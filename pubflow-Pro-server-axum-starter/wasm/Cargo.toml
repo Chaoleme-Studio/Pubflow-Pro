@@ -1,0 +1,28 @@
+[package]
+name = "pubflow-wasm"
+version.workspace = true
+edition.workspace = true
+description = "PubFlow WASM helpers for license verification, selector decryption, and machine hash generation"
+license = "MIT"
+repository = "https://github.com/pubflow/pubflow-server-axum-starter"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pubflow-core = { workspace = true }
+wasm-bindgen = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+ed25519-dalek = { workspace = true }
+hex = { workspace = true }
+js-sys = { workspace = true }
+base64 = { workspace = true }
+
+[features]
+default = []
+console_error_panic_hook = ["dep:console_error_panic_hook"]
+
+[dependencies.console_error_panic_hook]
+version = "0.1.7"
+optional = true

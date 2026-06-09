@@ -1,0 +1,43 @@
+import type { PlatformCampaign } from '../types';
+
+export const bilibiliCampaigns: PlatformCampaign[] = [
+  {
+    标识: 'bilibili-activity-center',
+    平台标识: 'bilibili',
+    标题: 'B站活动中心',
+    简称: '活动中心',
+    类型: 'activityCenter',
+    简介: '查看征稿活动、主题企划和投稿扶持，适合蹭站内热点。',
+    参与提示: '在创作中心活动页选题并按活动要求投稿，关注标签、分区与时效。',
+    官方链接: 'https://member.bilibili.com/platform/home',
+    标签: ['征稿', '热点', '分区活动', '企划'],
+    关键词: ['动画', '游戏', '数码', '影视', '教程', '知识', '鬼畜', '剪辑'],
+    长期有效: true,
+  },
+  {
+    标识: 'bilibili-incentive',
+    平台标识: 'bilibili',
+    标题: 'B站创作激励相关入口',
+    简称: '创作激励',
+    类型: 'monetization',
+    简介: '偏长期收益，适合有稳定播放和原创内容积累的账号。',
+    参与提示: '在创作中心查看激励资格或收益页，重点关注原创度、播放表现和社区规范。',
+    官方链接: 'https://member.bilibili.com/platform/home',
+    标签: ['收益', '原创', '知识区', '长尾内容'],
+    关键词: ['教程', '测评', '盘点', '科普', '知识', '经验', '评测'],
+    长期有效: true,
+  },
+  {
+    标识: 'bilibili-charge',
+    平台标识: 'bilibili',
+    标题: 'B站充电与花火合作',
+    简称: '充电花火',
+    类型: 'brand',
+    简介: '适合成熟账号做粉丝支持或品牌合作转化。',
+    参与提示: '完善创作档案与商业资料，达到平台门槛后开启充电或花火合作。',
+    官方链接: 'https://member.bilibili.com/platform/home',
+    标签: ['品牌合作', '粉丝支持', '商业化'],
+    关键词: ['测评', '品牌', '开箱', '专业内容', '深度讲解'],
+    长期有效: true,
+  },
+];

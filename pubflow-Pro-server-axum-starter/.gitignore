@@ -1,0 +1,13 @@
+/target
+.env
+.DS_Store
+dist/
+
+.history
+.vscode
+.idea
+logs
+
+.serena
+
+config/local.toml

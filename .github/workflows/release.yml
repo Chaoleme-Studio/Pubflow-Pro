@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pubflow-Pro/pnpm-lock.yaml
+
+      - name: Install & Build Extension
+        working-directory: pubflow-Pro
+        run: |
+          pnpm install
+          pnpm build:protected
+
+      - name: Pack ZIP
+        run: |
+          cd pubflow-Pro/.output/chrome-mv3
+          zip -r ../../../pubflow-extension.zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension
+          path: pubflow-extension.zip
+
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pubflow-Pro-Web/pnpm-lock.yaml
+
+      - name: Install & Build Web
+        working-directory: pubflow-Pro-Web
+        run: |
+          pnpm install
+          pnpm build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: pubflow-Pro-Web/dist/
+
+  build-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
+
+      - name: Build WASM
+        working-directory: pubflow-Pro-server-axum-starter
+        run: ./scripts/build-wasm.sh --out-dir ../dist/wasm
+
+      - name: Build Native (Linux)
+        working-directory: pubflow-Pro-server-axum-starter
+        run: ./scripts/build-native.sh --out-dir ../dist/native
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: server
+          path: dist/
+
+  release:
+    needs: [build-extension, build-web, build-server]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/extension/pubflow-extension.zip
+          generate_release_notes: true

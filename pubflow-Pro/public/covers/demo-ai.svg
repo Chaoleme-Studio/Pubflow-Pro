@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+  <defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#0f172a"/><stop offset="100%" stop-color="#1e40af"/></linearGradient></defs>
+  <rect width="320" height="180" fill="url(#g)"/>
+  <circle cx="90" cy="90" r="40" fill="none" stroke="white" stroke-width="2" opacity="0.2"/>
+  <circle cx="90" cy="90" r="25" fill="none" stroke="white" stroke-width="2" opacity="0.3"/>
+  <circle cx="90" cy="90" r="10" fill="white" opacity="0.5"/>
+  <line x1="90" y1="50" x2="90" y2="65" stroke="white" stroke-width="2" opacity="0.3"/>
+  <line x1="90" y1="115" x2="90" y2="130" stroke="white" stroke-width="2" opacity="0.3"/>
+  <line x1="50" y1="90" x2="65" y2="90" stroke="white" stroke-width="2" opacity="0.3"/>
+  <line x1="115" y1="90" x2="130" y2="90" stroke="white" stroke-width="2" opacity="0.3"/>
+  <text x="150" y="75" fill="white" font-family="Arial,sans-serif" font-size="26" font-weight="bold">AI工具</text>
+  <text x="150" y="105" fill="white" font-family="Arial,sans-serif" font-size="18" opacity="0.8">创作者推荐合集</text>
+</svg>

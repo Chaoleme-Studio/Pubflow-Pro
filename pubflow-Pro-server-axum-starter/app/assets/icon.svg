@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="PubFlow icon">
+  <defs>
+    <linearGradient id="bg" x1="16" y1="10" x2="112" y2="118" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#111111"/>
+      <stop offset=".56" stop-color="#050505"/>
+      <stop offset="1" stop-color="#1f2933"/>
+    </linearGradient>
+    <linearGradient id="orange" x1="67" y1="43" x2="102" y2="84" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffb347"/>
+      <stop offset=".56" stop-color="#ff8a00"/>
+      <stop offset="1" stop-color="#f97316"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bg)"/>
+  <rect x="24" y="32" width="80" height="64" rx="16" fill="#171717" stroke="#2f2f2f" stroke-width="3"/>
+
+  <path d="M37 82V46h18c11 0 18 6 18 16 0 10-7 16-18 16h-8v4H37Zm10-13h8c5 0 8-3 8-7s-3-7-8-7h-8v14Z" fill="#ffffff"/>
+
+  <rect x="68" y="48" width="31" height="32" rx="8" fill="url(#orange)"/>
+  <path d="M77 58v12l10.5-6L77 58Z" fill="#111111"/>
+  <rect x="88" y="56" width="6" height="4" rx="2" fill="#111111" opacity=".8"/>
+  <rect x="88" y="64" width="7" height="4" rx="2" fill="#111111" opacity=".72"/>
+  <rect x="74" y="74" width="19" height="3" rx="1.5" fill="#111111" opacity=".58"/>
+  <circle cx="76" cy="75.5" r="2.5" fill="#111111"/>
+
+  <path d="M53 96c10 8 26 8 38 0" fill="none" stroke="#ff8a00" stroke-width="7" stroke-linecap="round"/>
+  <path d="M89 90l8 6-8 6" fill="none" stroke="#ff8a00" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <circle cx="28" cy="102" r="5" fill="#ff8a00"/>
+  <circle cx="44" cy="108" r="4" fill="#ffffff" opacity=".72"/>
+  <circle cx="101" cy="28" r="5" fill="#ff8a00"/>
+</svg>

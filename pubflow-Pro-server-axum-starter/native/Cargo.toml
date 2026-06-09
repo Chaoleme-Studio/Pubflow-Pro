@@ -1,0 +1,17 @@
+[package]
+name = "pubflow-native"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "pubflow-native"
+path = "src/main.rs"
+
+[dependencies]
+pubflow-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

@@ -1,0 +1,9 @@
+[package]
+name = "dev-tools"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+
+[dev-dependencies]
+cargo-husky = { version = "1", default-features = false, features = ["user-hooks"] }

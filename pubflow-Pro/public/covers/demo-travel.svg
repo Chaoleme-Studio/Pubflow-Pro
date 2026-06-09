@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+  <defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#2563eb"/><stop offset="100%" stop-color="#7c3aed"/></linearGradient></defs>
+  <rect width="320" height="180" fill="url(#g)"/>
+  <path d="M40 130L80 80L120 110L160 70L200 100L240 60L280 130Z" fill="white" opacity="0.1"/>
+  <circle cx="70" cy="55" r="12" fill="white" opacity="0.2"/>
+  <path d="M70 67L60 85L80 85Z" fill="white" opacity="0.15"/>
+  <text x="150" y="75" fill="white" font-family="Arial,sans-serif" font-size="26" font-weight="bold">旅行Vlog</text>
+  <text x="150" y="105" fill="white" font-family="Arial,sans-serif" font-size="16" opacity="0.8">周末小众目的地</text>
+</svg>

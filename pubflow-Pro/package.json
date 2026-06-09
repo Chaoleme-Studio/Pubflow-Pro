@@ -1,0 +1,43 @@
+{
+  "name": "pubflow-extension",
+  "description": "多平台短视频发布助手",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@11.0.4",
+  "scripts": {
+    "dev": "wxt",
+    "dev:manual": "PUBFLOW_MANUAL_BROWSER=1 wxt",
+    "dev:auto": "wxt",
+    "dev:9222": "wxt --browser chrome",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:protected": "OBFUSCATE=1 wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "verify:platform-routing": "node scripts/verify-platform-routing.mjs",
+    "typecheck": "vue-tsc --noEmit",
+    "compile": "vue-tsc --noEmit",
+    "postinstall": "wxt prepare"
+  },
+  "dependencies": {
+    "highcharts": "^12.6.0",
+    "highcharts-vue": "^2.0.1",
+    "markdown-it": "^14.1.1",
+    "markstream-vue": "0.0.14-beta.3",
+    "vditor": "^3.11.2",
+    "vue": "^3.5.29"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.4",
+    "@types/markdown-it": "^14.1.2",
+    "@wxt-dev/module-vue": "^1.0.3",
+    "javascript-obfuscator": "^5.4.3",
+    "rollup-plugin-obfuscator": "^1.1.0",
+    "tailwindcss": "^4.2.4",
+    "typescript": "^5.9.3",
+    "vue-tsc": "^3.2.5",
+    "wxt": "^0.20.25"
+  }
+}

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+  <defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#ea580c"/><stop offset="100%" stop-color="#dc2626"/></linearGradient></defs>
+  <rect width="320" height="180" fill="url(#g)"/>
+  <ellipse cx="95" cy="110" rx="45" ry="18" fill="white" opacity="0.15"/>
+  <ellipse cx="95" cy="100" rx="40" ry="15" fill="white" opacity="0.12"/>
+  <rect x="75" y="55" width="40" height="45" rx="6" fill="white" opacity="0.15"/>
+  <rect x="85" y="48" width="20" height="10" rx="3" fill="white" opacity="0.2"/>
+  <text x="155" y="75" fill="white" font-family="Arial,sans-serif" font-size="24" font-weight="bold">家常菜教程</text>
+  <text x="155" y="105" fill="white" font-family="Arial,sans-serif" font-size="16" opacity="0.8">10分钟搞定晚餐</text>
+</svg>
