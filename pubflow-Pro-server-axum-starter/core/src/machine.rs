@@ -10,6 +10,7 @@
 //! - salt 由服务端控制，防止跨服务撞库
 
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 /// 生成设备哈希
 ///
@@ -32,7 +33,13 @@ pub fn generate_machine_hash(raw_machine_id: &str, salt: &str) -> String {
 /// 验证机器码是否匹配
 pub fn verify_machine_hash(raw_machine_id: &str, salt: &str, expected_hash: &str) -> bool {
     let hash = generate_machine_hash(raw_machine_id, salt);
-    hash == expected_hash
+    let Ok(hash_bytes) = hex::decode(hash) else {
+        return false;
+    };
+    let Ok(expected_bytes) = hex::decode(expected_hash) else {
+        return false;
+    };
+    hash_bytes.ct_eq(&expected_bytes).into()
 }
 
 #[cfg(test)]
@@ -65,5 +72,14 @@ mod tests {
         let hash = generate_machine_hash("my-device", "my-salt");
         assert!(verify_machine_hash("my-device", "my-salt", &hash));
         assert!(!verify_machine_hash("wrong-device", "my-salt", &hash));
+    }
+
+    #[test]
+    fn test_verify_rejects_invalid_expected_hash() {
+        assert!(!verify_machine_hash(
+            "my-device",
+            "my-salt",
+            "not-a-hex-hash"
+        ));
     }
 }

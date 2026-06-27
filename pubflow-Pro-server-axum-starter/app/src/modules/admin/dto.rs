@@ -35,7 +35,11 @@ pub struct LicenseItem {
     pub batch_name: Option<String>,
     pub user_id: Option<i32>,
     pub max_devices: i32,
+    pub device_migration_limit: i32,
+    pub device_migration_count: i32,
+    pub last_migrated_at: Option<DateTime<Utc>>,
     pub is_revoked: bool,
+    pub client_install_ids: Vec<String>,
     pub machine_hashes: Vec<String>,
     pub order_no: Option<String>,
     pub order_channel: Option<String>,
@@ -71,6 +75,7 @@ pub struct GenerateLicenseResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RevokeLicenseRequest {
     pub activation_code: String,
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -79,11 +84,125 @@ pub struct RevokeLicenseResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AdminPlanConfig {
+    pub id: String,
+    pub name: String,
+    pub unit: Option<String>,
+    pub note: Option<String>,
+    pub original_amount_cents: i32,
+    pub discount_amount_cents: Option<i32>,
+    pub discount_start_at: Option<DateTime<Utc>>,
+    pub discount_end_at: Option<DateTime<Utc>>,
+    pub discount_enabled: bool,
+    pub is_active: bool,
+    pub sort_order: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AdminDownloadConfig {
+    pub code: String,
+    pub platform: String,
+    pub name: String,
+    pub chip: Option<String>,
+    pub file_name: Option<String>,
+    pub href: String,
+    pub is_active: bool,
+    pub sort_order: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AdminProductCatalogConfig {
+    pub plans: Vec<AdminPlanConfig>,
+    pub downloads: Vec<AdminDownloadConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AdminAppVersionQuery {
+    pub platform: Option<String>,
+    pub limit: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AdminAppVersionItem {
+    pub id: String,
+    pub platform: String,
+    pub version: String,
+    pub min_app_version: Option<String>,
+    pub download_url: String,
+    pub release_notes: Option<String>,
+    pub force_update: bool,
+    pub is_active: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AdminAppVersionListResponse {
+    pub items: Vec<AdminAppVersionItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CreateAppVersionRequest {
+    pub platform: String,
+    pub version: String,
+    pub min_app_version: Option<String>,
+    pub download_url: String,
+    pub release_notes: Option<String>,
+    pub force_update: Option<bool>,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateAppVersionRequest {
+    pub platform: Option<String>,
+    pub version: String,
+    pub min_app_version: Option<String>,
+    pub download_url: String,
+    pub release_notes: Option<String>,
+    pub force_update: Option<bool>,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteAppVersionResponse {
+    pub deleted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ReplaceLicenseRequest {
+    pub activation_code: String,
+    pub reason: String,
+    pub revoke_old: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ReplaceLicenseResponse {
+    pub old_license_id: String,
+    pub new_license_id: String,
+    pub new_activation_code: String,
+    pub revoked_old: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateLicenseLimitsRequest {
+    pub activation_code: String,
+    pub max_devices: i32,
+    pub device_migration_limit: i32,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateLicenseLimitsResponse {
+    pub item: LicenseItem,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ListLicenseQuery {
     pub keyword: Option<String>,
     pub activation_code: Option<String>,
     pub tier: Option<String>,
     pub plan: Option<String>,
+    pub client_install_id: Option<String>,
     pub machine_hash: Option<String>,
     pub is_revoked: Option<bool>,
     pub created_from: Option<String>,
@@ -104,6 +223,7 @@ pub struct UserOperationItem {
     pub status: String,
     pub plan: Option<String>,
     pub source: Option<String>,
+    pub client_install_ids: Vec<String>,
     pub machine_hashes: Vec<String>,
     pub license_count: usize,
     pub order_no: Option<String>,
@@ -117,6 +237,7 @@ pub struct UserOperationItem {
 pub struct ListUserQuery {
     pub keyword: Option<String>,
     pub plan: Option<String>,
+    pub client_install_id: Option<String>,
     pub machine_hash: Option<String>,
     pub status: Option<String>,
     pub paid_from: Option<String>,

@@ -26,6 +26,7 @@ import type { PlatformConfig } from '../types';
  * 无论当前处于哪种状态，都先点击 _compactTrigger 展开面板，
  * 再选中目标按钮，最后点击「确定」确认。
  */
+/** 填充微博的“内容声明”选项。 */
 async function fillWeiboDeclaration(targetText: string) {
   console.info('[PubFlow][weibo] fillWeiboDeclaration start', { targetText });
 
@@ -82,6 +83,7 @@ async function fillWeiboDeclaration(targetText: string) {
   console.warn('[PubFlow][weibo] confirm button not found after retries');
 }
 
+/** 查找微博内容声明的触发元素（_compactTrigger）。 */
 function findWeiboDeclarationTrigger(): HTMLElement | null {
   const compactTrigger = document.querySelector<HTMLElement>('[class*="compactTrigger"]');
   if (compactTrigger?.offsetParent !== null) return compactTrigger;
@@ -105,6 +107,7 @@ function findWeiboDeclarationTrigger(): HTMLElement | null {
   return null;
 }
 
+/** 查找微博内容声明的展开面板元素。 */
 function findWeiboDeclarationPanel(): HTMLElement | Document {
   const panels = queryWeiboClickableElements(
     '[class*="panel"], [class*="Panel"], [class*="popover"], [class*="Popover"], [class*="modal"], [class*="Modal"]',
@@ -118,6 +121,7 @@ function findWeiboDeclarationPanel(): HTMLElement | Document {
   return document;
 }
 
+/** 查找微博内容声明面板内的选项按钮列表。 */
 function findWeiboDeclarationOptionButtons(): HTMLElement[] {
   const panel = findWeiboDeclarationPanel();
   const legacyButtons = Array.from(
@@ -145,6 +149,7 @@ function findWeiboDeclarationOptionButtons(): HTMLElement[] {
   });
 }
 
+/** 查找微博内容声明面板内的「确定」确认按钮。 */
 function findWeiboDeclarationConfirmButton(): HTMLElement | null {
   const panel = findWeiboDeclarationPanel();
   const buttons = queryWeiboClickableElements('button, [role="button"]', panel);
@@ -157,11 +162,13 @@ function findWeiboDeclarationConfirmButton(): HTMLElement | null {
   return null;
 }
 
+/** 在指定根节点下查询所有可点击的 HTMLElement 元素。 */
 function queryWeiboClickableElements(selector: string, root: ParentNode = document): HTMLElement[] {
   return Array.from(root.querySelectorAll(selector))
     .filter((element): element is HTMLElement => element instanceof HTMLElement && typeof element.click === 'function');
 }
 
+/** 根据内容类型填充微博发布内容（图文、视频或文章）。 */
 export async function fillWeiboContent(config: PlatformConfig, content: ContentData, isArticle: boolean = false) {
   let uploadMessage = '';
   let articleBodyMessage = '';

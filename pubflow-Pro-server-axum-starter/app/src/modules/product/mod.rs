@@ -13,5 +13,13 @@ pub fn routes(state: Arc<AppState>) -> ApiRouter {
             "/catalog",
             get_with(handler::catalog, handler::catalog_docs),
         )
+        .api_route(
+            "/version",
+            get_with(handler::latest_version, handler::latest_version_docs),
+        )
+        .api_route(
+            "/versions",
+            get_with(handler::recent_versions, handler::recent_versions_docs),
+        )
         .with_state(state)
 }

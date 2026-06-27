@@ -16,10 +16,12 @@ export type PageWorldPayload = Record<string, unknown>;
  * chrome.scripting.executeScript({ func }) serializes only the passed function.
  * Keep helpers inside this dispatcher so injected MAIN-world code stays self-contained.
  */
+/** 视频号 page world 动作调度入口，按 action 分发到对应处理函数。 */
 export async function runWeixinChannelsPageWorldAction(
   action: PageWorldAction,
   payload: PageWorldPayload,
 ): Promise<unknown> {
+  /** 在 DOM 及 Shadow DOM / iframe 中递归查找单个元素 */
   function queryDeep(selector: string): Element | null {
     if (!selector) return null;
     const visitedRoots = new Set<Document | ShadowRoot | Element>();
@@ -46,6 +48,7 @@ export async function runWeixinChannelsPageWorldAction(
     return find(document);
   }
 
+  /** 在 DOM 及 Shadow DOM / iframe 中递归查找所有匹配元素 */
   function queryDeepAll(selector: string): Element[] {
     const results: Element[] = [];
     const seen = new Set<Element>();
@@ -75,6 +78,7 @@ export async function runWeixinChannelsPageWorldAction(
     return results;
   }
 
+  /** 遍历给定根节点，收集所有嵌套的 ShadowRoot 和 iframe contentDocument */
   function listNestedRoots(root: Document | ShadowRoot | Element): Array<Document | ShadowRoot> {
     const nestedRoots: Array<Document | ShadowRoot> = [];
     const walkerRoot = root instanceof Document ? root.documentElement : root;
@@ -111,10 +115,12 @@ export async function runWeixinChannelsPageWorldAction(
     return nestedRoots;
   }
 
+  /** 延迟指定毫秒数 */
   function sleep(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  /** 在编辑器中模拟按键输入 */
   function simulateKey(editor: HTMLElement, key: string) {
     const init: KeyboardEventInit = {
       key,
@@ -132,10 +138,12 @@ export async function runWeixinChannelsPageWorldAction(
     editor.dispatchEvent(new KeyboardEvent('keyup', init));
   }
 
+  /** 查找页面主编辑器元素 */
   function findEditor(): HTMLElement | null {
     return queryDeep('div.input-editor') as HTMLElement | null;
   }
 
+  /** 判断元素是否在视觉上可见 */
   function isVisible(el: Element): boolean {
     const rect = el.getBoundingClientRect();
     const style = window.getComputedStyle(el);
@@ -148,6 +156,7 @@ export async function runWeixinChannelsPageWorldAction(
     );
   }
 
+  /** 模拟真实鼠标点击事件序列触发元素点击 */
   function clickElement(el: HTMLElement) {
     const rect = el.getBoundingClientRect();
     const eventInit: MouseEventInit = {
@@ -168,6 +177,7 @@ export async function runWeixinChannelsPageWorldAction(
     el.click();
   }
 
+  /** 查找页面中的视频文件上传 input 元素 */
   function findVideoInput(): HTMLInputElement | null {
     const inputs = queryDeepAll('input[type="file"]') as HTMLInputElement[];
     for (const input of inputs) {
@@ -178,6 +188,7 @@ export async function runWeixinChannelsPageWorldAction(
     return inputs[0] || null;
   }
 
+  /** 向编辑器填充标题、话题和描述内容 */
   async function fillEditor() {
     const title = String(payload.title || '');
     const topics = Array.isArray(payload.topics) ? payload.topics.map(String) : [];
@@ -237,6 +248,7 @@ export async function runWeixinChannelsPageWorldAction(
     return { ok: true };
   }
 
+  /** 填写视频短标题（6-16字概括） */
   async function fillShortTitle() {
     const title = String(payload.title || '')
       .replace(/[，,、。.!！；;\\/|()[\]{}（）【】]/g, ' ')
@@ -277,6 +289,7 @@ export async function runWeixinChannelsPageWorldAction(
     return { ok: true };
   }
 
+  /** 填写图文消息的标题 */
   async function fillArticleTitle() {
     const title = String(payload.title || '').trim();
     if (!title) return { ok: true };
@@ -297,6 +310,7 @@ export async function runWeixinChannelsPageWorldAction(
     return { ok: true };
   }
 
+  /** 上传视频文件到页面 */
   async function uploadFile() {
     const fileName = String(payload.fileName || '');
     const fileType = String(payload.fileType || '');
@@ -335,6 +349,7 @@ export async function runWeixinChannelsPageWorldAction(
     return { ok: true };
   }
 
+  /** 勾选原创声明和阅读协议复选框后点击声明原创 */
   async function handleDeclarePopup() {
     const allCheckboxes = queryDeepAll('input[type="checkbox"]') as HTMLInputElement[];
     for (const checkbox of allCheckboxes) {
@@ -374,6 +389,7 @@ export async function runWeixinChannelsPageWorldAction(
     return { ok: true };
   }
 
+  /** 检查页面是否已准备好进行内容填写 */
   function checkReady() {
     const readySelector = String(payload.readySelector || '');
     const editorSelector = String(payload.editorSelector || '');
@@ -390,6 +406,7 @@ export async function runWeixinChannelsPageWorldAction(
     );
   }
 
+  /** 等待指定选择器的元素出现并可见 */
   async function waitReady() {
     const selector = String(payload.selector || '');
     const timeoutMs = Number(payload.timeoutMs || 180000);
@@ -406,6 +423,7 @@ export async function runWeixinChannelsPageWorldAction(
     return { ok: false, error: `上传后没有等到可填写区域：${selector}` };
   }
 
+  /** 将时间戳拆分为年月日时分等日期组成部分 */
   function getDateParts(timestamp: number) {
     const date = new Date(timestamp);
     const year = date.getFullYear();
@@ -425,6 +443,7 @@ export async function runWeixinChannelsPageWorldAction(
     };
   }
 
+  /** 判断日期元素是否为禁用状态 */
   function isDisabledDateElement(element: HTMLElement) {
     const className = element.className?.toString() || '';
     const disabledAncestor = element.closest(
@@ -439,11 +458,13 @@ export async function runWeixinChannelsPageWorldAction(
     );
   }
 
+  /** 判断元素是否已渲染（非 display:none / visibility:hidden） */
   function isRenderedElement(element: HTMLElement) {
     const style = getComputedStyle(element);
     return style.display !== 'none' && style.visibility !== 'hidden';
   }
 
+  /** 判断元素是否位于日期选择器下拉面板内部 */
   function isInsideDatePicker(element: HTMLElement) {
     return Boolean(
       element.closest(
@@ -462,6 +483,7 @@ export async function runWeixinChannelsPageWorldAction(
     );
   }
 
+  /** 提取日期候选元素的各种文本标识 */
   function getDateCandidateText(element: HTMLElement) {
     return [
       element.getAttribute('title') || '',
@@ -473,6 +495,7 @@ export async function runWeixinChannelsPageWorldAction(
     ].join(' ');
   }
 
+  /** 根据日期匹配度对候选元素进行评分 */
   function scoreDateCandidate(element: HTMLElement, dateStr: string, targetDay: number) {
     if (!isRenderedElement(element) || isDisabledDateElement(element)) return 0;
 
@@ -493,6 +516,7 @@ export async function runWeixinChannelsPageWorldAction(
     return score;
   }
 
+  /** 在微信原生日期时间选择器面板中查找目标日期元素 */
   function getPickerPanelDateElement(datetimeInput: HTMLInputElement, year: number, month: number, targetDay: number): HTMLElement | null {
     const picker = datetimeInput.closest('.weui-desktop-picker__date-time, .weui-desktop-picker__date');
     const panel = picker?.querySelector<HTMLElement>('.weui-desktop-picker__panel_day');
@@ -513,6 +537,7 @@ export async function runWeixinChannelsPageWorldAction(
     }) || null;
   }
 
+  /** 在页面中查找与目标日期最匹配的可点击日期元素 */
   function findTargetDateElement(dateStr: string, targetDay: number): HTMLElement | null {
     const selectors = [
       'td[title]',
@@ -542,15 +567,18 @@ export async function runWeixinChannelsPageWorldAction(
     return best.querySelector<HTMLElement>('a, button, [role="button"], .ant-picker-cell-inner') || best;
   }
 
+  /** 判断日期时间输入框是否已包含完整的日期和时间 */
   function isDatetimeInputAlreadySet(input: HTMLInputElement, dateStr: string, timeStr: string) {
     const value = input.value || '';
     return value.includes(dateStr) && value.includes(timeStr);
   }
 
+  /** 判断日期时间输入框是否已包含目标日期 */
   function isDatetimeInputDateSet(input: HTMLInputElement, dateStr: string) {
     return (input.value || '').includes(dateStr);
   }
 
+  /** 通过原生 setter 设置 input 的值并触发相应事件 */
   function setNativeInputValue(input: HTMLInputElement, value: string) {
     const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
     nativeSetter?.call(input, value);
@@ -559,6 +587,7 @@ export async function runWeixinChannelsPageWorldAction(
     input.dispatchEvent(new Event('blur', { bubbles: true }));
   }
 
+  /** 滚动元素到可视区域后模拟完整鼠标点击 */
   async function clickPickerElement(element: HTMLElement) {
     element.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     await sleep(80);
@@ -577,6 +606,7 @@ export async function runWeixinChannelsPageWorldAction(
     element.dispatchEvent(new MouseEvent('click', { ...init, buttons: 0 }));
   }
 
+  /** 在 Ant Design 时间选择面板中选中指定时分秒 */
   async function selectAntTimeCells(hours: string, minutes: string) {
     const timeColumns = queryDeepAll('.ant-picker-time-panel-column') as HTMLElement[];
     const values = [hours, minutes, '00'];
@@ -591,6 +621,7 @@ export async function runWeixinChannelsPageWorldAction(
     }
   }
 
+  /** 在微信原生日期时间选择器中设置时间 */
   async function selectWeixinTime(datetimeInput: HTMLInputElement, hours: string, minutes: string) {
     const picker = datetimeInput.closest('.weui-desktop-picker__date-time, .weui-desktop-picker__date');
     const timePicker = picker?.querySelector<HTMLElement>('.weui-desktop-picker__time');
@@ -636,6 +667,7 @@ export async function runWeixinChannelsPageWorldAction(
     return Boolean(timeInput ? timeInput.value.includes(timeStr) : true);
   }
 
+  /** 点击日期时间选择器的确定按钮 */
   async function confirmDateTimePicker() {
     const buttons = queryDeepAll('button, [role="button"], a') as HTMLElement[];
     const confirmButton = buttons.find((button) => {
@@ -650,6 +682,7 @@ export async function runWeixinChannelsPageWorldAction(
     return false;
   }
 
+  /** 设置定时发布的时间 */
   async function handleSchedule() {
     const scheduledAt = Number(payload.scheduledAt || 0);
     const radios = queryDeepAll('input[type="radio"]') as HTMLInputElement[];
@@ -749,6 +782,7 @@ export async function runWeixinChannelsPageWorldAction(
     return { ok: true };
   }
 
+  /** 上传图片文件到编辑器 */
   async function uploadImages() {
     const filesData = Array.isArray(payload.files) ? payload.files as Array<{ fileName: string; fileType: string; fileDataBase64: string }> : [];
     const uploadDoneSelector = String(payload.uploadDoneSelector || '');
@@ -840,6 +874,7 @@ export async function runWeixinChannelsPageWorldAction(
     return { ok: true, uploadedCount: files.length };
   }
 
+  /** 上传并设置视频或图文封面 */
   async function uploadCover() {
     const fileName = String(payload.fileName || '');
     const fileType = String(payload.fileType || '');
@@ -853,6 +888,7 @@ export async function runWeixinChannelsPageWorldAction(
     }
     const file = new File([byteArray], fileName, { type: fileType });
 
+    /** 判断按钮是否为禁用状态 */
     function isDisabledButton(el: HTMLElement): boolean {
       return (
         el.hasAttribute('disabled') ||
@@ -861,6 +897,7 @@ export async function runWeixinChannelsPageWorldAction(
       );
     }
 
+    /** 将文件设置到 input 元素上 */
     function setInputFile(input: HTMLInputElement, targetFile: File) {
       const dt = new DataTransfer();
       dt.items.add(targetFile);
@@ -874,16 +911,19 @@ export async function runWeixinChannelsPageWorldAction(
       }
     }
 
+    /** 触发 input 的 change 事件 */
     function dispatchInputFileChange(input: HTMLInputElement) {
       input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
       input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
     }
 
+    /** 设置文件并触发 change 事件 */
     function assignInputFile(input: HTMLInputElement, targetFile: File) {
       setInputFile(input, targetFile);
       dispatchInputFileChange(input);
     }
 
+    /** 获取对话框标题文本 */
     function getDialogTitle(dialog: HTMLElement): string {
       const directDialog = Array.from(dialog.children)
         .find((child) => child.classList.contains('weui-desktop-dialog')) as HTMLElement | undefined;
@@ -891,6 +931,7 @@ export async function runWeixinChannelsPageWorldAction(
       return title?.textContent?.trim() || '';
     }
 
+    /** 查找当前活动的封面编辑对话框 */
     function findActiveCoverDialog(expectedTitle?: string): HTMLElement | null {
       const dialogs = queryDeepAll('.edit-cover-dialog .weui-desktop-dialog__wrp, .finder-common-dialog.edit-cover-dialog .weui-desktop-dialog__wrp') as HTMLElement[];
       for (const dialog of dialogs) {
@@ -904,6 +945,7 @@ export async function runWeixinChannelsPageWorldAction(
       return null;
     }
 
+    /** 查找裁剪封面图的对话框 */
     function findCropDialog(): HTMLElement | null {
       const dialogs = queryDeepAll('.finder-common-dialog .weui-desktop-dialog__wrp') as HTMLElement[];
       for (const dialog of dialogs) {
@@ -915,6 +957,7 @@ export async function runWeixinChannelsPageWorldAction(
       return null;
     }
 
+    /** 在指定范围内查找包含指定文本的可用按钮 */
     function findScopedButton(scope: HTMLElement, texts: string[]): HTMLElement | null {
       const buttons = Array.from(scope.querySelectorAll('button')) as HTMLElement[];
       for (const button of buttons) {
@@ -926,6 +969,7 @@ export async function runWeixinChannelsPageWorldAction(
       return null;
     }
 
+    /** 在全局查找包含指定文本的可用按钮 */
     function findVisibleButtonByText(texts: string[]): HTMLElement | null {
       const candidates = queryDeepAll('button, [role="button"], .weui-desktop-btn') as HTMLElement[];
       for (const candidate of candidates) {
@@ -937,6 +981,7 @@ export async function runWeixinChannelsPageWorldAction(
       return null;
     }
 
+    /** 查找封面编辑入口元素 */
     function findCoverEntry(entrySelector: string): HTMLElement | null {
       const editButton = queryDeep(`${entrySelector} .edit-btn`) as HTMLElement | null;
       if (editButton && isVisible(editButton)) return editButton;
@@ -944,6 +989,7 @@ export async function runWeixinChannelsPageWorldAction(
       return entry && isVisible(entry) ? entry : null;
     }
 
+    /** 在对话框中查找封面图片上传 input */
     function findCoverInput(dialog: HTMLElement): HTMLInputElement | null {
       const inputs = Array.from(dialog.querySelectorAll('input[type="file"]')) as HTMLInputElement[];
       for (const input of inputs) {
@@ -955,10 +1001,12 @@ export async function runWeixinChannelsPageWorldAction(
       return null;
     }
 
+    /** 判断字符串是否为有效的 Data URL 图片 */
     function isValidDataImage(src: string): boolean {
       return /^data:image\/(?:png|jpe?g);base64,/i.test(src) && src.length > 1000;
     }
 
+    /** 在对话框中查找 Vue 封面上传组件 */
     function findCoverUploader(dialog: HTMLElement): (HTMLElement & {
       __vue__?: {
         handleCropping?: (file: File) => unknown;
@@ -993,6 +1041,7 @@ export async function runWeixinChannelsPageWorldAction(
       }) | null;
     }
 
+    /** 触发封面上传组件的文件变更 */
     async function triggerCoverUploader(input: HTMLInputElement, targetFile: File) {
       const uploader = input.closest('.single-cover-uploader-wrap') as ReturnType<typeof findCoverUploader>;
       const vueUploader = uploader?.__vue__;
@@ -1010,6 +1059,7 @@ export async function runWeixinChannelsPageWorldAction(
       dispatchInputFileChange(input);
     }
 
+    /** 触发封面裁剪流程 */
     function triggerCoverCropping(input: HTMLInputElement, targetFile: File): boolean {
       const uploader = input.closest('.single-cover-uploader-wrap') as ReturnType<typeof findCoverUploader>;
       const vueUploader = uploader?.__vue__;
@@ -1018,6 +1068,7 @@ export async function runWeixinChannelsPageWorldAction(
       return true;
     }
 
+    /** 等待 Croppie 裁剪结果并返回 base64 图片数据 */
     async function waitForCroppieResult(dialog: HTMLElement, timeoutMs: number): Promise<string | null> {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() <= deadline) {
@@ -1041,6 +1092,7 @@ export async function runWeixinChannelsPageWorldAction(
       return null;
     }
 
+    /** 将 Data URL 图片绘制到 Canvas 上 */
     async function dataImageToCanvas(src: string): Promise<HTMLCanvasElement> {
       const image = new Image();
       image.src = src;
@@ -1057,6 +1109,7 @@ export async function runWeixinChannelsPageWorldAction(
       return canvas;
     }
 
+    /** 将文件读取为图片并绘制到 Canvas */
     async function fileToCanvas(targetFile: File): Promise<HTMLCanvasElement> {
       const src = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -1076,6 +1129,7 @@ export async function runWeixinChannelsPageWorldAction(
       $parent?: unknown;
     };
 
+    /** 沿 Vue 组件祖先链查找处理自定义封面变更的组件 */
     function findAncestorWithCustomCoverHandler(vueUploader: unknown): WeixinCoverVueComponent | null {
       let current = (vueUploader as { $parent?: unknown } | null)?.$parent;
       let fallback: WeixinCoverVueComponent | null = null;
@@ -1099,6 +1153,7 @@ export async function runWeixinChannelsPageWorldAction(
       return fallback;
     }
 
+    /** 将 Croppie 裁剪结果应用到封面 */
     async function applyCroppieResultToCover(dialog: HTMLElement, result: string): Promise<boolean> {
       const uploader = findCoverUploader(dialog);
       const vueUploader = uploader?.__vue__;
@@ -1135,6 +1190,7 @@ export async function runWeixinChannelsPageWorldAction(
       return true;
     }
 
+    /** 将文件直接应用到封面对话框 */
     async function applyCoverFileToDialog(dialog: HTMLElement, targetFile: File): Promise<boolean> {
       const uploader = findCoverUploader(dialog);
       const vueUploader = uploader?.__vue__;
@@ -1159,6 +1215,7 @@ export async function runWeixinChannelsPageWorldAction(
       return true;
     }
 
+    /** 等待上传组件预览图片就绪 */
     async function waitForUploaderPreview(dialog: HTMLElement, timeoutMs: number): Promise<boolean> {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() <= deadline) {
@@ -1194,12 +1251,14 @@ export async function runWeixinChannelsPageWorldAction(
       return false;
     }
 
+    /** 检查封面区域是否显示生成中状态 */
     function hasGeneratingCoverText(): boolean {
       const coverArea = queryDeep('.cover-preview-wrap');
       const scopes = coverArea ? [coverArea] : queryDeepAll('.vertical-cover-wrap, .horizon-cover-wrap');
       return scopes.some((scope) => isVisible(scope) && (scope.textContent || '').includes('生成中'));
     }
 
+    /** 等待封面生成完成 */
     async function waitForCoverGenerationReady(timeoutMs: number): Promise<boolean> {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() <= deadline) {
@@ -1213,6 +1272,7 @@ export async function runWeixinChannelsPageWorldAction(
       return !hasGeneratingCoverText();
     }
 
+    /** 等待封面编辑对话框出现 */
     async function waitForDialog(expectedTitle: string, timeoutMs: number): Promise<HTMLElement | null> {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() <= deadline) {
@@ -1223,6 +1283,7 @@ export async function runWeixinChannelsPageWorldAction(
       return null;
     }
 
+    /** 等待封面编辑对话框关闭 */
     async function waitForDialogClosed(expectedTitle: string, timeoutMs: number): Promise<boolean> {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() <= deadline) {
@@ -1232,6 +1293,7 @@ export async function runWeixinChannelsPageWorldAction(
       return false;
     }
 
+    /** 等待裁剪对话框出现 */
     async function waitForCropDialog(timeoutMs: number): Promise<HTMLElement | null> {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() <= deadline) {
@@ -1242,6 +1304,7 @@ export async function runWeixinChannelsPageWorldAction(
       return null;
     }
 
+    /** 等待素材选择浮层出现 */
     async function waitForMaterialPopover(timeoutMs: number): Promise<HTMLElement | null> {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() <= deadline) {
@@ -1256,6 +1319,7 @@ export async function runWeixinChannelsPageWorldAction(
       return null;
     }
 
+    /** 打开封面编辑对话框 */
     async function openCoverDialog(entrySelector: string, expectedTitle: string): Promise<HTMLElement | null> {
       const entry = findCoverEntry(entrySelector);
       if (!entry) return null;
@@ -1292,6 +1356,7 @@ export async function runWeixinChannelsPageWorldAction(
       return dialog;
     }
 
+    /** 上传单个封面 */
     async function uploadOneCover(entrySelector: string, expectedTitle: string): Promise<boolean> {
       const dialog = await openCoverDialog(entrySelector, expectedTitle);
       if (!dialog) return false;

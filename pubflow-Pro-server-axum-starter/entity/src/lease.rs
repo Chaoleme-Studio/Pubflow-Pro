@@ -40,8 +40,11 @@ pub struct Model {
     /// 客户端 IP 地址
     pub ip_address: String,
 
-    /// 机器码哈希
+    /// 旧版机器码哈希兼容列；订阅版新授权不再写入。
     pub machine_hash: String,
+
+    /// 浏览器插件安装实例 ID，不是硬件机器码。
+    pub client_install_id: Option<String>,
 
     /// 平台：macos / windows / linux
     pub platform: String,

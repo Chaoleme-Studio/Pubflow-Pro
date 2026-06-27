@@ -63,6 +63,7 @@ function findImageFileInput(selectors: string[]): HTMLInputElement | null {
  * 判断图文/文章图片上传是否已经进入编辑态。
  * background 重试或页面自动恢复时会再次发送填充指令，这里用于避免重复上传同一批图片。
  */
+/** 判断文章/图文图片是否已上传完成，避免重复上传。 */
 function hasArticleUploadCompleted(uploadConfig: PlatformConfig['articleUpload'] | PlatformConfig['upload']) {
   return (
     selectorExists(uploadConfig?.uploadDoneSelector) ||
@@ -92,10 +93,7 @@ async function waitForImageUploadSignal(
   return hasArticleUploadCompleted(uploadConfig) ? 'existing-signal' : undefined;
 }
 
-/**
- * 上传图文图片。
- * 这是图文发布的公共入口，负责加载缓存图片、等待上传区、注入 file input，并在失败时回退拖拽上传。
- */
+/** 上传缓存中的图文图片，支持文件 input 注入和拖拽上传兜底。 */
 export async function uploadImagesIfAvailable(config: PlatformConfig, content: ContentData) {
   const uploadConfig = config.articleUpload || config.upload;
 
@@ -251,10 +249,7 @@ export async function uploadImagesIfAvailable(config: PlatformConfig, content: C
   return `已上传 ${files.length} 张图片，继续填写文本。`;
 }
 
-/**
- * 直接通过平台文件 input 上传 File 对象数组。
- * 用于从 Markdown 提取的 base64 图片转为 File 后上传，和普通图文图片上传共用相同的 DOM 注入能力。
- */
+/** 直接通过平台文件 input 上传一组 File 对象。 */
 export async function uploadFilesViaInput(config: PlatformConfig, files: File[]): Promise<string> {
   if (!files.length) return '无图片需要上传。';
 

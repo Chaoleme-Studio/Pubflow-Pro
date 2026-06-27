@@ -27,6 +27,7 @@ export const PLATFORM_CONTENT_HANDLERS: Record<PlatformId, PlatformContentHandle
   xigua: fillXiguaContent,
 };
 
+/** 根据平台 ID 获取对应的内容填充处理函数。 */
 export function getPlatformContentHandler(platformId: PlatformId) {
   return PLATFORM_CONTENT_HANDLERS[platformId];
 }

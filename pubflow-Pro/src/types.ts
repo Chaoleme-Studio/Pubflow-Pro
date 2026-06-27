@@ -185,6 +185,22 @@ export interface ServerConfig {
   connected: boolean;
 }
 
+export type LicenseStatus = 'unconfigured' | 'inactive' | 'active' | 'expired' | 'device_mismatch' | 'invalid';
+
+export interface LicensingSettings {
+  apiBaseUrl: string;
+  activationCode: string;
+  /** 浏览器插件安装实例 ID，不是硬件设备码。 */
+  clientInstallId: string;
+  /** 旧字段兼容；订阅版新逻辑不再使用 Machine Hash 语义。 */
+  machineHash?: string;
+  leaseToken: string;
+  status: LicenseStatus;
+  statusMessage?: string;
+  validUntil?: number;
+  serverTime?: number;
+}
+
 /** 内置 AI 服务商类型，custom 表示用户手动配置的兼容 OpenAI 协议服务。 */
 export type AIProviderBuiltinId = 'deepseek' | 'openai' | 'qwen' | 'siliconflow' | 'xiaomi' | 'custom';
 
@@ -228,6 +244,7 @@ export const STORAGE_KEYS = {
   globalSettings: 'pubflow:global-settings',
   currentTask: 'pubflow:current-task',
   serverConfig: 'pubflow:server-config',
+  licensingSettings: 'pubflow:licensing-settings',
   aiSettings: 'pubflow:ai-settings',
   secrets: 'pubflow:secrets',
   workspaceSettings: 'pubflow:workspace-settings',
@@ -282,6 +299,15 @@ export type RuntimeMessage =
   }
   | {
     type: 'GET_SIDE_PANEL_STATUS';
+  }
+  | {
+    type: 'GET_LICENSE_STATUS';
+  }
+  | {
+    type: 'VERIFY_LICENSE';
+    payload?: {
+      licensingSettings?: LicensingSettings;
+    };
   }
   | {
     type: 'SIDE_PANEL_STATUS';

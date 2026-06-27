@@ -6,6 +6,7 @@ const FIRE_AND_FORGET_MESSAGE_TYPES = new Set<RuntimeMessage['type']>([
   'SKIP_PLATFORM',
 ]);
 
+/** 向后台脚本发送运行时消息，自动处理空响应和发送失败。 */
 export async function sendRuntimeMessage<T = unknown>(
   message: RuntimeMessage,
 ): Promise<RuntimeResponse<T>> {
@@ -31,10 +32,12 @@ export async function sendRuntimeMessage<T = unknown>(
   }
 }
 
+/** 判断返回值是否是有效的运行时响应结构。 */
 function isRuntimeResponse<T>(value: RuntimeResponse<T> | undefined): value is RuntimeResponse<T> {
   return !!value && typeof value.ok === 'boolean';
 }
 
+/** 判断消息类型是否属于发出去不需要等响应的“即发即弃”类型。 */
 function isFireAndForgetMessage(type: RuntimeMessage['type']) {
   return FIRE_AND_FORGET_MESSAGE_TYPES.has(type);
 }

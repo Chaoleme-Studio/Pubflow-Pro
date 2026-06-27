@@ -1,10 +1,7 @@
 import type { RuntimeMessage } from '../types';
 import type { RuntimeResponse } from '../types';
 
-/**
- * 通过 CDP 发送可信点击事件。
- * 用于知乎等 React 组件，这些组件不响应 JavaScript 的 element.click()。
- */
+/** 通过 CDP 发送可信点击事件，用于知乎等不响应 JS click 的 React 组件。 */
 export async function cdpClickElement(el: HTMLElement): Promise<boolean> {
   const point = getTopFrameCenterPoint(el);
   try {

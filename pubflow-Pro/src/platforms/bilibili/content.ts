@@ -19,6 +19,7 @@ import { loadFileForTransfer } from '../../storage/videoTransferStorage';
 import type { ContentData } from '../../types';
 import type { PlatformConfig } from '../types';
 
+/** 上传 B站视频或专栏封面；优先走专栏封面流程，再回退到视频封面制作面板。 */
 async function uploadBilibiliCover(
   config: PlatformConfig,
   content: ContentData,
@@ -64,10 +65,7 @@ async function uploadBilibiliCover(
   return changed ? '封面已通过 B 站封面制作面板上传并完成。' : '封面已通过 B 站封面制作面板上传并完成，请检查封面预览。';
 }
 
-/**
- * 上传 B站专栏封面。
- * 专栏封面在文章 iframe 的发布设置里，先打开“自定义封面”开关，再等待上传 input 出现。
- */
+/** 上传 B站专栏封面；先打开自定义封面开关，再注入文件 input。 */
 async function uploadBilibiliArticleCover(file: File) {
   const articleDoc = findBilibiliArticleDocument();
   if (!articleDoc) return '';
@@ -412,9 +410,7 @@ async function waitForBilibiliCoverPreviewChange(
   return false;
 }
 
-/**
- * B站标签填充：先清除已有自动标签（可选），再逐个填入新标签
- */
+/** 填充 B站标签；先清除已有自动标签，再逐个填入新标签。 */
 async function fillBilibiliTags(tags: string[], keepAutoTags: boolean) {
   const tagInput = document.querySelector<HTMLInputElement>('#tag-container input.input-val');
   if (!tagInput) return;

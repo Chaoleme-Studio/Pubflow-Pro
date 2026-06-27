@@ -30,6 +30,7 @@ export const DEFAULT_DRAFT: ContentDraft = {
   platformSettings: {},
 };
 
+/** 将数组或类数组对象规范化成字符串数组。 */
 function normalizeArrayLike(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.filter((item): item is string => typeof item === 'string');
@@ -41,6 +42,7 @@ function normalizeArrayLike(value: unknown): string[] {
     .filter((item): item is string => typeof item === 'string');
 }
 
+/** 将原始草稿数据规范化成完整有效的 ContentDraft。 */
 function normalizeDraft(raw: Partial<ContentDraft> | undefined): ContentDraft {
   if (!raw) return { ...DEFAULT_DRAFT };
   const imageFileNames = normalizeArrayLike(raw.imageFileNames);
@@ -81,6 +83,7 @@ function normalizeDraft(raw: Partial<ContentDraft> | undefined): ContentDraft {
   };
 }
 
+/** 加载当前内容草稿，优先从工作区读取。 */
 export async function loadContentDraft(): Promise<ContentDraft> {
   // 优先从工作区读
   const dataFile = await readDataFile();
@@ -93,6 +96,7 @@ export async function loadContentDraft(): Promise<ContentDraft> {
   return normalizeDraft(stored[STORAGE_KEYS.draft] as Partial<ContentDraft> | undefined);
 }
 
+/** 保存当前内容草稿到工作区和 chrome.storage.local。 */
 export async function saveContentDraft(draft: ContentDraft) {
   const contentType = draft.contentType || (draft.imageFileNames?.length || draft.imageCacheIds?.length ? 'image' : 'video');
   const clean = {

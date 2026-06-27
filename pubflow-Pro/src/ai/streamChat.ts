@@ -14,12 +14,14 @@ export interface StreamChunk {
 const REQUEST_TIMEOUT_MS = 30000;
 const MAX_CONNECT_ATTEMPTS = 2;
 
+/** 判断连接异常是否值得重试，排除用户主动取消的情况。 */
 function isRetryableConnectError(error: unknown): boolean {
   if (error instanceof DOMException && error.name === 'AbortError') return false;
   if (!(error instanceof Error)) return true;
   return /network|fetch|timeout|failed to fetch|load failed/i.test(error.message);
 }
 
+/** 将外部 AbortSignal 和超时合并成一个新的 signal，方便统一取消。 */
 function createLinkedSignal(signal: AbortSignal | undefined, timeoutMs: number): {
   signal: AbortSignal;
   clearTimeout: () => void;
@@ -50,6 +52,7 @@ function createLinkedSignal(signal: AbortSignal | undefined, timeoutMs: number):
   };
 }
 
+/** 发起单次流式请求，带连接失败重试和请求超时。 */
 async function fetchStreamResponse(url: string, provider: AIProviderConfig, messages: ChatMessage[], signal?: AbortSignal) {
   let lastError: unknown;
   for (let attempt = 0; attempt < MAX_CONNECT_ATTEMPTS; attempt++) {

@@ -15,6 +15,7 @@ import type {
   ContentDraft,
   DistributionTask,
   GlobalSettings,
+  LicensingSettings,
   PlatformId,
   PlatformSettings,
   PublishRecord,
@@ -23,11 +24,13 @@ import type {
   WorkspaceSettings,
 } from '../../types';
 
+/** 组合式函数：提供工作区选择、清空、演示数据种子和导出功能。 */
 export function useWorkspaceManager(params: {
   draft: ContentDraft;
   platformSettings: Record<PlatformId, PlatformSettings>;
   globalSettings: GlobalSettings;
   serverConfig: ServerConfig;
+  licensingSettings: LicensingSettings;
   aiSettings: AIProviderSettings;
   workspaceSettings: WorkspaceSettings;
   videos: Ref<VideoRecord[]>;
@@ -43,6 +46,7 @@ export function useWorkspaceManager(params: {
     platformSettings,
     globalSettings,
     serverConfig,
+    licensingSettings,
     aiSettings,
     workspaceSettings,
     videos,
@@ -54,6 +58,7 @@ export function useWorkspaceManager(params: {
     resetDraft,
   } = params;
 
+  /** 选择本地文件夹作为工作区，并初始化或载入工作区数据 */
   async function selectWorkspace() {
     const picker = (window as Window & {
       showDirectoryPicker?: (options?: { mode?: 'read' | 'readwrite' }) => Promise<FileSystemDirectoryHandle>;
@@ -77,6 +82,7 @@ export function useWorkspaceManager(params: {
             platformSettings: { ...platformSettings } as Record<string, unknown>,
             globalSettings: { ...globalSettings } as Record<string, unknown>,
             serverConfig: { ...serverConfig } as Record<string, unknown>,
+            licensingSettings: { ...licensingSettings } as Record<string, unknown>,
             aiSettings: { ...aiSettings } as Record<string, unknown>,
           },
           projectIndex: videos.value.map((video) => ({
@@ -100,6 +106,7 @@ export function useWorkspaceManager(params: {
     }
   }
 
+  /** 清除已设置的工作区目录，回退到浏览器内部缓存 */
   async function clearWorkspace() {
     await clearWorkspaceDirectory();
     invalidateWorkspaceCache();
@@ -107,6 +114,7 @@ export function useWorkspaceManager(params: {
     notice.value = '工作区连接已清除，当前将回退到浏览器内部缓存。';
   }
 
+  /** 清空浏览器本地缓存的所有数据（视频、发布记录、草稿等） */
   async function clearLocalData() {
     await clearLibraryData();
     videos.value = [];
@@ -118,6 +126,7 @@ export function useWorkspaceManager(params: {
       : '浏览器内部数据已清空。';
   }
 
+  /** 从工作区目录读取所有项目并恢复到当前会话中 */
   async function restoreFromWorkspace() {
     busy.value = true;
     notice.value = '正在从工作区读取项目…';
@@ -142,6 +151,7 @@ export function useWorkspaceManager(params: {
     }
   }
 
+  /** 初始化内置的演示工作区，导入样例项目数据 */
   async function initializeDemoWorkspace() {
     busy.value = true;
     notice.value = '正在初始化样例工作区…';

@@ -7,6 +7,7 @@ import type { PlatformConfig } from '../types';
 
 const PAGE_WORLD_UPLOAD_TIMEOUT_MS = 180000;
 
+/** 等待视频号编辑器区域加载完成 */
 async function waitForWeixinChannelsEditorReady(config: PlatformConfig, isArticle: boolean) {
   const uploadConfig = isArticle ? config.articleUpload || config.upload : config.upload;
   const selector = uploadConfig?.editorReadySelector || config.readySelector;
@@ -27,6 +28,7 @@ async function waitForWeixinChannelsEditorReady(config: PlatformConfig, isArticl
   }
 }
 
+/** 通过页面主世界批量上传图片 */
 async function uploadImagesViaPageWorld(config: PlatformConfig, content: ContentData): Promise<string> {
   if (!content.imageCacheIds?.length) {
     return '未检测到可自动上传的图片缓存，跳过上传。';
@@ -75,6 +77,7 @@ async function uploadImagesViaPageWorld(config: PlatformConfig, content: Content
   return `已上传 ${response.data?.uploadedCount || files.length} 张图片，继续填写文本。`;
 }
 
+/** 通过页面主世界上传视频文件 */
 async function uploadVideoViaPageWorld(config: PlatformConfig, file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
@@ -107,6 +110,7 @@ async function uploadVideoViaPageWorld(config: PlatformConfig, file: File): Prom
   return '视频已通过页面脚本上传，继续填写文本。';
 }
 
+/** 通过页面主世界填充编辑器内容（标题、话题、描述） */
 async function fillWeixinChannelsEditor(content: ContentData, skipTitle = false) {
   const hasText = Boolean(content.title || content.description || content.topics.length > 0);
   if (!hasText) return;
@@ -130,6 +134,7 @@ async function fillWeixinChannelsEditor(content: ContentData, skipTitle = false)
   }
 }
 
+/** 通过页面主世界填充图文标题 */
 async function fillWeixinChannelsArticleTitle(content: ContentData) {
   if (!content.title) return;
 
@@ -149,6 +154,7 @@ async function fillWeixinChannelsArticleTitle(content: ContentData) {
   }
 }
 
+/** 通过页面主世界填充视频号短标题 */
 async function fillWeixinChannelsShortTitle(content: ContentData) {
   if (!content.title) return;
 
@@ -168,6 +174,7 @@ async function fillWeixinChannelsShortTitle(content: ContentData) {
   }
 }
 
+/** 通过页面主世界处理定时发布设置 */
 async function fillWeixinChannelsScheduled(scheduledAt: number) {
   const response = await browser.runtime.sendMessage({
     type: 'HANDLE_WEIXIN_SCHEDULE',
@@ -183,6 +190,7 @@ async function fillWeixinChannelsScheduled(scheduledAt: number) {
   await humanDelay(1500);
 }
 
+/** 通过页面主世界处理原创声明弹窗 */
 async function fillWeixinChannelsOriginalDeclare() {
   const response = await browser.runtime.sendMessage({
     type: 'HANDLE_WEIXIN_DECLARE_POPUP',
@@ -197,6 +205,7 @@ async function fillWeixinChannelsOriginalDeclare() {
   await humanDelay(1500);
 }
 
+/** 通过页面主世界上传封面图片 */
 async function uploadCoverViaPageWorld(config: PlatformConfig, file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
@@ -226,6 +235,7 @@ async function uploadCoverViaPageWorld(config: PlatformConfig, file: File): Prom
   return '封面已通过页面脚本上传（个人主页卡片 3:4 + 分享卡片 4:3）。';
 }
 
+/** 填充视频号内容主流程：上传媒体、填充字段、处理定时与原创声明 */
 export async function fillWeixinChannelsContent(config: PlatformConfig, content: ContentData, isArticle: boolean = false) {
   let uploadMessage = '';
   const isImagePost = content.contentType === 'image' || isArticle;

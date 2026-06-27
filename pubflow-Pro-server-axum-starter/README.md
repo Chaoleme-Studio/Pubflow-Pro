@@ -101,8 +101,9 @@ make build-artifacts  # 一次性构建全部
 
 WASM 产物用于浏览器插件，提供：
 - `verify_license()` - License 签名验证
-- `verify_lease()` - Lease Token 解析和过期检查
 - `decrypt_selectors()` - Selector 数据解密
+- `pfsp_build_selector_request()` - 构建 PFSP selector 请求
+- `pfsp_decode_selector_response()` - 解码 PFSP selector 响应
 - `generate_device_hash()` - 设备哈希生成
 
 ## 数据库

@@ -33,6 +33,7 @@ export function eventLabel(type: string) {
     verify: '校验',
     renew: '续租',
     deactivate: '解绑',
+    device_migrate: '设备迁移',
     selector_fetch: 'Selector 拉取',
   };
   return map[type] || type || '-';

@@ -14,4 +14,5 @@ pub mod crypto;
 pub mod license;
 pub mod machine;
 pub mod selector;
+pub mod selector_protocol;
 pub mod types;

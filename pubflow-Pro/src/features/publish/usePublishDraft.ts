@@ -16,6 +16,7 @@ import {
 import { PLATFORM_CONFIGS, supportsContentType } from '../../platforms';
 import type { ContentDraft, VideoRecord, WorkspaceSettings } from '../../types';
 
+/** 组合式函数：管理发布页草稿的媒体文件、缓存和从项目恢复。 */
 export function usePublishDraft(params: {
   draft: ContentDraft;
   workspaceSettings: WorkspaceSettings;
@@ -38,10 +39,12 @@ export function usePublishDraft(params: {
   /** 文章正文的文件路径版本（图片用路径而非 base64），用于写入 project.json */
   let persistArticleContent = '';
 
+  /** 设置持久化文章正文内容 */
   function setPersistArticleContent(content: string) {
     persistArticleContent = content;
   }
 
+  /** 持久化草稿并同步写入项目清单 */
   async function persistDraftAndManifest() {
     await persistDraft();
     try {
@@ -52,11 +55,13 @@ export function usePublishDraft(params: {
     }
   }
 
+  /** 从文件输入事件设置封面文件 */
   function setCoverFile(event: Event) {
     const file = (event.target as HTMLInputElement).files?.[0] || null;
     applyCoverFile(file);
   }
 
+  /** 应用封面文件并更新预览和草稿状态 */
   function applyCoverFile(file: File | null) {
     if (coverPreviewUrl.value) URL.revokeObjectURL(coverPreviewUrl.value);
     coverFile.value = file;
@@ -66,6 +71,7 @@ export function usePublishDraft(params: {
     void cacheCoverAndPersist(file);
   }
 
+  /** 更新视频文件并触发缓存持久化 */
   function onVideoFileUpdate(file: File | null) {
     if (videoPreviewUrl.value) URL.revokeObjectURL(videoPreviewUrl.value);
     videoFile.value = file;
@@ -75,19 +81,23 @@ export function usePublishDraft(params: {
     void cacheVideoAndPersist(file);
   }
 
+  /** 更新封面文件 */
   function onCoverFileUpdate(file: File | null) {
     applyCoverFile(file);
   }
 
+  /** 从图片 URL 设置封面预览 */
   function onCoverUrlFromImage(url: string) {
     if (coverPreviewUrl.value && coverPreviewUrl.value !== url) URL.revokeObjectURL(coverPreviewUrl.value);
     coverPreviewUrl.value = url;
   }
 
+  /** 更新图片预览 URL 列表 */
   function onImageUrlsUpdate(urls: string[]) {
     imagePreviewUrls.value = urls;
   }
 
+  /** 更新图片文件并触发导入和持久化 */
   function onImageFilesUpdate(files: File[]) {
     imageFiles.value = [...files];
     draft.contentType = 'image';
@@ -95,6 +105,7 @@ export function usePublishDraft(params: {
     void importImagesAndPersist(files);
   }
 
+  /** 从文件输入事件设置背景音乐文件 */
   function setMusicFile(event: Event) {
     const file = (event.target as HTMLInputElement).files?.[0] || null;
     if (musicPreviewUrl.value) URL.revokeObjectURL(musicPreviewUrl.value);
@@ -106,6 +117,7 @@ export function usePublishDraft(params: {
     void importAssetAndPersist(file, 'music');
   }
 
+  /** 导入素材到工作区并持久化草稿 */
   async function importAssetAndPersist(file: File | null, kind: 'video' | 'cover' | 'music') {
     if (!file) {
       await persistDraftAndManifest();
@@ -127,6 +139,7 @@ export function usePublishDraft(params: {
     }
   }
 
+  /** 缓存视频文件并持久化到工作区 */
   async function cacheVideoAndPersist(file: File | null) {
     const previousCacheId = draft.videoCacheId;
     if (!file) {
@@ -152,6 +165,7 @@ export function usePublishDraft(params: {
     }
   }
 
+  /** 缓存封面文件并持久化到工作区 */
   async function cacheCoverAndPersist(file: File | null) {
     const previousCacheId = draft.coverCacheId;
     if (!file) {
@@ -172,6 +186,7 @@ export function usePublishDraft(params: {
     }
   }
 
+  /** 导入图片到工作区并持久化 */
   async function importImagesAndPersist(files: File[]) {
     const previousCacheIds = [...(draft.imageCacheIds || [])];
     draft.imageCacheIds = [];
@@ -209,6 +224,7 @@ export function usePublishDraft(params: {
     }
   }
 
+  /** 切换背景音乐预览播放状态 */
   function togglePreviewMusic() {
     if (!musicPreviewUrl.value) return;
     if (!previewAudio.value || previewAudio.value.src !== musicPreviewUrl.value) {
@@ -227,16 +243,19 @@ export function usePublishDraft(params: {
     });
   }
 
+  /** 停止背景音乐预览 */
   function stopPreviewMusic() {
     previewAudio.value?.pause();
     previewMusicPlaying.value = false;
   }
 
+  /** 部分更新草稿字段并持久化 */
   function onDraftPartialUpdate(partial: Partial<ContentDraft>) {
     Object.assign(draft, partial);
     void persistDraftAndManifest();
   }
 
+  /** 释放所有预览 URL 并清理缓存 */
   function revokeAllUrls() {
     if (videoPreviewUrl.value) URL.revokeObjectURL(videoPreviewUrl.value);
     if (coverPreviewUrl.value) URL.revokeObjectURL(coverPreviewUrl.value);
@@ -259,6 +278,7 @@ export function usePublishDraft(params: {
     stopPreviewMusic();
   }
 
+  /** 释放所有预览 URL 并重置预览状态 */
   function resetPreviewUrls() {
     if (videoPreviewUrl.value) URL.revokeObjectURL(videoPreviewUrl.value);
     if (coverPreviewUrl.value) URL.revokeObjectURL(coverPreviewUrl.value);
@@ -271,12 +291,14 @@ export function usePublishDraft(params: {
     stopPreviewMusic();
   }
 
+  /** 重置草稿为默认状态并清理所有资源 */
   function resetDraft() {
     revokeAllUrls();
     Object.assign(draft, { ...DEFAULT_DRAFT });
     void persistDraft();
   }
 
+  /** 从视频记录恢复草稿状态并加载项目素材 */
   async function restoreDraftFromVideo(video: VideoRecord) {
     draft.sourceVideoId = video.id;
     draft.contentType = video.contentType || (video.imageFileNames?.length ? 'image' : 'video');

@@ -11,6 +11,7 @@ import type {
   VideoRecord,
 } from '../../types';
 
+/** 组合式函数：根据当前草稿创建视频记录并启动分发任务。 */
 export function useDistributionLauncher(params: {
   draft: ContentDraft;
   canStart: Ref<boolean>;
@@ -34,6 +35,7 @@ export function useDistributionLauncher(params: {
     onStarted,
   } = params;
 
+  /** 根据草稿内容更新或创建视频记录，并保存到库中。 */
   async function upsertVideoFromDraft() {
     const now = Date.now();
     const contentType = draft.contentType || (draft.imageCacheIds?.length ? 'image' : 'video');
@@ -120,6 +122,7 @@ export function useDistributionLauncher(params: {
     return video;
   }
 
+  /** 校验条件并向后台发起 START_DISTRIBUTION 任务。 */
   async function startDistribution() {
     if (!canStart.value || busy.value) return;
     busy.value = true;

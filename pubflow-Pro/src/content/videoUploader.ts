@@ -30,6 +30,7 @@ const SAVE_BUTTON_TEXTS = ['保存', '确定', '确认', '完成', 'OK', 'Save',
 const SAVE_BUTTON_SELECTOR = 'button, [role="button"], [class*="btn"], [class*="button"]';
 const MODAL_CONTAINER_SELECTOR = '[class*="modal"], [class*="Modal"], [class*="dialog"], [class*="Dialog"], [class*="popup"], [class*="Popup"], [class*="overlay"], [class*="Overlay"], [class*="drawer"], [class*="Drawer"]';
 
+/** 如果存在视频缓存，则自动将视频上传到平台发布页。 */
 export async function uploadVideoIfAvailable(config: PlatformConfig, content: ContentData) {
   if (!content.videoCacheId || !config.upload) {
     return '未检测到可自动上传的视频缓存，跳过上传。';
@@ -150,11 +151,13 @@ export async function uploadVideoIfAvailable(config: PlatformConfig, content: Co
   return '视频已尝试自动上传，继续填写文本。';
 }
 
+/** 判断一个按钮是否是可见的保存/确认类按钮。 */
 function isVisibleSaveButton(button: HTMLElement) {
   const text = button.textContent?.trim() || '';
   return SAVE_BUTTON_TEXTS.includes(text) && button.offsetParent !== null;
 }
 
+/** 在按钮列表中按保存按钮规则查找第一个匹配的按钮。 */
 function findFirstSaveButton(buttons: Iterable<HTMLElement>, predicate?: (button: HTMLElement) => boolean) {
   for (const button of buttons) {
     if (!isVisibleSaveButton(button)) continue;
@@ -164,6 +167,7 @@ function findFirstSaveButton(buttons: Iterable<HTMLElement>, predicate?: (button
   return null;
 }
 
+/** 在页面中查找封面编辑弹窗或封面区域附近的保存按钮。 */
 function findSaveButton(): HTMLElement | null {
   const buttons = document.querySelectorAll<HTMLElement>(SAVE_BUTTON_SELECTOR);
 
@@ -195,6 +199,7 @@ function findSaveButton(): HTMLElement | null {
   return findFirstSaveButton(buttons);
 }
 
+/** 如果存在封面缓存，则自动将封面上传到平台封面区域。 */
 export async function uploadCoverIfAvailable(config: PlatformConfig, content: ContentData) {
   if (!content.coverCacheId || !config.fields.cover) {
     return '';

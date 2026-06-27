@@ -19,8 +19,7 @@ pub fn handle(request: &Value) -> Value {
             let raw_id = platform::get_raw_machine_id();
             match raw_id {
                 Some(id) => {
-                    // 此处 salt 应从配置文件或编译时常量读取
-                    let salt = option_env!("MACHINE_SALT").unwrap_or("default-salt");
+                    let salt = machine_salt();
                     let hash = pubflow_core::machine::generate_machine_hash(&id, salt);
                     json!({
                         "success": true,
@@ -47,4 +46,9 @@ pub fn handle(request: &Value) -> Value {
             "error": format!("未知操作: {}", action)
         }),
     }
+}
+
+fn machine_salt() -> &'static str {
+    option_env!("MACHINE_SALT")
+        .expect("MACHINE_SALT env var must be set when building pubflow-native")
 }

@@ -42,6 +42,7 @@ export const PLATFORM_MATCH_PATTERNS = activeSelectorConfigs.flatMap((config) =>
   config.匹配域名.map((host) => `https://${host}/*`),
 );
 
+/** 根据 URL 主机名匹配对应的平台配置。 */
 export function getPlatformByUrl(url: string): PlatformConfig | undefined {
   let host = '';
   try {
@@ -55,6 +56,7 @@ export function getPlatformByUrl(url: string): PlatformConfig | undefined {
   );
 }
 
+/** 判断当前 URL 是否匹配某个平台的指定页面地址（用于检测图文/文章发布页）。 */
 function isPlatformPageUrl(url: string, getTargetUrl: (platform: PlatformConfig) => string | undefined): boolean {
   try {
     const current = new URL(url);
@@ -79,14 +81,17 @@ function isPlatformPageUrl(url: string, getTargetUrl: (platform: PlatformConfig)
   }
 }
 
+/** 判断当前 URL 是否是平台图文发布页。 */
 export function isArticlePage(url: string): boolean {
   return isPlatformPageUrl(url, (platform) => platform.articleEditorUrl);
 }
 
+/** 判断当前 URL 是否是平台长文章/专栏发布页。 */
 export function isLongArticlePage(url: string): boolean {
   return isPlatformPageUrl(url, (platform) => platform.articlePageUrl);
 }
 
+/** 判断平台是否支持指定的内容类型（视频/图文/文章）。 */
 export function supportsContentType(platform: PlatformConfig, contentType: 'video' | 'image' | 'article'): boolean {
   if (platform.supportedContentTypes) {
     return platform.supportedContentTypes.includes(contentType);

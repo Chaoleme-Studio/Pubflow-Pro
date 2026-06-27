@@ -4,16 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="$ROOT_DIR/dist/native"
 TARGET_TRIPLE=""
-MACHINE_SALT_VALUE="${MACHINE_SALT:-pubflow-local-machine-salt}"
+MACHINE_SALT_VALUE="${MACHINE_SALT:-}"
 
 usage() {
   cat <<'USAGE'
 Usage: scripts/build-native.sh [--target <triple>] [--out-dir <dir>]
 
 Builds the PubFlow native machine-code helper.
+MACHINE_SALT must be provided; production builds must use a stable private value.
 
 Examples:
-  scripts/build-native.sh
+  MACHINE_SALT="your-development-salt" scripts/build-native.sh
   MACHINE_SALT="your-production-salt" scripts/build-native.sh
   scripts/build-native.sh --target aarch64-apple-darwin --out-dir dist/downloads
 
@@ -44,6 +45,12 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -z "$MACHINE_SALT_VALUE" ]]; then
+  echo "MACHINE_SALT is required to build pubflow-native." >&2
+  echo "Example: MACHINE_SALT=\"your-production-salt\" scripts/build-native.sh" >&2
+  exit 1
+fi
 
 mkdir -p "$OUT_DIR"
 

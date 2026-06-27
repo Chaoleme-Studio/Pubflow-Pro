@@ -29,13 +29,14 @@ pub struct License {
 
 impl License {
     /// 构造待签名的消息 bytes
-    /// 签名内容 = device_id || tier || expires_at || activation_code
+    /// 签名内容 = domain || len(device_id) || device_id || len(tier) || tier || ...
     fn sign_message(&self) -> Vec<u8> {
         let mut msg = Vec::new();
-        msg.extend_from_slice(self.device_id.as_bytes());
-        msg.extend_from_slice(self.tier_str().as_bytes());
-        msg.extend_from_slice(self.expires_at.to_string().as_bytes());
-        msg.extend_from_slice(self.activation_code.as_bytes());
+        msg.extend_from_slice(b"pubflow-license-v2\0");
+        push_signing_field(&mut msg, &self.device_id);
+        push_signing_field(&mut msg, self.tier_str());
+        push_signing_field(&mut msg, &self.expires_at.to_string());
+        push_signing_field(&mut msg, &self.activation_code);
         msg
     }
 
@@ -77,6 +78,12 @@ impl License {
     pub fn matches_device(&self, machine_hash: &str) -> bool {
         self.device_id == machine_hash
     }
+}
+
+fn push_signing_field(msg: &mut Vec<u8>, value: &str) {
+    let len = u32::try_from(value.len()).expect("license signing field is too large");
+    msg.extend_from_slice(&len.to_be_bytes());
+    msg.extend_from_slice(value.as_bytes());
 }
 
 /// License 验证错误
@@ -141,5 +148,30 @@ mod tests {
         // 篡改 tier
         license.tier = LicenseTier::Enterprise;
         assert!(license.verify(&vk).is_err());
+    }
+
+    #[test]
+    fn test_sign_message_preserves_field_boundaries() {
+        let license_a = License {
+            device_id: "abc".into(),
+            tier: LicenseTier::Pro,
+            expires_at: 123,
+            activation_code: "CODE".into(),
+            signature: String::new(),
+        };
+        let license_b = License {
+            device_id: "abcp".into(),
+            tier: LicenseTier::Free,
+            expires_at: 123,
+            activation_code: "CODE".into(),
+            signature: String::new(),
+        };
+
+        assert_ne!(license_a.sign_message(), license_b.sign_message());
+        assert!(
+            license_a
+                .sign_message()
+                .starts_with(b"pubflow-license-v2\0")
+        );
     }
 }

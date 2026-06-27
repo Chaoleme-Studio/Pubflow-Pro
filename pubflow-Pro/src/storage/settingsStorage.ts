@@ -1,7 +1,7 @@
 import { AI_PROVIDER_PRESETS } from '../features/settings/aiPresets';
 import { PLATFORM_ORDER } from '../platforms';
 import { STORAGE_KEYS } from '../types';
-import type { AIProviderSettings, GlobalSettings, PlatformId, PlatformSettings, ServerConfig } from '../types';
+import type { AIProviderSettings, GlobalSettings, LicensingSettings, PlatformId, PlatformSettings, ServerConfig } from '../types';
 import { loadSecret, pruneSecrets, saveSecret } from './secretStorage';
 import { readDataFile, mergeDataFile } from './workspaceStorage';
 
@@ -31,6 +31,20 @@ export const defaultServerConfig: ServerConfig = {
   connected: false,
 };
 
+export const defaultLicensingSettings: LicensingSettings = {
+  apiBaseUrl: __PUBFLOW_DEFAULT_LICENSE_API_BASE_URL__,
+  activationCode: '',
+  clientInstallId: '',
+  machineHash: '',
+  leaseToken: '',
+  status: 'unconfigured',
+};
+
+const LOCAL_LICENSE_API_BASE_URLS = new Set([
+  'http://127.0.0.1:3001',
+  'http://localhost:3001',
+]);
+
 export const defaultAISettings: AIProviderSettings = {
   enabled: false,
   activeProviderId: 'deepseek',
@@ -51,7 +65,7 @@ export const defaultAISettings: AIProviderSettings = {
   useForCover: true,
 };
 
-// 兼容早期默认 OpenAI 配置，避免升级后把旧用户卡死在旧 preset。
+/** 兼容早期默认 OpenAI 配置，避免升级后旧用户被卡在旧 preset。 */
 function isLegacyOpenAIDefaultProvider(provider: Partial<AIProviderSettings['providers'][number]> | undefined) {
   if (!provider) return false;
   return provider.builtinId === 'openai'
@@ -62,6 +76,7 @@ function isLegacyOpenAIDefaultProvider(provider: Partial<AIProviderSettings['pro
     && (provider.imageModel || '') === 'gpt-image-1';
 }
 
+/** 构建默认 DeepSeek 设置，保留用户已修改的开关项。 */
 function buildDefaultDeepSeekSettings(stored: Partial<AIProviderSettings>) {
   return {
     ...defaultAISettings,
@@ -72,7 +87,7 @@ function buildDefaultDeepSeekSettings(stored: Partial<AIProviderSettings>) {
   } satisfies AIProviderSettings;
 }
 
-// 统一把旧结构、单 provider 结构和当前 providers 数组结构归一成一套数据。
+/** 统一把旧结构、单 provider 结构和当前 providers 数组结构归一成标准 AI 设置。 */
 function normalizeAISettings(settings: unknown): AIProviderSettings {
   const stored = (settings || {}) as Partial<AIProviderSettings> & {
     builtinId?: AIProviderSettings['providers'][number]['builtinId'];
@@ -142,6 +157,7 @@ function normalizeAISettings(settings: unknown): AIProviderSettings {
   };
 }
 
+/** 从本地设置中合并服务端 API Key（兼容旧版明文存储）。 */
 function mergeServerSecretFromLocal(source: ServerConfig, local: unknown): ServerConfig {
   const localServer = (local || {}) as Partial<ServerConfig>;
   return {
@@ -150,6 +166,7 @@ function mergeServerSecretFromLocal(source: ServerConfig, local: unknown): Serve
   };
 }
 
+/** 移除服务端配置中的 API Key，避免明文写入存储。 */
 function withoutServerSecret(config: ServerConfig): ServerConfig {
   return {
     ...config,
@@ -157,6 +174,7 @@ function withoutServerSecret(config: ServerConfig): ServerConfig {
   };
 }
 
+/** 移除所有 AI 提供商的 API Key，避免明文写入存储。 */
 function withoutAISecrets(settings: AIProviderSettings): AIProviderSettings {
   return {
     ...settings,
@@ -167,18 +185,27 @@ function withoutAISecrets(settings: AIProviderSettings): AIProviderSettings {
   };
 }
 
+/** 返回服务端 API Key 在加密存储中的 ID。 */
 function serverSecretId() {
   return 'server:api-key';
 }
 
+/** 返回指定 AI 提供商 API Key 在加密存储中的 ID。 */
 function aiProviderSecretId(providerId: string) {
   return `ai-provider:${providerId}:api-key`;
 }
 
+/** 返回 AI 提供商密钥在加密存储中的前缀。 */
 function aiProviderSecretPrefix() {
   return 'ai-provider:';
 }
 
+/** 返回授权字段在加密存储中的 ID。 */
+function licensingSecretId(name: 'activation-code' | 'client-install-id' | 'machine-hash' | 'lease-token') {
+  return `licensing:${name}`;
+}
+
+/** 从加密存储读取服务端 API Key 并合并到配置中。 */
 async function resolveServerSecret(source: ServerConfig, local: unknown): Promise<ServerConfig> {
   const legacyMerged = mergeServerSecretFromLocal(source, local);
   const encrypted = await loadSecret(serverSecretId()).catch(() => '');
@@ -188,6 +215,61 @@ async function resolveServerSecret(source: ServerConfig, local: unknown): Promis
   };
 }
 
+/** 移除授权配置中的敏感字段，避免明文写入 storage 和工作区文件。 */
+function withoutLicensingSecrets(settings: LicensingSettings): LicensingSettings {
+  return {
+    ...settings,
+    activationCode: '',
+    clientInstallId: '',
+    machineHash: '',
+    leaseToken: '',
+  };
+}
+
+/** 从加密存储恢复授权敏感字段，并兼容旧版 machineHash 字段。 */
+async function resolveLicensingSecrets(source: LicensingSettings, local: unknown): Promise<LicensingSettings> {
+  const localLicensing = (local || {}) as Partial<LicensingSettings>;
+  const activationCode = await loadSecret(licensingSecretId('activation-code')).catch(() => '');
+  const clientInstallId = await loadSecret(licensingSecretId('client-install-id')).catch(() => '');
+  const legacyMachineHash = await loadSecret(licensingSecretId('machine-hash')).catch(() => '');
+  const leaseToken = await loadSecret(licensingSecretId('lease-token')).catch(() => '');
+  const resolvedClientInstallId =
+    clientInstallId ||
+    source.clientInstallId ||
+    localLicensing.clientInstallId ||
+    legacyMachineHash ||
+    source.machineHash ||
+    localLicensing.machineHash ||
+    '';
+
+  return {
+    ...source,
+    apiBaseUrl: resolveLicensingApiBaseUrl(source.apiBaseUrl),
+    activationCode: activationCode || source.activationCode || localLicensing.activationCode || '',
+    clientInstallId: resolvedClientInstallId,
+    machineHash: '',
+    leaseToken: leaseToken || source.leaseToken || localLicensing.leaseToken || '',
+  };
+}
+
+function resolveLicensingApiBaseUrl(apiBaseUrl: string): string {
+  const defaultApiBaseUrl = normalizeApiBaseUrl(defaultLicensingSettings.apiBaseUrl);
+  const storedApiBaseUrl = normalizeApiBaseUrl(apiBaseUrl);
+  if (
+    defaultApiBaseUrl &&
+    !LOCAL_LICENSE_API_BASE_URLS.has(defaultApiBaseUrl) &&
+    LOCAL_LICENSE_API_BASE_URLS.has(storedApiBaseUrl)
+  ) {
+    return defaultApiBaseUrl;
+  }
+  return storedApiBaseUrl || defaultApiBaseUrl;
+}
+
+function normalizeApiBaseUrl(value?: string): string {
+  return (value || '').trim().replace(/\/+$/, '');
+}
+
+/** 从加密存储读取各 AI 提供商的 API Key 并合并到配置中。 */
 async function resolveAISecrets(source: AIProviderSettings, local: unknown): Promise<AIProviderSettings> {
   const localAI = normalizeAISettings(local);
   const localProviderById = new Map(localAI.providers.map((provider) => [provider.id, provider]));
@@ -225,25 +307,38 @@ async function resolveAISecrets(source: AIProviderSettings, local: unknown): Pro
   };
 }
 
+/** 判断配置对象中是否包含服务端 API Key。 */
 function hasServerSecret(config: unknown): boolean {
   return !!(config as Partial<ServerConfig> | undefined)?.apiKey;
 }
 
+/** 判断 AI 设置中是否任一提供商包含 API Key。 */
 function hasAISecrets(settings: unknown): boolean {
   return normalizeAISettings(settings).providers.some((provider) => !!provider.apiKey);
 }
 
+/** 判断授权配置中是否存在需要迁移的明文敏感字段。 */
+function hasLicensingSecrets(settings: unknown): boolean {
+  const licensing = (settings || {}) as Partial<LicensingSettings>;
+  return Boolean(licensing.activationCode || licensing.clientInstallId || licensing.machineHash || licensing.leaseToken);
+}
+
+/** 如果来源中存在明文密钥，则触发一次迁移保存到加密存储。 */
 async function migratePlaintextSecretsIfNeeded(settings: {
   platformSettings: Record<PlatformId, PlatformSettings>;
   globalSettings: GlobalSettings;
   serverConfig: ServerConfig;
+  licensingSettings: LicensingSettings;
   aiSettings: AIProviderSettings;
 }, sources: Array<{
   serverConfig?: unknown;
+  licensingSettings?: unknown;
   aiSettings?: unknown;
 }>) {
   const hasPlaintextSecret = sources.some((source) =>
-    hasServerSecret(source.serverConfig) || hasAISecrets(source.aiSettings),
+    hasServerSecret(source.serverConfig) ||
+    hasLicensingSecrets(source.licensingSettings) ||
+    hasAISecrets(source.aiSettings),
   );
   if (!hasPlaintextSecret) {
     return;
@@ -251,6 +346,7 @@ async function migratePlaintextSecretsIfNeeded(settings: {
   await saveSettings(settings);
 }
 
+/** 加载完整设置，优先从工作区读取并恢复加密存储中的密钥。 */
 export async function loadSettings() {
   // 优先从工作区读
   const dataFile = await readDataFile();
@@ -260,6 +356,7 @@ export async function loadSettings() {
     STORAGE_KEYS.platformSettings,
     STORAGE_KEYS.globalSettings,
     STORAGE_KEYS.serverConfig,
+    STORAGE_KEYS.licensingSettings,
     STORAGE_KEYS.aiSettings,
     STORAGE_KEYS.workspaceSettings,
   ]);
@@ -269,7 +366,15 @@ export async function loadSettings() {
     ...(src?.serverConfig || stored[STORAGE_KEYS.serverConfig] || {}),
   } as ServerConfig;
   const aiSettings = normalizeAISettings(src?.aiSettings || stored[STORAGE_KEYS.aiSettings]);
+  const licensingSettings = {
+    ...defaultLicensingSettings,
+    ...(src?.licensingSettings || stored[STORAGE_KEYS.licensingSettings] || {}),
+  } as LicensingSettings;
   const restoredServerConfig = await resolveServerSecret(serverConfig, stored[STORAGE_KEYS.serverConfig]);
+  const restoredLicensingSettings = await resolveLicensingSecrets(
+    licensingSettings,
+    stored[STORAGE_KEYS.licensingSettings],
+  );
   const restoredAISettings = await resolveAISecrets(aiSettings, stored[STORAGE_KEYS.aiSettings]);
 
   const resolvedSettings = {
@@ -282,28 +387,37 @@ export async function loadSettings() {
       ...(src?.globalSettings || stored[STORAGE_KEYS.globalSettings] || {}),
     } as GlobalSettings,
     serverConfig: restoredServerConfig,
+    licensingSettings: restoredLicensingSettings,
     aiSettings: restoredAISettings,
   };
   await migratePlaintextSecretsIfNeeded(resolvedSettings, [
     {
       serverConfig: stored[STORAGE_KEYS.serverConfig],
+      licensingSettings: stored[STORAGE_KEYS.licensingSettings],
       aiSettings: stored[STORAGE_KEYS.aiSettings],
     },
     {
       serverConfig: src?.serverConfig,
+      licensingSettings: src?.licensingSettings,
       aiSettings: src?.aiSettings,
     },
   ]);
   return resolvedSettings;
 }
 
+/** 保存完整设置，将密钥写入加密存储，配置本体写入工作区和 chrome.storage.local。 */
 export async function saveSettings(settings: {
   platformSettings: Record<PlatformId, PlatformSettings>;
   globalSettings: GlobalSettings;
   serverConfig: ServerConfig;
+  licensingSettings: LicensingSettings;
   aiSettings: AIProviderSettings;
 }) {
   await saveSecret(serverSecretId(), settings.serverConfig.apiKey);
+  await saveSecret(licensingSecretId('activation-code'), settings.licensingSettings.activationCode);
+  await saveSecret(licensingSecretId('client-install-id'), settings.licensingSettings.clientInstallId);
+  await saveSecret(licensingSecretId('machine-hash'), '');
+  await saveSecret(licensingSecretId('lease-token'), settings.licensingSettings.leaseToken);
   const providerSecretIds = new Set(settings.aiSettings.providers.map((provider) => aiProviderSecretId(provider.id)));
   for (const provider of settings.aiSettings.providers) {
     await saveSecret(aiProviderSecretId(provider.id), provider.apiKey);
@@ -311,6 +425,7 @@ export async function saveSettings(settings: {
   await pruneSecrets(aiProviderSecretPrefix(), providerSecretIds);
 
   const serverConfig = withoutServerSecret(settings.serverConfig);
+  const licensingSettings = withoutLicensingSecrets(settings.licensingSettings);
   const aiSettings = withoutAISecrets(settings.aiSettings);
 
   // 工作区根配置文件优先，浏览器本地只做兜底和快速恢复。
@@ -319,6 +434,7 @@ export async function saveSettings(settings: {
       platformSettings: settings.platformSettings,
       globalSettings: settings.globalSettings as unknown as Record<string, unknown>,
       serverConfig: serverConfig as unknown as Record<string, unknown>,
+      licensingSettings: licensingSettings as unknown as Record<string, unknown>,
       aiSettings: aiSettings as unknown as Record<string, unknown>,
     },
   });
@@ -328,6 +444,7 @@ export async function saveSettings(settings: {
     [STORAGE_KEYS.platformSettings]: settings.platformSettings,
     [STORAGE_KEYS.globalSettings]: settings.globalSettings,
     [STORAGE_KEYS.serverConfig]: serverConfig,
+    [STORAGE_KEYS.licensingSettings]: licensingSettings,
     [STORAGE_KEYS.aiSettings]: aiSettings,
   });
 }

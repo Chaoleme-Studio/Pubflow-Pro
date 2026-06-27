@@ -13,14 +13,17 @@ export interface VideoTransferMeta {
   createdAt: number;
 }
 
+/** 构造视频/文件缓存的 meta 键名。 */
 function metaKey(id: string) {
   return `${META_PREFIX}${id}`;
 }
 
+/** 构造视频/文件缓存的分片键名。 */
 function chunkKey(id: string, index: number) {
   return `${CHUNK_PREFIX}${id}:${index}`;
 }
 
+/** 将 ArrayBuffer 编码为 base64，用于存入 chrome.storage.local。 */
 function arrayBufferToBase64(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer);
   let binary = '';
@@ -31,6 +34,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer) {
   return btoa(binary);
 }
 
+/** 将 base64 解码为 Uint8Array。 */
 function base64ToUint8Array(base64: string) {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -40,6 +44,7 @@ function base64ToUint8Array(base64: string) {
   return bytes;
 }
 
+/** 将文件分片存入 chrome.storage.local，用于跨页面传输大文件。 */
 export async function storeFileForTransfer(file: File, existingId?: string) {
   if (existingId) {
     await cleanupFileTransfer(existingId);
@@ -68,6 +73,7 @@ export async function storeFileForTransfer(file: File, existingId?: string) {
   return meta;
 }
 
+/** 从 chrome.storage.local 读取并重组分片文件。 */
 export async function loadFileForTransfer(id: string) {
   const stored = await browser.storage.local.get(metaKey(id));
   const meta = stored[metaKey(id)] as VideoTransferMeta | undefined;
@@ -90,6 +96,7 @@ export async function loadFileForTransfer(id: string) {
   });
 }
 
+/** 清理指定 ID 的文件缓存分片。 */
 export async function cleanupFileTransfer(id?: string) {
   if (!id) return;
   const stored = await browser.storage.local.get(metaKey(id));

@@ -2,7 +2,7 @@
 //!
 //! 包含 V1 版本所有的 API 端点。
 
-use crate::{AppState, admin, lease, product, purchase, selector, user};
+use crate::{AppState, admin, lease, license_center, product, purchase, selector, user};
 use aide::axum::ApiRouter;
 use std::sync::Arc;
 
@@ -21,6 +21,7 @@ pub fn routes(state: Arc<AppState>) -> ApiRouter {
     ApiRouter::new()
         .nest_api_service("/user", user::routes(state.clone()))
         .nest_api_service("/lease", lease::routes(state.clone()))
+        .nest_api_service("/license", license_center::routes(state.clone()))
         .nest_api_service("/product", product::routes(state.clone()))
         .nest_api_service("/selector", selector::routes(state.clone()))
         .nest_api_service("/purchase", purchase::routes(state.clone()))

@@ -29,6 +29,9 @@ pub enum PubFlowError {
     #[error("Selector 版本不存在")]
     SelectorNotFound,
 
+    #[error("应用版本不存在")]
+    AppVersionNotFound,
+
     #[error("订单不存在")]
     OrderNotFound,
 
@@ -40,6 +43,9 @@ pub enum PubFlowError {
 
     #[error("请求签名或密钥配置无效")]
     InvalidCryptoConfig,
+
+    #[error("Selector 协议错误: {0}")]
+    SelectorProtocol(String),
 
     #[error("内部错误: {0}")]
     Internal(String),
@@ -61,12 +67,18 @@ impl IntoResponse for PubFlowError {
                 )
             }
             Self::DeviceLimitReached => ApiError::new(StatusCode::CONFLICT, self.to_string())
-                .with_detail(ErrorDetail::new(DOMAIN, Reason::UsageLimitReached)),
+                .with_detail(ErrorDetail::with_message(
+                    DOMAIN,
+                    Reason::DeviceLimitReached,
+                    "DEVICE_LIMIT_REACHED",
+                )),
             Self::DeviceNotBound => ApiError::new(StatusCode::NOT_FOUND, self.to_string())
                 .with_detail(ErrorDetail::new(DOMAIN, Reason::NotFound)),
             Self::LeaseNotFound => ApiError::new(StatusCode::NOT_FOUND, self.to_string())
                 .with_detail(ErrorDetail::new(DOMAIN, Reason::NotFound)),
             Self::SelectorNotFound => ApiError::new(StatusCode::NOT_FOUND, self.to_string())
+                .with_detail(ErrorDetail::new(DOMAIN, Reason::NotFound)),
+            Self::AppVersionNotFound => ApiError::new(StatusCode::NOT_FOUND, self.to_string())
                 .with_detail(ErrorDetail::new(DOMAIN, Reason::NotFound)),
             Self::OrderNotFound => ApiError::new(StatusCode::NOT_FOUND, self.to_string())
                 .with_detail(ErrorDetail::new(DOMAIN, Reason::NotFound)),
@@ -77,6 +89,19 @@ impl IntoResponse for PubFlowError {
             Self::InvalidCryptoConfig => {
                 tracing::error!("invalid pubflow crypto configuration");
                 ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
+            Self::SelectorProtocol(ref code) => {
+                let status = match code.as_str() {
+                    "PFSP_REPLAY" => StatusCode::CONFLICT,
+                    "PFSP_LEASE_INVALID" | "PFSP_DEVICE_MISMATCH" => StatusCode::FORBIDDEN,
+                    "PFSP_UNSUPPORTED_MEDIA_TYPE" => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    _ => StatusCode::BAD_REQUEST,
+                };
+                ApiError::new(status, self.to_string()).with_detail(ErrorDetail::with_message(
+                    DOMAIN,
+                    Reason::InvalidFormat,
+                    code,
+                ))
             }
             Self::Internal(ref msg) => {
                 tracing::error!(error = %msg, "pubflow internal error");

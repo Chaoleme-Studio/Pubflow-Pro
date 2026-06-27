@@ -38,3 +38,9 @@ target/
 *.njsproj
 *.sln
 *.sw?
+
+
+
+
+__pycache__
+scripts/deploy-to-nucbox.py

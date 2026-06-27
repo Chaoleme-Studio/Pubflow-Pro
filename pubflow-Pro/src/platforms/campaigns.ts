@@ -20,14 +20,17 @@ export const PLATFORM_CAMPAIGNS: PlatformCampaign[] = [
   ...xiguaCampaigns,
 ];
 
+/** 获取指定平台下的所有官方活动/创作激励计划。 */
 export function getCampaignsByPlatform(platformId: PlatformId) {
   return PLATFORM_CAMPAIGNS.filter((活动) => 活动.平台标识 === platformId);
 }
 
+/** 根据活动 ID 查找对应的活动配置。 */
 export function getCampaignById(id: string) {
   return PLATFORM_CAMPAIGNS.find((活动) => 活动.标识 === id);
 }
 
+/** 根据标题、描述、话题和已选平台推荐最匹配的平台官方活动。 */
 export function recommendCampaigns(input: {
   title: string;
   description: string;

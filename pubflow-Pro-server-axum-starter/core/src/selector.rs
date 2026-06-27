@@ -66,11 +66,19 @@ pub fn decrypt_selectors(
     server_secret: &str,
     license_code: &str,
 ) -> Result<HashMap<String, PlatformSelector>, CryptoError> {
+    let json_str = decrypt_selector_json(encrypted_data, server_secret, license_code)?;
+    serde_json::from_str(&json_str).map_err(|e| CryptoError::DecryptFailed(e.to_string()))
+}
+
+/// 解密 selector JSON，保留完整结构，供扩展端读取当前 PlatformSelectorConfig。
+pub fn decrypt_selector_json(
+    encrypted_data: &str,
+    server_secret: &str,
+    license_code: &str,
+) -> Result<String, CryptoError> {
     let key = crypto::derive_key(server_secret, license_code);
     let plaintext = crypto::decrypt(encrypted_data, &key)?;
-    let json_str =
-        String::from_utf8(plaintext).map_err(|e| CryptoError::DecryptFailed(e.to_string()))?;
-    serde_json::from_str(&json_str).map_err(|e| CryptoError::DecryptFailed(e.to_string()))
+    String::from_utf8(plaintext).map_err(|e| CryptoError::DecryptFailed(e.to_string()))
 }
 
 /// 加密 selector 数据（后端使用）
@@ -81,8 +89,17 @@ pub fn encrypt_selectors(
 ) -> Result<String, CryptoError> {
     let json =
         serde_json::to_string(selectors).map_err(|e| CryptoError::EncryptFailed(e.to_string()))?;
+    encrypt_selector_json_str(&json, server_secret, license_code)
+}
+
+/// 加密完整 selector JSON 字符串，避免服务端把插件端配置压缩成旧的简化结构。
+pub fn encrypt_selector_json_str(
+    selector_json: &str,
+    server_secret: &str,
+    license_code: &str,
+) -> Result<String, CryptoError> {
     let key = crypto::derive_key(server_secret, license_code);
-    crypto::encrypt(json.as_bytes(), &key)
+    crypto::encrypt(selector_json.as_bytes(), &key)
 }
 
 #[cfg(test)]

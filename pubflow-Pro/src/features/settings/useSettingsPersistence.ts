@@ -11,6 +11,7 @@ import {
 import type {
   AIProviderSettings,
   GlobalSettings,
+  LicensingSettings,
   PlatformId,
   PlatformSettings,
   ServerConfig,
@@ -19,10 +20,12 @@ import type {
 
 const SETTINGS_AUTOSAVE_DELAY_MS = 500;
 
+/** 组合式函数：管理设置页的加载、自动保存和脏状态。 */
 export function useSettingsPersistence(params: {
   platformSettings: Record<PlatformId, PlatformSettings>;
   globalSettings: GlobalSettings;
   serverConfig: ServerConfig;
+  licensingSettings: LicensingSettings;
   aiSettings: AIProviderSettings;
   workspaceSettings: WorkspaceSettings;
   setNotice: (notice: string) => void;
@@ -31,6 +34,7 @@ export function useSettingsPersistence(params: {
     platformSettings,
     globalSettings,
     serverConfig,
+    licensingSettings,
     aiSettings,
     workspaceSettings,
     setNotice,
@@ -44,20 +48,24 @@ export function useSettingsPersistence(params: {
   let settingsLoaded = false;
   let lastSavedSettingsSnapshot = '';
 
+  /** 生成当前设置对象（不含工作区设置）的快照字符串，用于脏状态比较。 */
   function createSettingsSnapshot() {
     return JSON.stringify({
       platformSettings,
       globalSettings,
       serverConfig,
+      licensingSettings,
       aiSettings,
     });
   }
 
+  /** 从存储加载设置并回填到响应式对象中。 */
   async function loadSettings() {
     const stored = await loadStoredSettings();
     Object.assign(platformSettings, stored.platformSettings);
     Object.assign(globalSettings, stored.globalSettings);
     Object.assign(serverConfig, stored.serverConfig);
+    Object.assign(licensingSettings, stored.licensingSettings);
     Object.assign(aiSettings, stored.aiSettings);
     Object.assign(workspaceSettings, await loadWorkspaceSettings());
 
@@ -69,6 +77,7 @@ export function useSettingsPersistence(params: {
     }
   }
 
+  /** 将当前设置持久化到存储。 */
   async function persistSettings(showNotice = false) {
     if (!settingsLoaded || settingsSaving.value) return;
 
@@ -80,6 +89,7 @@ export function useSettingsPersistence(params: {
         platformSettings,
         globalSettings,
         serverConfig,
+        licensingSettings,
         aiSettings,
       });
       lastSavedSettingsSnapshot = snapshotBeforeSave;
@@ -93,6 +103,7 @@ export function useSettingsPersistence(params: {
     }
   }
 
+  /** 安排一次延迟自动保存。 */
   function scheduleSettingsAutosave() {
     if (!settingsLoaded) return;
     if (settingsAutoSaveTimer) clearTimeout(settingsAutoSaveTimer);
@@ -102,14 +113,16 @@ export function useSettingsPersistence(params: {
     }, SETTINGS_AUTOSAVE_DELAY_MS);
   }
 
-  async function saveSettings() {
+  /** 立即保存设置并提示用户。 */
+  async function saveSettings(showNotice = true) {
     if (settingsAutoSaveTimer) {
       clearTimeout(settingsAutoSaveTimer);
       settingsAutoSaveTimer = null;
     }
-    await persistSettings(true);
+    await persistSettings(showNotice);
   }
 
+  /** 标记设置已加载完成，重置脏状态。 */
   function markSettingsLoaded() {
     lastSavedSettingsSnapshot = createSettingsSnapshot();
     isSettingsDirty.value = false;

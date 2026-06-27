@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { BadgeCheck, ClipboardCopy, CreditCard, RefreshCw, WalletCards } from 'lucide-vue-next';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { createOrder, getOrderStatus, getProductCatalog, type PayChannel, type Plan, type PlanOption } from '../api';
+import { createOrder, FALLBACK_PRODUCT_CATALOG, getOrderStatus, getProductCatalog, type PayChannel, type Plan, type PlanOption } from '../api';
 
 defineProps<{
   navigate: (href: string) => void;
@@ -17,6 +17,27 @@ const plans = ref<PlanOption[]>([]);
 const catalogLoading = ref(true);
 const catalogError = ref('');
 const activePlan = computed(() => plans.value.find((item) => item.id === selectedPlan.value) || plans.value[0]);
+const nowTick = ref(Date.now());
+let countdownTimer: ReturnType<typeof setInterval> | undefined;
+const activePlanOriginalPrice = computed(() => {
+  const plan = activePlan.value;
+  return plan?.originalAmountCents && plan.originalAmountCents > plan.amountCents
+    ? formatAmount(plan.originalAmountCents)
+    : '';
+});
+const activePlanSavings = computed(() => activePlan.value?.savingsCents ? formatAmount(activePlan.value.savingsCents) : '');
+const discountCountdown = computed(() => {
+  const end = activePlan.value?.discountEndAt;
+  if (!activePlan.value?.isDiscountActive || !end) return '';
+  const diff = new Date(end).getTime() - nowTick.value;
+  if (diff <= 0) return '即将结束';
+  const totalMinutes = Math.floor(diff / 60000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `${days}天${hours}小时后结束`;
+  return `${hours}小时${minutes}分钟后结束`;
+});
 
 // 支付相关
 const payLoading = ref(false);
@@ -29,12 +50,17 @@ const copied = ref(false);
 let copyTimer: ReturnType<typeof setTimeout> | undefined;
 
 onMounted(async () => {
+  countdownTimer = setInterval(() => {
+    nowTick.value = Date.now();
+  }, 60000);
   try {
     const catalog = await getProductCatalog();
     plans.value = catalog.plans;
     selectedPlan.value = catalog.plans.find((item) => item.id === 'yearly')?.id || catalog.plans[0]?.id || 'yearly';
   } catch (error) {
-    catalogError.value = error instanceof Error ? error.message : '产品配置加载失败';
+    plans.value = FALLBACK_PRODUCT_CATALOG.plans;
+    selectedPlan.value = 'yearly';
+    catalogError.value = `${error instanceof Error ? error.message : '产品配置加载失败'}，当前使用本地套餐配置。`;
   } finally {
     catalogLoading.value = false;
   }
@@ -116,7 +142,15 @@ async function copyActivationCode() {
 
 onUnmounted(() => {
   if (copyTimer) clearTimeout(copyTimer);
+  if (countdownTimer) clearInterval(countdownTimer);
 });
+
+function formatAmount(amountCents: number) {
+  return (amountCents / 100).toLocaleString('zh-CN', {
+    minimumFractionDigits: amountCents % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+}
 </script>
 
 <template>
@@ -124,7 +158,7 @@ onUnmounted(() => {
     <section class="purchase-hero">
       <div>
         <p class="eyebrow">购买 PubFlow License</p>
-        <h1>选择套餐，付款后查询激活码。</h1>
+        <h1>选择套餐，付款后查询激活码</h1>
         <p>微信和支付宝会跳转到官方支付页面，支付完成后回到此页查询并领取激活码。</p>
       </div>
     </section>
@@ -135,7 +169,11 @@ onUnmounted(() => {
           <p v-if="catalogLoading" class="inline-empty">套餐配置加载中...</p>
           <button v-for="item in plans" :key="item.id" type="button" :class="{ active: selectedPlan === item.id }" @click="selectedPlan = item.id">
             <span>{{ item.name }}</span>
-            <strong>¥{{ item.price }}</strong>
+            <strong>
+              <small v-if="item.originalAmountCents && item.originalAmountCents > item.amountCents" class="price-origin">¥{{ formatAmount(item.originalAmountCents) }}</small>
+              ¥{{ item.price }}
+            </strong>
+            <em v-if="item.isDiscountActive" class="discount-pill">限时折扣</em>
             <small>{{ item.note }}</small>
           </button>
           <p v-if="catalogError" class="inline-empty">{{ catalogError }}</p>
@@ -169,6 +207,9 @@ onUnmounted(() => {
         <template v-else>
           <span>订单已创建</span>
           <strong>{{ activePlan ? `${activePlan.name} ¥${activePlan.price}` : '' }}</strong>
+          <div v-if="activePlanOriginalPrice" class="summary-line"><span>原价</span><b class="line-through">¥{{ activePlanOriginalPrice }}</b></div>
+          <div v-if="activePlanSavings" class="summary-line"><span>节省</span><b>¥{{ activePlanSavings }}</b></div>
+          <div v-if="discountCountdown" class="summary-line"><span>折扣</span><b>{{ discountCountdown }}</b></div>
           <div class="summary-line"><span>支付方式</span><b>{{ selectedPay === 'wechat' ? '微信' : '支付宝' }}</b></div>
           <div class="summary-line"><span>订单号</span><b>{{ orderNo }}</b></div>
           <div class="paid-state opened">

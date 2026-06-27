@@ -14,6 +14,7 @@ pub struct Model {
     pub reason: Option<String>,
     pub ip_address: String,
     pub machine_hash: Option<String>,
+    pub client_install_id: Option<String>,
     pub platform: Option<String>,
     pub extension_version: Option<String>,
     pub user_agent: Option<String>,

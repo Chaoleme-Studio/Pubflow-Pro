@@ -2,6 +2,7 @@ import { STORAGE_KEYS } from '../types';
 import type { PlatformStatus, PublishRecord, VideoRecord } from '../types';
 import { deleteProjectData, loadAllWorkspaceProjects, writeProjectData } from './workspaceStorage';
 
+/** 从工作区或 chrome.storage.local 加载视频与发布记录的对照数据。 */
 async function loadPersistedLibraryPairs() {
   const projects = await loadAllWorkspaceProjects();
   if (projects.length) {
@@ -18,10 +19,12 @@ async function loadPersistedLibraryPairs() {
   };
 }
 
+/** 筛选出与指定视频关联的发布记录。 */
 function recordsForVideo(records: PublishRecord[], video: VideoRecord) {
   return records.filter((record) => record.videoId === video.id);
 }
 
+/** 规范化视频记录字段，补齐旧数据缺失的 projectId、topics 等字段。 */
 function normalizeVideoRecord(record: VideoRecord): VideoRecord {
   return {
     ...record,
@@ -77,16 +80,19 @@ function deduplicateVideos(videos: VideoRecord[]): VideoRecord[] {
   return result.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+/** 判断某个平台状态是否需要生成发布记录。 */
 function shouldHavePublishRecord(platform: PlatformStatus): boolean {
   return platform.status === 'published' || platform.status === 'filled' || platform.status === 'error';
 }
 
+/** 将平台状态映射为发布记录中的状态字段。 */
 function recordStatusFromPlatform(platform: PlatformStatus): PublishRecord['status'] {
   if (platform.status === 'published') return 'published';
   if (platform.status === 'error') return 'error';
   return 'pending';
 }
 
+/** 根据视频和平台状态构造一条发布记录。 */
 function buildRecordFromVideoPlatform(video: VideoRecord, platform: PlatformStatus): PublishRecord {
   return {
     id: `${video.id}:${platform.platformId}`,
@@ -101,6 +107,7 @@ function buildRecordFromVideoPlatform(video: VideoRecord, platform: PlatformStat
   };
 }
 
+/** 合并已有记录和视频生成的记录，保留最完整的发布状态。 */
 function mergeRecordsFromVideos(videos: VideoRecord[], records: PublishRecord[]): PublishRecord[] {
   const byKey = new Map<string, PublishRecord>();
   for (const record of records) {
@@ -131,6 +138,7 @@ function mergeRecordsFromVideos(videos: VideoRecord[], records: PublishRecord[])
   return [...byKey.values()].sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0));
 }
 
+/** 生成发布记录的稳定签名，用于判断记录集合是否发生变化。 */
 function publishRecordSignature(record: PublishRecord) {
   return [
     record.id,
@@ -145,6 +153,7 @@ function publishRecordSignature(record: PublishRecord) {
   ].join('\u001f');
 }
 
+/** 比较两组发布记录是否不同。 */
 function recordsChanged(next: PublishRecord[], previous: PublishRecord[]) {
   if (next.length !== previous.length) return true;
   for (let index = 0; index < next.length; index++) {
@@ -155,6 +164,7 @@ function recordsChanged(next: PublishRecord[], previous: PublishRecord[]) {
   return false;
 }
 
+/** 加载并去重后的视频库和发布记录。 */
 export async function loadLibraryData() {
   const persisted = await loadPersistedLibraryPairs();
   const videos = persisted.videos;
@@ -172,6 +182,7 @@ export async function loadLibraryData() {
   return { videos: deduped, records: mergedRecords };
 }
 
+/** 将视频和发布记录同时保存到工作区和 chrome.storage.local。 */
 export async function saveLibraryData(videos: VideoRecord[], records: PublishRecord[]) {
   const normalizedVideos = videos.map(normalizeVideoRecord);
   for (const video of normalizedVideos) {
@@ -183,6 +194,7 @@ export async function saveLibraryData(videos: VideoRecord[], records: PublishRec
   });
 }
 
+/** 保存视频列表，并同步更新每条视频在工作区中的项目数据。 */
 export async function saveVideos(videos: VideoRecord[]) {
   const persisted = await loadPersistedLibraryPairs();
   const normalizedVideos = videos.map(normalizeVideoRecord);
@@ -192,6 +204,7 @@ export async function saveVideos(videos: VideoRecord[]) {
   await browser.storage.local.set({ [STORAGE_KEYS.videos]: videos });
 }
 
+/** 保存发布记录，并同步更新相关视频在工作区中的项目数据。 */
 export async function saveRecords(records: PublishRecord[]) {
   const persisted = await loadPersistedLibraryPairs();
   for (const video of persisted.videos) {
@@ -200,6 +213,7 @@ export async function saveRecords(records: PublishRecord[]) {
   await browser.storage.local.set({ [STORAGE_KEYS.records]: records });
 }
 
+/** 删除指定视频及其关联的发布记录，同时清理工作区中的项目目录。 */
 export async function deleteVideoRecord(videoId: string) {
   const persisted = await loadPersistedLibraryPairs();
   const target = persisted.videos.find((video) => video.id === videoId);
@@ -218,6 +232,7 @@ export async function deleteVideoRecord(videoId: string) {
   return { videos, records };
 }
 
+/** 清空浏览器缓存的视频、记录、任务和草稿数据，不删除工作区文件。 */
 export async function clearLibraryData() {
   // 只清浏览器缓存，不动工作区文件（工作区数据由用户在设置中显式管理）
   await browser.storage.local.remove([
@@ -228,6 +243,7 @@ export async function clearLibraryData() {
   ]);
 }
 
+/** 导出 chrome.storage.local 中的所有数据，用于备份。 */
 export async function exportAllStoredData() {
   return browser.storage.local.get(null);
 }

@@ -19,6 +19,7 @@ import { DEFAULT_DRAFT, loadContentDraft, saveContentDraft } from '../../src/sto
 import {
   defaultAISettings,
   defaultGlobalSettings,
+  defaultLicensingSettings,
   defaultPlatformSettings,
   defaultServerConfig,
 } from '../../src/storage/settingsStorage';
@@ -32,6 +33,7 @@ import type {
   DistributionTask,
   GlobalSettings,
   ContentDraft,
+  LicensingSettings,
   PlatformId,
   PlatformSettings,
   PublishRecord,
@@ -60,6 +62,10 @@ import {
 } from './lib/dashboardPresentation';
 
 const sidebarCollapsed = ref(false);
+const officialSiteUrl = computed(() =>
+  (__PUBFLOW_OFFICIAL_SITE_URL__ || __PUBFLOW_DEFAULT_LICENSE_API_BASE_URL__ || 'https://github.com/Chaoleme/PubFlow').replace(/\/+$/, ''),
+);
+const extensionVersion = browser.runtime.getManifest().version || '0.0.0';
 
 const draft = reactive<ContentDraft>({ ...DEFAULT_DRAFT });
 const { task, refreshTask } = useRuntimeTask();
@@ -79,6 +85,7 @@ const platformSettings = reactive<Record<PlatformId, PlatformSettings>>({
 });
 const globalSettings = reactive<GlobalSettings>({ ...defaultGlobalSettings });
 const serverConfig = reactive<ServerConfig>({ ...defaultServerConfig });
+const licensingSettings = reactive<LicensingSettings>({ ...defaultLicensingSettings });
 const aiSettings = reactive<AIProviderSettings>({ ...defaultAISettings });
 const workspaceSettings = reactive<WorkspaceSettings>({ ...defaultWorkspaceSettings });
 const {
@@ -158,6 +165,7 @@ const {
   platformSettings,
   globalSettings,
   serverConfig,
+  licensingSettings,
   aiSettings,
   workspaceSettings,
   setNotice: (message) => {
@@ -260,6 +268,7 @@ const {
   platformSettings,
   globalSettings,
   serverConfig,
+  licensingSettings,
   aiSettings,
   workspaceSettings,
   videos,
@@ -321,6 +330,37 @@ async function fetchAIModels() {
   }
 }
 
+async function verifyLicense() {
+  busy.value = true;
+  notice.value = '';
+  licensingSettings.statusMessage = '';
+  try {
+    await saveSettings(false);
+    const response = await browser.runtime.sendMessage({
+      type: 'VERIFY_LICENSE',
+      payload: {
+        licensingSettings: { ...licensingSettings },
+      },
+    });
+    if (!response?.ok) throw new Error(response?.error || '授权验证失败');
+    Object.assign(licensingSettings, response.data);
+    licensingSettings.statusMessage = response.data.statusMessage || '授权验证成功。';
+    await saveSettings(false);
+  } catch (error) {
+    licensingSettings.status = 'invalid';
+    licensingSettings.statusMessage = error instanceof Error ? error.message : '授权验证失败';
+  } finally {
+    busy.value = false;
+  }
+}
+
+function hasLicenseCredentials() {
+  return Boolean(
+    licensingSettings.apiBaseUrl &&
+    licensingSettings.activationCode,
+  );
+}
+
 async function startFromVideo(video: VideoRecord) {
   uploadTab.value = video.contentType || (video.imageFileNames?.length ? 'image' : 'video');
   activeView.value = 'publish';
@@ -360,6 +400,9 @@ onMounted(async () => {
   await hydrate();
   await refreshSidePanelStatus().catch(() => undefined);
   browser.runtime.onMessage.addListener(handleRuntimeMessage);
+  if (!hasLicenseCredentials()) {
+    activeView.value = 'settings';
+  }
   markSettingsLoaded();
 });
 
@@ -431,10 +474,10 @@ onUnmounted(() => {
             <div v-if="!sidebarCollapsed" class="mt-2 text-center text-[11px] text-slate-400">
               <a
                 class="hover:text-slate-600 hover:underline"
-                href="https://github.com/Chaoleme/PubFlow"
+                :href="officialSiteUrl"
                 target="_blank"
                 rel="noopener noreferrer"
-              >v0.2.0 · CopyRight © 2026</a>
+              >v{{ extensionVersion }} · CopyRight © 2026</a>
             </div>
           </div>
         </div>
@@ -470,7 +513,7 @@ onUnmounted(() => {
                   v-if="isSettingsDirty"
                   class="pf-btn-primary"
                   type="button"
-                  @click="saveSettings"
+                  @click="saveSettings()"
                 >
                   保存
                 </button>
@@ -615,6 +658,7 @@ onUnmounted(() => {
             :platform-settings="platformSettings"
             :global-settings="globalSettings"
             :server-config="serverConfig"
+            :licensing-settings="licensingSettings"
             :ai-settings="aiSettings"
             :workspace-settings="workspaceSettings"
             :ai-model-options="aiModelOptions"
@@ -623,6 +667,7 @@ onUnmounted(() => {
             @remove-ai-provider="removeAIProvider"
             @apply-provider-preset="applyProviderPreset"
             @fetch-ai-models="fetchAIModels"
+            @verify-license="verifyLicense"
             @select-workspace="selectWorkspace"
             @initialize-demo-workspace="initializeDemoWorkspace"
             @clear-workspace="clearWorkspace"

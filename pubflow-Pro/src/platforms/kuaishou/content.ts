@@ -22,6 +22,7 @@ import type { PlatformConfig } from '../types';
 const KUAISHOU_UPLOAD_TAB_TEXTS = ['上传封面', '本地上传', '上传图片'];
 const KUAISHOU_COVER_ENTRY_TEXTS = ['修改封面', '设置封面', '编辑封面', '上传封面', '封面设置'];
 
+/** 上传快手封面（通过弹窗选择"本地上传"标签页并注入文件） */
 async function uploadKuaishouCover(config: PlatformConfig, content: ContentData) {
   if (!content.coverCacheId || !config.fields.cover) return '';
 
@@ -67,6 +68,7 @@ async function uploadKuaishouCover(config: PlatformConfig, content: ContentData)
   return changed ? '封面已通过快手弹窗上传并确认。' : '封面已通过快手弹窗上传并确认，请检查封面预览。';
 }
 
+/** 查找快手封面入口元素（优先配置选择器，再按文案匹配） */
 function findKuaishouCoverEntry(config: PlatformConfig) {
   const configured = findVisibleElement(config.fields.cover?.selectors || []);
   const configuredEntry = configured ? resolveKuaishouCoverClickTarget(configured) : null;
@@ -78,6 +80,7 @@ function findKuaishouCoverEntry(config: PlatformConfig) {
   return configured;
 }
 
+/** 解析封面元素的实际点击目标（优先卡片或按钮） */
 function resolveKuaishouCoverClickTarget(coverElement: HTMLElement) {
   const coverCard =
     coverElement.querySelector<HTMLElement>('[class*="cover-full-editor"]') ||
@@ -90,6 +93,7 @@ function resolveKuaishouCoverClickTarget(coverElement: HTMLElement) {
   return coverElement.querySelector<HTMLElement>('button, [role="button"], [class*="button"], [class*="btn"]') || coverElement;
 }
 
+/** 通过文件 input 注入封面图片 */
 async function uploadKuaishouCoverByInput(file: File) {
   const input = await waitForKuaishouImageInputInDialog(8000);
   if (!input) return false;
@@ -100,6 +104,7 @@ async function uploadKuaishouCoverByInput(file: File) {
   return true;
 }
 
+/** 关闭快手封面编辑弹窗（贴纸/文字编辑） */
 async function finishKuaishouCoverEditor(timeoutMs: number) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -117,6 +122,7 @@ async function finishKuaishouCoverEditor(timeoutMs: number) {
   return !findKuaishouCoverEditor();
 }
 
+/** 查找"封面编辑"弹窗（非封面截取） */
 function findKuaishouCoverEditor(): HTMLElement | null {
   const dialogs = document.querySelectorAll<HTMLElement>(
     '[role="dialog"], .ant-modal-wrap, .ant-modal, .ant-modal-content, .ant-modal-body',
@@ -130,6 +136,7 @@ function findKuaishouCoverEditor(): HTMLElement | null {
   return null;
 }
 
+/** 打开快手封面设置弹窗（如已打开则直接返回） */
 async function openKuaishouCoverDialog(coverElement?: HTMLElement) {
   const existingDialog = findKuaishouCoverDialog();
   if (existingDialog) return existingDialog;
@@ -157,6 +164,7 @@ async function openKuaishouCoverDialog(coverElement?: HTMLElement) {
   return null;
 }
 
+/** 在封面弹窗中切换到"上传封面/本地上传"标签页 */
 async function selectKuaishouUploadTab(dialog: HTMLElement) {
   // 等待弹窗动画完成（Ant Design Modal 有 300ms 动画）
   await waitForIdle(800);
@@ -186,6 +194,7 @@ async function selectKuaishouUploadTab(dialog: HTMLElement) {
   return false;
 }
 
+/** 确保封面弹窗停留在"上传封面"标签页 */
 async function ensureKuaishouUploadTabSelected(timeoutMs: number) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -204,7 +213,7 @@ async function ensureKuaishouUploadTabSelected(timeoutMs: number) {
   return !dialog || isKuaishouUploadTabActive(dialog);
 }
 
-// 跳过 CDP 直接派发事件，避免 Ant Design Modal 动画中 CDP 坐标不准
+/** 跳过 CDP 直接派发事件，避免 Ant Design Modal 动画中 CDP 坐标不准 */
 async function clickKuaishouTabElement(element: HTMLElement) {
   scrollIntoView(element);
   await waitForIdle(300);
@@ -229,6 +238,7 @@ async function clickKuaishouTabElement(element: HTMLElement) {
   element.dispatchEvent(new MouseEvent('click', { ...eventInit, buttons: 0 }));
 }
 
+/** 判断封面弹窗当前是否处于"上传封面"标签页 */
 function isKuaishouUploadTabActive(dialog: HTMLElement) {
   const headerItems = dialog.querySelectorAll<HTMLElement>(
     '[class*="header-title-item"], [role="tab"], [class*="tab"], [class*="Tab"]',
@@ -247,6 +257,7 @@ function isKuaishouUploadTabActive(dialog: HTMLElement) {
   return Boolean(uploadPanel && isVisible(uploadPanel));
 }
 
+/** 等待封面弹窗内的图片文件 input 出现 */
 async function waitForKuaishouImageInputInDialog(timeoutMs: number) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -258,6 +269,7 @@ async function waitForKuaishouImageInputInDialog(timeoutMs: number) {
   return null;
 }
 
+/** 在指定作用域内查找图片文件 input（排除视频） */
 function findKuaishouImageInput(scope: ParentNode): HTMLInputElement | null {
   const imageInputSelector = [
     'input[type="file"][accept*="image"]',
@@ -278,6 +290,7 @@ function findKuaishouImageInput(scope: ParentNode): HTMLInputElement | null {
   return null;
 }
 
+/** 查找快手封面截取弹窗（包含"封面截取"和上传标签文案） */
 function findKuaishouCoverDialog(): HTMLElement | null {
   const dialogs = document.querySelectorAll<HTMLElement>(
     '[role="dialog"], .ant-modal-wrap, .ant-modal, .ant-modal-content, .ant-modal-body',
@@ -292,6 +305,7 @@ function findKuaishouCoverDialog(): HTMLElement | null {
   return null;
 }
 
+/** 等待封面弹窗内出现指定文案的按钮 */
 async function waitForKuaishouDialogButton(texts: string[], timeoutMs: number) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -303,6 +317,7 @@ async function waitForKuaishouDialogButton(texts: string[], timeoutMs: number) {
   return null;
 }
 
+/** 在指定作用域内查找匹配文案的可点击按钮 */
 function findKuaishouButton(scope: HTMLElement, texts: string[]) {
   const buttons = scope.querySelectorAll<HTMLElement>('button, [role="button"]');
   for (const button of buttons) {
@@ -312,6 +327,7 @@ function findKuaishouButton(scope: HTMLElement, texts: string[]) {
   return null;
 }
 
+/** 在弹窗内查找"上传封面/本地上传"标签元素 */
 function findKuaishouUploadTabElement(scope: HTMLElement) {
   const headerItems = scope.querySelectorAll<HTMLElement>('[class*="header-title-item"]');
   for (const item of headerItems) {
@@ -335,6 +351,7 @@ function findKuaishouUploadTabElement(scope: HTMLElement) {
   return textElement?.closest<HTMLElement>('[role="tab"], [class*="tab"], [class*="Tab"], button, [role="button"]') || textElement;
 }
 
+/** 等待已上传封面的预览在弹窗内就绪 */
 async function waitForKuaishouUploadedCoverPreview(timeoutMs: number) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -346,6 +363,7 @@ async function waitForKuaishouUploadedCoverPreview(timeoutMs: number) {
   return false;
 }
 
+/** 判断弹窗内上传封面的预览是否已渲染 */
 function isKuaishouUploadedCoverPreviewReady(dialog: HTMLElement) {
   const uploadPanels = dialog.querySelectorAll<HTMLElement>(
     '[class*="cropper-upload"], [class*="upload"]',
@@ -361,6 +379,7 @@ function isKuaishouUploadedCoverPreviewReady(dialog: HTMLElement) {
   return false;
 }
 
+/** 在指定作用域内按文案查找可点击的元素 */
 function findKuaishouTextElement(scope: HTMLElement, texts: string[]) {
   const elements = scope.querySelectorAll<HTMLElement>(
     'button, [role="button"], [role="tab"], [class*="header-title-item"], span, div',
@@ -372,6 +391,7 @@ function findKuaishouTextElement(scope: HTMLElement, texts: string[]) {
   return null;
 }
 
+/** 在指定作用域内按文案查找入口元素（优先按钮类元素） */
 function findKuaishouTextEntry(scope: ParentNode, texts: string[]) {
   const preferredElements = scope.querySelectorAll<HTMLElement>(
     'button, [role="button"], a, [class*="button"], [class*="btn"]',
@@ -383,6 +403,7 @@ function findKuaishouTextEntry(scope: ParentNode, texts: string[]) {
   return findMatchingKuaishouEntry(leafElements, texts, true);
 }
 
+/** 从元素列表中按文案匹配可点击的入口元素 */
 function findMatchingKuaishouEntry(elements: NodeListOf<HTMLElement>, texts: string[], requireLeafText: boolean) {
   for (const element of elements) {
     const text = element.textContent?.replace(/\s+/g, '') || '';
@@ -397,6 +418,7 @@ function findMatchingKuaishouEntry(elements: NodeListOf<HTMLElement>, texts: str
   return null;
 }
 
+/** 判断元素是否可见且可点击（非禁用、有尺寸） */
 function isClickableKuaishouElement(element: HTMLElement) {
   const rect = element.getBoundingClientRect();
   const disabled =
@@ -407,6 +429,7 @@ function isClickableKuaishouElement(element: HTMLElement) {
   return !disabled && isVisible(element) && rect.width > 0 && rect.height > 0;
 }
 
+/** 点击元素（优先 CDP，失败则派发自定义鼠标事件） */
 async function clickKuaishouElement(element: HTMLElement) {
   scrollIntoView(element);
   await waitForIdle(120);
@@ -435,6 +458,7 @@ async function clickKuaishouElement(element: HTMLElement) {
   element.dispatchEvent(new MouseEvent('click', { ...eventInit, buttons: 0 }));
 }
 
+/** 等待快手封面弹窗关闭 */
 async function waitForKuaishouCoverDialogClosed(timeoutMs: number) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -444,6 +468,7 @@ async function waitForKuaishouCoverDialogClosed(timeoutMs: number) {
   return false;
 }
 
+/** 获取当前封面区域图片 src 的拼接签名，用于对比变化 */
 function getKuaishouCoverSignature() {
   const coverRoot = document.querySelector('[class*="high-cover-editor"], [class*="default-cover"]') || document;
   const images = Array.from(coverRoot.querySelectorAll<HTMLImageElement>('img'))
@@ -452,6 +477,7 @@ function getKuaishouCoverSignature() {
   return images.join('|');
 }
 
+/** 等待封面预览签名发生变化（确认上传生效） */
 async function waitForKuaishouCoverPreviewChange(beforeSignature: string, timeoutMs: number) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -462,6 +488,7 @@ async function waitForKuaishouCoverPreviewChange(beforeSignature: string, timeou
   return false;
 }
 
+/** 填充快手发布内容（标题、描述、封面、可见性、定时、原创声明等） */
 export async function fillKuaishouContent(config: PlatformConfig, content: ContentData, isArticle: boolean = false) {
   let uploadMessage = '';
   let coverMessage = '';

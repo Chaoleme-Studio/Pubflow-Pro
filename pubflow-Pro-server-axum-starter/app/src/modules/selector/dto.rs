@@ -21,6 +21,9 @@ pub struct SelectorVersionResponse {
     pub version: i32,
     pub min_app_version: String,
     pub created_at: DateTime<Utc>,
+    pub protocol_version: u8,
+    pub protocol_public_key: String,
+    pub server_time_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

@@ -1,3 +1,4 @@
+/** 判断时间戳是否为今天。 */
 export function isToday(timestamp: number) {
   const date = new Date(timestamp);
   const now = new Date();
@@ -8,6 +9,7 @@ export function isToday(timestamp: number) {
   );
 }
 
+/** 判断时间戳是否处于本月。 */
 export function isCurrentMonth(timestamp: number) {
   const date = new Date(timestamp);
   const now = new Date();

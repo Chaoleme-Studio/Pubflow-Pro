@@ -1,34 +1,80 @@
 <script setup lang="ts">
 import { CloudUpload, Play, Sparkles } from 'lucide-vue-next';
+import { computed } from 'vue';
 import { capabilityCards, platforms, showcaseRows } from '../config/marketing';
 
 defineProps<{
   navigate: (href: string) => void;
 }>();
+
+interface DanmakuItem {
+  id: string;
+  text: string;
+  action: string;
+  top: number;
+  duration: number;
+  delay: number;
+}
+
+const danmakuNames = [
+  '小鱼短视频',
+  '星辰传媒',
+  '橘子工作室',
+  '阿楠运营日记',
+  '北岸内容组',
+  '晴天剪辑',
+  '青禾运营',
+  '南巷工作室',
+  '一页视频',
+  '山海矩阵',
+];
+
+const danmakuActions = [
+  () => `刚刚发布了 ${randomInt(6, 36)} 条视频`,
+  () => `完成 ${randomInt(18, 96)} 条批量发布`,
+  () => `同步了 ${randomInt(3, 8)} 个平台的发布队列`,
+  () => `激活了 Pro ${Math.random() > 0.38 ? '年付' : '月付'}套餐`,
+  () => `处理了 ${randomInt(12, 64)} 条素材任务`,
+  () => `完成今日第 ${randomInt(2, 9)} 轮分发`,
+];
+
+const danmakuItems = computed<DanmakuItem[]>(() => {
+  return Array.from({ length: 8 }, (_, index) => {
+    const name = pick(danmakuNames);
+    const action = pick(danmakuActions)();
+    const minutes = randomInt(1, 18);
+    return {
+      id: `${name}-${index}-${minutes}`,
+      text: `${name} ${action}`,
+      action: `· ${minutes} 分钟前`,
+      top: 8 + ((index * 17 + randomInt(0, 14)) % 84),
+      duration: randomInt(16, 28),
+      delay: index * 2.3 + randomInt(0, 12) / 10,
+    };
+  });
+});
+
+function randomInt(min: number, max: number) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function pick<T>(items: T[]): T {
+  return items[randomInt(0, items.length - 1)];
+}
 </script>
 
 <template>
   <main class="marketing-page">
     <div class="danmaku-layer" aria-hidden="true">
-      <span class="danmaku-item" style="top: 8px; animation-duration: 18s; animation-delay: 0s;">
+      <span
+        v-for="item in danmakuItems"
+        :key="item.id"
+        class="danmaku-item"
+        :style="{ top: `${item.top}px`, animationDuration: `${item.duration}s`, animationDelay: `${item.delay}s` }"
+      >
         <span class="dmk-dot"></span>
-        <span>小鱼短视频 刚刚发布了 12 条视频</span>
-        <span class="dmk-action">· 3 分钟前</span>
-      </span>
-      <span class="danmaku-item" style="top: 40px; animation-duration: 22s; animation-delay: 3s;">
-        <span class="dmk-dot"></span>
-        <span>星辰传媒 完成 48 条批量发布</span>
-        <span class="dmk-action">· 5 分钟前</span>
-      </span>
-      <span class="danmaku-item" style="top: 72px; animation-duration: 16s; animation-delay: 6s;">
-        <span class="dmk-dot"></span>
-        <span>橘子工作室 使用 Selector 自动化发布</span>
-        <span class="dmk-action">· 8 分钟前</span>
-      </span>
-      <span class="danmaku-item" style="top: 20px; animation-duration: 20s; animation-delay: 9s;">
-        <span class="dmk-dot"></span>
-        <span>阿楠运营日记 激活了 Pro 年付套餐</span>
-        <span class="dmk-action">· 12 分钟前</span>
+        <span>{{ item.text }}</span>
+        <span class="dmk-action">{{ item.action }}</span>
       </span>
     </div>
     <section class="hero-section">
@@ -94,7 +140,7 @@ defineProps<{
     <section class="product-showcase">
       <div class="showcase-copy">
         <div class="section-kicker">运营体验</div>
-        <h2>复杂任务藏在背后，前台只保留运营真正要看的东西。</h2>
+        <h2>复杂任务藏在背后，前台只保留运营真正要看的东西</h2>
         <p>素材、账号、平台、发布时间和结果状态放在同一个视图里，减少切换、复制和人工确认。</p>
       </div>
       <div class="product-console-preview">

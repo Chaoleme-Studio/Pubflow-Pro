@@ -1,3 +1,4 @@
+/** 将纯文本描述注入小红书图文编辑器 */
 export function injectXiaohongshuImageDescription(description: string) {
   const editor = Array.from(document.querySelectorAll<HTMLElement>('.tiptap.ProseMirror, [contenteditable="true"]'))
     .find((candidate) => isVisible(candidate));
@@ -38,6 +39,7 @@ export function injectXiaohongshuImageDescription(description: string) {
     : { ok: false, error: '小红书图文描述填充后未同步到编辑器' };
 }
 
+/** 从 DOM 元素中查找 Tiptap 编辑器实例 */
 function findTiptapEditor(element: HTMLElement): any {
   const candidates = [element, ...Array.from(element.querySelectorAll<HTMLElement>('.ProseMirror, .tiptap'))];
   for (const candidate of candidates) {
@@ -47,6 +49,7 @@ function findTiptapEditor(element: HTMLElement): any {
   return null;
 }
 
+/** 将纯文本转换为 HTML 段落结构 */
 function plainTextToHtml(value: string) {
   return value
     .split(/\r?\n/)
@@ -54,6 +57,7 @@ function plainTextToHtml(value: string) {
     .join('');
 }
 
+/** 对字符串进行 HTML 转义，防止 XSS */
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, '&amp;')
@@ -63,6 +67,7 @@ function escapeHtml(value: string) {
     .replace(/'/g, '&#39;');
 }
 
+/** 判断 DOM 元素是否在页面上可见 */
 function isVisible(element: Element) {
   const rect = element.getBoundingClientRect();
   const style = window.getComputedStyle(element);

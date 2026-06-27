@@ -1,7 +1,9 @@
 use aide::transform::TransformOperation;
 use axum::Json;
+use axum::body::Bytes;
 use axum::extract::{Query, State};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -54,10 +56,41 @@ pub async fn activate(
     Ok(ApiResponse::success(service.activate(req, &ip).await?))
 }
 
+pub async fn activate_protocol(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    if !content_type.starts_with("application/octet-stream") {
+        return Err(crate::error::PubFlowError::SelectorProtocol(
+            "PFAP_UNSUPPORTED_MEDIA_TYPE".to_string(),
+        )
+        .into());
+    }
+    let ip = extract_client_ip(&headers);
+    let service = LeaseService::from_state(&state);
+    let bytes = service.activate_protocol(&body, &ip).await?;
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/octet-stream")],
+        bytes,
+    )
+        .into_response())
+}
+
 pub fn activate_docs(op: TransformOperation) -> TransformOperation {
-    op.description("激活订阅 lease，绑定设备")
+    op.description("激活订阅 lease，绑定安装实例")
         .tag("PubFlow Lease")
         .response::<200, ApiResponse<ActivateLeaseResponse>>()
+}
+
+pub fn activate_protocol_docs(op: TransformOperation) -> TransformOperation {
+    op.description("使用 PFAP v1 二进制协议激活订阅 lease")
+        .tag("PubFlow Lease")
 }
 
 /// 验证 lease
@@ -70,7 +103,7 @@ pub async fn verify(
 }
 
 pub fn verify_docs(op: TransformOperation) -> TransformOperation {
-    op.description("验证 lease 有效性，检查设备绑定和过期时间")
+    op.description("验证 lease 有效性，检查安装实例绑定和过期时间")
         .tag("PubFlow Lease")
         .response::<200, ApiResponse<VerifyLeaseResponse>>()
 }
@@ -100,7 +133,7 @@ pub async fn deactivate(
 }
 
 pub fn deactivate_docs(op: TransformOperation) -> TransformOperation {
-    op.description("解绑设备，吊销关联的 lease")
+    op.description("解绑安装实例，吊销关联的 lease")
         .tag("PubFlow Lease")
         .response::<200, ApiResponse<DeactivateLeaseResponse>>()
 }

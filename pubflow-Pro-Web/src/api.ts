@@ -1,6 +1,6 @@
 export type Plan = 'monthly' | 'yearly';
 export type PayChannel = 'wechat' | 'alipay';
-export type Platform = 'macos' | 'windows' | 'linux';
+export type Platform = 'macos' | 'windows' | 'linux' | 'extension';
 
 export interface PlanOption {
   id: Plan;
@@ -9,6 +9,13 @@ export interface PlanOption {
   unit: string;
   note: string;
   amountCents: number;
+  originalAmountCents?: number;
+  discountAmountCents?: number;
+  discountStartAt?: string;
+  discountEndAt?: string;
+  discountEnabled: boolean;
+  isDiscountActive: boolean;
+  savingsCents: number;
 }
 
 export interface DownloadOption {
@@ -33,6 +40,7 @@ export interface AdminLoginResult {
 export interface AdminFilters {
   keyword?: string;
   plan?: string;
+  clientInstallId?: string;
   machineHash?: string;
   paidFrom?: string;
   paidTo?: string;
@@ -54,7 +62,11 @@ export interface AdminLicenseItem {
   batchName?: string;
   userId?: number;
   maxDevices: number;
+  deviceMigrationLimit: number;
+  deviceMigrationCount: number;
+  lastMigratedAt?: string;
   isRevoked: boolean;
+  clientInstallIds: string[];
   machineHashes: string[];
   orderNo?: string;
   orderChannel?: string;
@@ -69,17 +81,86 @@ export interface SelectorVersionItem {
   version: number;
   minAppVersion: string;
   createdAt: string;
+  protocolVersion?: number;
+  protocolPublicKey?: string;
 }
 
 export interface UploadSelectorPayload {
   version: number;
   minAppVersion?: string;
-  selectors: Record<string, Record<string, string>>;
+  selectors: Record<string, unknown>;
 }
 
 export interface ProductCatalog {
   plans: PlanOption[];
   downloads: DownloadOption[];
+}
+
+export interface AppVersionItem {
+  id: string;
+  platform: string;
+  version: string;
+  latestVersion: string;
+  minVersion: string;
+  minAppVersion?: string;
+  downloadUrl: string;
+  releaseNotes: string;
+  forceUpdate: boolean;
+  isActive?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface CreateAppVersionParams {
+  version: string;
+  minAppVersion?: string;
+  downloadUrl: string;
+  releaseNotes?: string;
+  forceUpdate?: boolean;
+  isActive?: boolean;
+}
+
+const EXTENSION_VERSION_STREAM = 'extension';
+
+export interface LicenseLookupResult {
+  plan: string;
+  status: string;
+  maxDevices: number;
+  deviceMigrationLimit: number;
+  deviceMigrationCount: number;
+  activeInstallCount: number;
+  expiresAt?: string;
+  activatedAt?: string;
+}
+
+export interface AdminPlanConfig {
+  id: Plan;
+  name: string;
+  unit?: string;
+  note?: string;
+  originalAmountCents: number;
+  discountAmountCents?: number;
+  discountStartAt?: string;
+  discountEndAt?: string;
+  discountEnabled: boolean;
+  isActive: boolean;
+  sortOrder?: number;
+}
+
+export interface AdminDownloadConfig {
+  code: string;
+  platform: Platform | string;
+  name: string;
+  chip?: string;
+  fileName?: string;
+  href: string;
+  isActive: boolean;
+  sortOrder?: number;
+}
+
+export interface AdminProductCatalogConfig {
+  plans: AdminPlanConfig[];
+  downloads: AdminDownloadConfig[];
 }
 
 export interface AdminOrderItem {
@@ -127,6 +208,7 @@ export interface GenerateLicenseResult {
 export interface AdminLeaseItem {
   id: string;
   activationCode: string;
+  clientInstallId: string;
   machineHash: string;
   platform: string;
   ipAddress: string;
@@ -144,15 +226,66 @@ export interface DauStat {
 }
 
 const FETCH_TIMEOUT_MS = 15_000;
+const API_BASE_URL = (import.meta.env.VITE_PUBFLOW_API_BASE_URL || '').trim().replace(/\/+$/, '');
+
+export const FALLBACK_PRODUCT_CATALOG: ProductCatalog = {
+  plans: [
+    {
+      id: 'monthly',
+      name: '月卡',
+      price: '14.9',
+      unit: '月',
+      note: '适合短期项目和试用',
+      amountCents: 1490,
+      originalAmountCents: 1490,
+      discountEnabled: false,
+      isDiscountActive: false,
+      savingsCents: 0,
+    },
+    {
+      id: 'yearly',
+      name: '年卡',
+      price: '99',
+      unit: '年',
+      note: '适合长期运营团队',
+      amountCents: 9900,
+      originalAmountCents: 9900,
+      discountEnabled: false,
+      isDiscountActive: false,
+      savingsCents: 0,
+    },
+  ],
+  downloads: [
+    {
+      platform: 'extension',
+      name: '离线包 (ZIP)',
+      chip: 'Chrome / Edge / Chromium',
+      fileName: 'pubflow-pro.zip',
+      href: '/downloads/pubflow-pro.zip',
+    },
+    {
+      platform: 'extension',
+      name: 'Chrome 扩展 (CRX)',
+      chip: 'Chrome / Edge / Chromium',
+      fileName: 'pubflow-pro.crx',
+      href: '/downloads/pubflow-pro.crx',
+    },
+  ],
+};
 
 async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await fetch(apiUrl(url), { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
+}
+
+function apiUrl(path: string) {
+  if (/^https?:\/\//i.test(path) || !API_BASE_URL) return path;
+  return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
 export function detectPlatform(): Platform {
@@ -181,10 +314,20 @@ export function validateMachineHash(hash: string): { valid: boolean; error?: str
 }
 
 export async function getProductCatalog(): Promise<ProductCatalog> {
-  const response = await fetchWithTimeout('/v1/product/catalog');
+  let response: Response;
+  try {
+    response = await fetchWithTimeout('/v1/product/catalog');
+  } catch (error) {
+    const detail = error instanceof Error && error.name === 'AbortError'
+      ? '请求超时'
+      : error instanceof Error && error.message
+        ? error.message
+        : '网络不可用';
+    throw new Error(`产品配置加载失败：${detail}`);
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error('产品配置加载失败，请稍后重试');
+    throw new Error(`产品配置加载失败：HTTP ${response.status}`);
   }
   const data = (payload?.data ?? payload) as Record<string, unknown>;
   const plans = arrayOfRecord(data.plans).map((item) => ({
@@ -194,6 +337,13 @@ export async function getProductCatalog(): Promise<ProductCatalog> {
     unit: String(item.unit ?? ''),
     note: String(item.note ?? ''),
     amountCents: Number(item.amount_cents ?? item.amountCents ?? 0),
+    originalAmountCents: numberOrUndefined(item.original_amount_cents ?? item.originalAmountCents),
+    discountAmountCents: numberOrUndefined(item.discount_amount_cents ?? item.discountAmountCents),
+    discountStartAt: stringOrUndefined(item.discount_start_at ?? item.discountStartAt),
+    discountEndAt: stringOrUndefined(item.discount_end_at ?? item.discountEndAt),
+    discountEnabled: Boolean(item.discount_enabled ?? item.discountEnabled),
+    isDiscountActive: Boolean(item.is_discount_active ?? item.isDiscountActive),
+    savingsCents: Number(item.savings_cents ?? item.savingsCents ?? 0),
   }));
   const downloads = arrayOfRecord(data.downloads).map((item) => ({
     platform: normalizePlatform(item.platform) ?? 'macos',
@@ -202,7 +352,300 @@ export async function getProductCatalog(): Promise<ProductCatalog> {
     fileName: String(item.file_name ?? item.fileName ?? ''),
     href: String(item.href ?? ''),
   }));
+  if (!plans.length) {
+    throw new Error('产品配置加载失败：未返回可购买套餐');
+  }
   return { plans, downloads };
+}
+
+export async function getAdminProductCatalog(token: string): Promise<AdminProductCatalogConfig> {
+  const response = await fetchWithTimeout('/v1/admin/product/catalog', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('登录已过期，请重新登录');
+    throw new Error('商品配置加载失败');
+  }
+  return normalizeAdminProductCatalog((payload?.data ?? payload) as Record<string, unknown>);
+}
+
+export async function saveAdminProductCatalog(
+  token: string,
+  config: AdminProductCatalogConfig,
+): Promise<AdminProductCatalogConfig> {
+  const response = await fetchWithTimeout('/v1/admin/product/catalog', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      plans: config.plans.map((item) => ({
+        id: item.id,
+        name: item.name,
+        unit: item.unit,
+        note: item.note,
+        original_amount_cents: item.originalAmountCents,
+        discount_amount_cents: item.discountAmountCents,
+        discount_start_at: dateTimeLocalToIso(item.discountStartAt),
+        discount_end_at: dateTimeLocalToIso(item.discountEndAt),
+        discount_enabled: item.discountEnabled,
+        is_active: item.isActive,
+        sort_order: item.sortOrder,
+      })),
+      downloads: config.downloads.map((item) => ({
+        code: item.code,
+        platform: item.platform,
+        name: item.name,
+        chip: item.chip,
+        file_name: item.fileName,
+        href: item.href,
+        is_active: item.isActive,
+        sort_order: item.sortOrder,
+      })),
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('登录已过期，请重新登录');
+    throw new Error(apiErrorMessage(payload, '商品配置保存失败'));
+  }
+  return normalizeAdminProductCatalog((payload?.data ?? payload) as Record<string, unknown>);
+}
+
+export async function getRecentAppVersions(limit = 3): Promise<AppVersionItem[]> {
+  const params = new URLSearchParams();
+  params.set('platform', EXTENSION_VERSION_STREAM);
+  params.set('limit', String(limit));
+  const response = await fetchWithTimeout(`/v1/product/versions?${params.toString()}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error('版本信息加载失败');
+  }
+  return normalizeVersionList(payload);
+}
+
+export async function listAdminAppVersions(
+  token: string,
+  limit = 20,
+): Promise<AppVersionItem[]> {
+  const params = new URLSearchParams();
+  params.set('platform', EXTENSION_VERSION_STREAM);
+  params.set('limit', String(limit));
+  const response = await fetchWithTimeout(`/v1/admin/versions?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('登录已过期，请重新登录');
+    throw new Error(apiErrorMessage(payload, '版本记录加载失败'));
+  }
+  return normalizeVersionList(payload);
+}
+
+export async function createAdminAppVersion(
+  token: string,
+  params: CreateAppVersionParams,
+): Promise<AppVersionItem> {
+  const response = await fetchWithTimeout('/v1/admin/versions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      platform: EXTENSION_VERSION_STREAM,
+      version: params.version,
+      min_app_version: params.minAppVersion,
+      download_url: params.downloadUrl,
+      release_notes: params.releaseNotes,
+      force_update: params.forceUpdate,
+      is_active: params.isActive,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('登录已过期，请重新登录');
+    throw new Error(apiErrorMessage(payload, '版本发布失败'));
+  }
+  return normalizeVersionItem((payload?.data ?? payload) as Record<string, unknown>);
+}
+
+export async function updateAdminAppVersion(
+  token: string,
+  id: string,
+  params: CreateAppVersionParams,
+): Promise<AppVersionItem> {
+  const response = await fetchWithTimeout(`/v1/admin/versions/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      platform: EXTENSION_VERSION_STREAM,
+      version: params.version,
+      min_app_version: params.minAppVersion,
+      download_url: params.downloadUrl,
+      release_notes: params.releaseNotes,
+      force_update: params.forceUpdate,
+      is_active: params.isActive,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('登录已过期，请重新登录');
+    throw new Error(apiErrorMessage(payload, '版本保存失败'));
+  }
+  return normalizeVersionItem((payload?.data ?? payload) as Record<string, unknown>);
+}
+
+export async function deleteAdminAppVersion(token: string, id: string): Promise<boolean> {
+  const response = await fetchWithTimeout(`/v1/admin/versions/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('登录已过期，请重新登录');
+    throw new Error(apiErrorMessage(payload, '版本删除失败'));
+  }
+  const data = (payload?.data ?? payload) as Record<string, unknown>;
+  return Boolean(data.deleted ?? true);
+}
+
+export async function replaceLicense(
+  token: string,
+  activationCode: string,
+  reason: string,
+  revokeOld: boolean,
+): Promise<{ newActivationCode: string; revokedOld: boolean }> {
+  const response = await fetchWithTimeout('/v1/admin/licenses/replace', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      activation_code: activationCode,
+      reason,
+      revoke_old: revokeOld,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('登录已过期，请重新登录');
+    throw new Error('补发激活码失败');
+  }
+  const data = (payload?.data ?? payload) as Record<string, unknown>;
+  return {
+    newActivationCode: String(data.new_activation_code ?? data.newActivationCode ?? ''),
+    revokedOld: Boolean(data.revoked_old ?? data.revokedOld),
+  };
+}
+
+export async function revokeAdminLicense(
+  token: string,
+  activationCode: string,
+  reason?: string,
+): Promise<boolean> {
+  const response = await fetchWithTimeout('/v1/admin/licenses/revoke', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      activation_code: activationCode,
+      reason,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('登录已过期，请重新登录');
+    throw new Error(apiErrorMessage(payload, '吊销激活码失败'));
+  }
+  const data = (payload?.data ?? payload) as Record<string, unknown>;
+  return Boolean(data.revoked ?? true);
+}
+
+export async function updateLicenseLimits(
+  token: string,
+  activationCode: string,
+  maxDevices: number,
+  deviceMigrationLimit: number,
+  reason?: string,
+): Promise<AdminLicenseItem> {
+  const response = await fetchWithTimeout('/v1/admin/licenses/limits', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      activation_code: activationCode,
+      max_devices: maxDevices,
+      device_migration_limit: deviceMigrationLimit,
+      reason,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('登录已过期，请重新登录');
+    throw new Error('调整设备限制失败');
+  }
+  const data = ((payload?.data ?? payload) as Record<string, unknown>).item as Record<string, unknown> | undefined;
+  return normalizeLicenseItem(data ?? {});
+}
+
+export async function lookupLicense(activationCode: string): Promise<LicenseLookupResult> {
+  const response = await fetchWithTimeout('/v1/license/lookup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ activation_code: activationCode }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error('未找到这个激活码，或服务暂时不可用');
+  }
+  const data = (payload?.data ?? payload) as Record<string, unknown>;
+  return {
+    plan: String(data.plan ?? ''),
+    status: String(data.status ?? ''),
+    maxDevices: Number(data.max_devices ?? data.maxDevices ?? 0),
+    deviceMigrationLimit: Number(data.device_migration_limit ?? data.deviceMigrationLimit ?? 0),
+    deviceMigrationCount: Number(data.device_migration_count ?? data.deviceMigrationCount ?? 0),
+    activeInstallCount: Number(data.active_install_count ?? data.activeInstallCount ?? 0),
+    expiresAt: stringOrUndefined(data.expires_at ?? data.expiresAt),
+    activatedAt: stringOrUndefined(data.activated_at ?? data.activatedAt),
+  };
+}
+
+export async function selfReplaceLicense(activationCode: string, reason?: string): Promise<string> {
+  const response = await fetchWithTimeout('/v1/license/replace', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ activation_code: activationCode, reason }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error('补发失败，请确认旧激活码有效');
+  }
+  const data = (payload?.data ?? payload) as Record<string, unknown>;
+  return String(data.new_activation_code ?? data.newActivationCode ?? '');
+}
+
+export async function selfRevokeLicense(activationCode: string, reason?: string): Promise<boolean> {
+  const response = await fetchWithTimeout('/v1/license/revoke', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ activation_code: activationCode, reason }),
+  });
+  if (!response.ok) {
+    throw new Error('注销失败，请确认激活码有效');
+  }
+  return true;
 }
 
 export async function createOrder(plan: Plan, channel: PayChannel): Promise<OrderResult> {
@@ -319,6 +762,8 @@ export async function getSelectorVersion(token: string): Promise<SelectorVersion
     version: Number(data.version),
     minAppVersion: String(data.min_app_version ?? data.minAppVersion ?? ''),
     createdAt: String(data.created_at ?? data.createdAt ?? ''),
+    protocolVersion: numberOrUndefined(data.protocol_version ?? data.protocolVersion),
+    protocolPublicKey: stringOrUndefined(data.protocol_public_key ?? data.protocolPublicKey),
   };
 }
 
@@ -354,6 +799,7 @@ async function adminGet(path: string, token: string, filters: AdminFilters): Pro
   const params = new URLSearchParams();
   addParam(params, 'keyword', filters.keyword);
   addParam(params, 'plan', filters.plan === 'all' ? '' : filters.plan);
+  addParam(params, 'client_install_id', filters.clientInstallId);
   addParam(params, 'machine_hash', filters.machineHash);
   addParam(params, 'status', filters.status === 'all' ? '' : filters.status);
   addParam(params, 'paid_from', filters.paidFrom);
@@ -393,7 +839,7 @@ function normalizePlan(value: unknown): Plan | undefined {
 }
 
 function normalizePlatform(value: unknown): Platform | undefined {
-  return value === 'macos' || value === 'windows' || value === 'linux' ? value : undefined;
+  return value === 'macos' || value === 'windows' || value === 'linux' || value === 'extension' ? value : undefined;
 }
 
 function stringOrUndefined(value: unknown): string | undefined {
@@ -479,6 +925,7 @@ export async function listAdminLeases(
   return items.map((item) => ({
     id: String(item.id ?? ''),
     activationCode: String(item.activation_code ?? item.activationCode ?? ''),
+    clientInstallId: String(item.client_install_id ?? item.clientInstallId ?? item.machine_hash ?? item.machineHash ?? ''),
     machineHash: String(item.machine_hash ?? item.machineHash ?? ''),
     platform: String(item.platform ?? ''),
     ipAddress: String(item.ip_address ?? item.ipAddress ?? ''),
@@ -502,7 +949,11 @@ function normalizeLicenseItem(item: Record<string, unknown>): AdminLicenseItem {
     batchName: stringOrUndefined(item.batch_name ?? item.batchName),
     userId: numberOrUndefined(item.user_id ?? item.userId),
     maxDevices: Number(item.max_devices ?? item.maxDevices ?? 1),
+    deviceMigrationLimit: Number(item.device_migration_limit ?? item.deviceMigrationLimit ?? 3),
+    deviceMigrationCount: Number(item.device_migration_count ?? item.deviceMigrationCount ?? 0),
+    lastMigratedAt: stringOrUndefined(item.last_migrated_at ?? item.lastMigratedAt),
     isRevoked: Boolean(item.is_revoked ?? item.isRevoked),
+    clientInstallIds: arrayOfString(item.client_install_ids ?? item.clientInstallIds ?? item.machine_hashes ?? item.machineHashes),
     machineHashes: arrayOfString(item.machine_hashes ?? item.machineHashes),
     orderNo: stringOrUndefined(item.order_no ?? item.orderNo),
     orderChannel: stringOrUndefined(item.order_channel ?? item.orderChannel),
@@ -512,6 +963,99 @@ function normalizeLicenseItem(item: Record<string, unknown>): AdminLicenseItem {
     expiresAt: stringOrUndefined(item.expires_at ?? item.expiresAt),
     activatedAt: stringOrUndefined(item.activated_at ?? item.activatedAt),
   };
+}
+
+function normalizeAdminProductCatalog(data: Record<string, unknown>): AdminProductCatalogConfig {
+  return {
+    plans: arrayOfRecord(data.plans).map((item) => ({
+      id: normalizePlan(item.id) ?? 'monthly',
+      name: String(item.name ?? ''),
+      unit: stringOrUndefined(item.unit),
+      note: stringOrUndefined(item.note),
+      originalAmountCents: Number(item.original_amount_cents ?? item.originalAmountCents ?? item.amount_cents ?? item.amountCents ?? 0),
+      discountAmountCents: numberOrUndefined(item.discount_amount_cents ?? item.discountAmountCents),
+      discountStartAt: isoToDateTimeLocal(stringOrUndefined(item.discount_start_at ?? item.discountStartAt)),
+      discountEndAt: isoToDateTimeLocal(stringOrUndefined(item.discount_end_at ?? item.discountEndAt)),
+      discountEnabled: Boolean(item.discount_enabled ?? item.discountEnabled),
+      isActive: Boolean(item.is_active ?? item.isActive ?? true),
+      sortOrder: numberOrUndefined(item.sort_order ?? item.sortOrder),
+    })),
+    downloads: arrayOfRecord(data.downloads)
+      .map((item) => ({
+        code: String(item.code ?? item.platform ?? ''),
+        platform: String(item.platform ?? ''),
+        name: String(item.name ?? ''),
+        chip: stringOrUndefined(item.chip),
+        fileName: stringOrUndefined(item.file_name ?? item.fileName),
+        href: String(item.href ?? ''),
+        isActive: Boolean(item.is_active ?? item.isActive ?? true),
+        sortOrder: numberOrUndefined(item.sort_order ?? item.sortOrder),
+      }))
+      .filter(isExtensionDownloadConfig),
+  };
+}
+
+function normalizeVersionList(payload: unknown): AppVersionItem[] {
+  const body = payload as Record<string, unknown>;
+  const data = (body?.data ?? body) as Record<string, unknown>;
+  const items = data.items ?? data.results ?? data.list;
+  if (Array.isArray(items)) {
+    return (items as Record<string, unknown>[]).map(normalizeVersionItem);
+  }
+  if (data.version || data.latest_version || data.latestVersion) {
+    return [normalizeVersionItem(data)];
+  }
+  return [];
+}
+
+function normalizeVersionItem(item: Record<string, unknown>): AppVersionItem {
+  const version = String(item.version ?? item.latest_version ?? item.latestVersion ?? '');
+  const minVersion = String(item.min_version ?? item.minVersion ?? item.min_app_version ?? item.minAppVersion ?? '');
+  return {
+    id: String(item.id ?? `${item.platform ?? EXTENSION_VERSION_STREAM}-${version}`),
+    platform: String(item.platform ?? EXTENSION_VERSION_STREAM),
+    version,
+    latestVersion: String(item.latest_version ?? item.latestVersion ?? version),
+    minVersion,
+    minAppVersion: stringOrUndefined(item.min_app_version ?? item.minAppVersion ?? minVersion),
+    downloadUrl: String(item.download_url ?? item.downloadUrl ?? ''),
+    releaseNotes: String(item.release_notes ?? item.releaseNotes ?? ''),
+    forceUpdate: Boolean(item.force_update ?? item.forceUpdate),
+    isActive: item.is_active === undefined && item.isActive === undefined
+      ? undefined
+      : Boolean(item.is_active ?? item.isActive),
+    createdAt: String(item.created_at ?? item.createdAt ?? ''),
+    updatedAt: stringOrUndefined(item.updated_at ?? item.updatedAt),
+  };
+}
+
+function isExtensionDownloadConfig(item: AdminDownloadConfig) {
+  return item.platform === 'extension'
+    || item.code === 'zip'
+    || item.code === 'crx'
+    || /\.(zip|crx)$/i.test(item.fileName || item.href);
+}
+
+function apiErrorMessage(payload: unknown, fallback: string) {
+  const body = payload as Record<string, unknown>;
+  const error = body?.error as Record<string, unknown> | undefined;
+  return String(error?.message ?? body?.message ?? fallback);
+}
+
+function isoToDateTimeLocal(value?: string): string | undefined {
+  if (!value) return undefined;
+  const time = new Date(value).getTime();
+  if (!Number.isFinite(time)) return value;
+  const date = new Date(time);
+  const pad = (num: number) => String(num).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function dateTimeLocalToIso(value?: string): string | undefined {
+  if (!value) return undefined;
+  const time = new Date(value).getTime();
+  if (!Number.isFinite(time)) return value;
+  return new Date(time).toISOString();
 }
 
 export async function getDauStats(

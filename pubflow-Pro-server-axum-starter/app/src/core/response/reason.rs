@@ -60,6 +60,8 @@ pub enum Reason {
     Conflict,
     /// 使用次数/变更次数已达上限
     UsageLimitReached,
+    /// 授权绑定设备数量已达上限
+    DeviceLimitReached,
 
     // ==================== 权限 ====================
     /// 权限不足
@@ -112,6 +114,7 @@ impl std::fmt::Display for Reason {
             Self::AlreadyExists => "ALREADY_EXISTS",
             Self::Conflict => "CONFLICT",
             Self::UsageLimitReached => "USAGE_LIMIT_REACHED",
+            Self::DeviceLimitReached => "DEVICE_LIMIT_REACHED",
             Self::PermissionDenied => "PERMISSION_DENIED",
             Self::FileTooLarge => "FILE_TOO_LARGE",
             Self::FileTypeNotAllowed => "FILE_TYPE_NOT_ALLOWED",

@@ -1,5 +1,6 @@
 import type { ContentData, ContentDraft } from '../types';
 
+/** 将话题文本按常见分隔符拆分成去重的话题数组。 */
 export function parseTopics(topicsText: string): string[] {
   return Array.from(
     new Set(
@@ -11,6 +12,7 @@ export function parseTopics(topicsText: string): string[] {
   );
 }
 
+/** 把草稿表单数据组装成统一的内容数据结构。 */
 export function buildContent(draft: ContentDraft): ContentData {
   const contentType = draft.contentType || (draft.imageCacheIds?.length ? 'image' : 'video');
   return {
@@ -38,6 +40,7 @@ export function buildContent(draft: ContentDraft): ContentData {
   };
 }
 
+/** 判断草稿中是否至少有一项可发布内容（标题、正文、媒体等）。 */
 export function hasContent(draft: ContentDraft): boolean {
   return (
     !!draft.title.trim() ||

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { PlatformConfig } from '../../../src/platforms';
-import type { AIProviderConfig, AIProviderSettings, GlobalSettings, PlatformId, PlatformSettings, ServerConfig, WorkspaceSettings } from '../../../src/types';
+import type { AIProviderConfig, AIProviderSettings, GlobalSettings, LicensingSettings, PlatformId, PlatformSettings, ServerConfig, WorkspaceSettings } from '../../../src/types';
 
 export interface ReservedPlatform {
   id: string;
@@ -30,6 +30,7 @@ const props = defineProps<{
   platformSettings: Record<PlatformId, PlatformSettings>;
   globalSettings: GlobalSettings;
   serverConfig: ServerConfig;
+  licensingSettings: LicensingSettings;
   aiSettings: AIProviderSettings;
   workspaceSettings: WorkspaceSettings;
   aiModelOptions: string[];
@@ -41,6 +42,7 @@ const emit = defineEmits<{
   removeAiProvider: [providerId: string];
   applyProviderPreset: [provider: AIProviderConfig];
   fetchAiModels: [];
+  verifyLicense: [];
   selectWorkspace: [];
   clearWorkspace: [];
   restoreFromWorkspace: [];
@@ -49,6 +51,8 @@ const emit = defineEmits<{
 }>();
 
 const showServerKey = ref(false);
+const showActivationCode = ref(false);
+const editingActivationCode = ref(false);
 const devWorkspacePath = import.meta.env.DEV ? __PUBFLOW_DEV_WORKSPACE_PATH__ : '';
 const expandedProviderId = ref('');
 const visibleAIProviderIds = ref<string[]>([]);
@@ -77,6 +81,43 @@ const workspaceStateText = computed(() => {
     unknown: '未知',
   };
   return permissionText[props.workspaceSettings.permission] || '未知';
+});
+
+const licenseFeedbackClass = computed(() => {
+  if (props.licensingSettings.status === 'active') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  }
+  if (
+    props.licensingSettings.status === 'invalid'
+    || props.licensingSettings.status === 'expired'
+    || props.licensingSettings.status === 'device_mismatch'
+  ) {
+    return 'border-red-200 bg-red-50 text-red-700';
+  }
+  return 'border-amber-200 bg-amber-50 text-amber-700';
+});
+
+const licenseFeedbackText = computed(() => {
+  return props.licensingSettings.statusMessage || '';
+});
+
+const activationCodeDisplayValue = computed(() => {
+  if (editingActivationCode.value || showActivationCode.value) {
+    return props.licensingSettings.activationCode;
+  }
+  return maskSecret(props.licensingSettings.activationCode);
+});
+
+const licenseValidUntilText = computed(() => {
+  const value = props.licensingSettings.validUntil;
+  if (typeof value !== 'number' || value <= 0) return '';
+  return new Date(value * 1000).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 });
 
 function hasModelOptions(providerId: string) {
@@ -115,6 +156,27 @@ function toggleAIKey(providerId: string) {
 
 function toggleServerKey() {
   showServerKey.value = !showServerKey.value;
+}
+
+function updateActivationCode(event: Event) {
+  props.licensingSettings.activationCode = (event.target as HTMLInputElement).value;
+  props.licensingSettings.leaseToken = '';
+  props.licensingSettings.validUntil = undefined;
+  props.licensingSettings.serverTime = undefined;
+  props.licensingSettings.status = 'unconfigured';
+  props.licensingSettings.statusMessage = '';
+}
+
+function beginEditActivationCode() {
+  editingActivationCode.value = true;
+}
+
+function finishEditActivationCode() {
+  editingActivationCode.value = false;
+}
+
+function toggleActivationCodeVisibility() {
+  showActivationCode.value = !showActivationCode.value;
 }
 
 function updateProviderApiKey(provider: AIProviderConfig, event: Event) {
@@ -449,6 +511,70 @@ watch(
             </button>
           </div>
         </label>
+      </div>
+    </section>
+
+    <section :class="cardClass">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h2 :class="titleClass">授权保护</h2>
+          <p class="mt-1 text-sm leading-6 text-slate-500">输入激活码后会完成授权验证；未通过时不会启动分发。</p>
+        </div>
+        <span
+          class="rounded-md border px-3 py-1.5 text-xs font-bold"
+          :class="licensingSettings.status === 'active'
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+            : 'border-amber-200 bg-amber-50 text-amber-700'"
+        >
+          {{ licensingSettings.status === 'active' ? '已授权' : '未授权' }}
+        </span>
+      </div>
+
+      <div v-if="licensingSettings.status === 'active'" class="mt-4 max-w-xl rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+        授权有效<span v-if="licenseValidUntilText">，有效期至 {{ licenseValidUntilText }}</span>
+      </div>
+
+      <div class="mt-4 grid max-w-xl gap-4">
+        <label class="grid gap-2">
+          <span :class="fieldLabelClass">激活码</span>
+          <div class="flex rounded-md border border-slate-300 bg-white focus-within:border-rose-500 focus-within:ring-2 focus-within:ring-rose-100">
+            <input
+              :value="activationCodeDisplayValue"
+              class="min-w-0 flex-1 rounded-md px-3 py-2.5 text-sm outline-none"
+              autocomplete="off"
+              placeholder="请输入激活码"
+              @focus="beginEditActivationCode"
+              @blur="finishEditActivationCode"
+              @input="updateActivationCode"
+            />
+            <button
+              class="grid w-11 place-items-center text-slate-400 hover:text-slate-700"
+              type="button"
+              :title="showActivationCode ? '隐藏' : '显示'"
+              @mousedown.prevent
+              @click="toggleActivationCodeVisibility"
+            >
+              <svg v-if="showActivationCode" class="h-4 w-4" viewBox="0 0 24 24">
+                <path d="M2 2l20 20M10.6 10.6A2 2 0 0012 14a2 2 0 001.4-.6M9.9 4.2A10.8 10.8 0 0112 4c5 0 9 5 10 8a13.4 13.4 0 01-3 4.7M6.2 6.2A13.7 13.7 0 002 12c1 3 5 8 10 8a10.9 10.9 0 004.1-.8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+              </svg>
+              <svg v-else class="h-4 w-4" viewBox="0 0 24 24">
+                <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" stroke="currentColor" stroke-width="2" fill="none"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" fill="none"/>
+              </svg>
+            </button>
+          </div>
+        </label>
+      </div>
+
+      <div class="mt-4 flex flex-wrap items-center gap-2">
+        <button class="pf-btn-primary" type="button" @click="emit('verifyLicense')">激活并验证授权</button>
+      </div>
+
+      <div
+        v-if="licenseFeedbackText"
+        class="mt-3 max-w-xl rounded-md border px-3 py-2 text-sm font-semibold"
+        :class="licenseFeedbackClass"
+      >
+        {{ licenseFeedbackText }}
       </div>
     </section>
 

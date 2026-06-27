@@ -11,6 +11,7 @@ import type { AIProviderConfig } from '../../types';
 
 export type AIMode = 'polish' | 'format' | null;
 
+/** 组合式函数：管理文章 AI 润色/排版的流式请求状态。 */
 export function useArticleAI(params: {
   markdownText: Ref<string>;
   onApply: (newText: string) => void;
@@ -23,6 +24,7 @@ export function useArticleAI(params: {
   const aiError = ref('');
   let abortController: AbortController | null = null;
 
+  /** 从设置中读取当前可用的 AI 提供商配置。 */
   async function getActiveProvider(): Promise<AIProviderConfig | null> {
     const settings = await loadSettings();
     const aiSettings = settings.aiSettings;
@@ -37,6 +39,7 @@ export function useArticleAI(params: {
     return provider || null;
   }
 
+  /** 启动 AI 润色或排版流式请求。 */
   async function startAI(mode: 'polish' | 'format') {
     if (aiStreaming.value) return;
 
@@ -92,11 +95,13 @@ export function useArticleAI(params: {
     }
   }
 
+  /** 取消当前 AI 请求。 */
   function cancelAI() {
     abortController?.abort();
     aiStreaming.value = false;
   }
 
+  /** 将 AI 结果应用到编辑器内容中。 */
   function applyResult() {
     if (aiResult.value) {
       onApply(aiResult.value);
@@ -104,6 +109,7 @@ export function useArticleAI(params: {
     }
   }
 
+  /** 关闭 AI 结果对比/重置状态。 */
   function closeDiff() {
     aiMode.value = null;
     aiResult.value = '';

@@ -22,9 +22,7 @@ export interface ArticleImage {
   isBase64: boolean;
 }
 
-/**
- * 从 Markdown 中提取所有图片信息。
- */
+/** 从 Markdown 中提取所有图片信息。 */
 export function extractImages(markdown: string): ArticleImage[] {
   const images: ArticleImage[] = [];
   const regex = /!\[([^\]]*)\]\(([^)]+)\)/g;
@@ -39,12 +37,7 @@ export function extractImages(markdown: string): ArticleImage[] {
   return images;
 }
 
-/**
- * 从 Markdown 中提取 base64 图片并转为 File 对象，返回清理后的 Markdown。
- * 处理两种格式：
- *   1. 内联：![alt](data:...)
- *   2. 引用定义：[img-N]: data:...
- */
+/** 从 Markdown 中提取 base64 图片并转为 File 对象，返回替换占位符后的 Markdown。 */
 export async function extractBase64ImagesAsFiles(markdown: string): Promise<{ cleanedMarkdown: string; files: File[] }> {
   const files: File[] = [];
   let index = 0;
@@ -72,9 +65,7 @@ export async function extractBase64ImagesAsFiles(markdown: string): Promise<{ cl
   return { cleanedMarkdown: cleaned, files };
 }
 
-/**
- * 将 data URL 转为 File 对象。
- */
+/** 将 data URL 转为 File 对象。 */
 function dataUrlToFile(dataUrl: string, fileName: string): File | null {
   try {
     const [header, body] = dataUrl.split(',');
@@ -89,29 +80,18 @@ function dataUrlToFile(dataUrl: string, fileName: string): File | null {
   }
 }
 
-/**
- * 从 Markdown 中提取标题（第一个 # 标题）。
- */
+/** 从 Markdown 中提取标题（第一个 # 标题）。 */
 export function extractTitle(markdown: string): string {
   const match = markdown.match(/^#\s+(.+)$/m);
   return match ? match[1].trim() : '';
 }
 
-/**
- * 将 Markdown 转换为 HTML。
- */
+/** 将 Markdown 转换为 HTML。 */
 export function markdownToHtml(markdown: string): string {
   return md.render(markdown);
 }
 
-/**
- * 将 Markdown 正文填充到 contenteditable 编辑器中。
- * 支持 ProseMirror（小红书、B站、微博、抖音）和 Draft.js（知乎）编辑器。
- *
- * @param field - 文章正文的字段配置（包含选择器）
- * @param markdown - 原始 Markdown 内容
- * @returns 操作结果消息
- */
+/** 将 Markdown 正文填充到 contenteditable 编辑器中，支持 ProseMirror 和 Draft.js 两类编辑器。 */
 export async function fillArticleBody(field: FieldConfig, markdown: string): Promise<string> {
   console.info('[PubFlow] fillArticleBody start', {
     selectors: field.selectors,
@@ -170,10 +150,7 @@ export async function fillArticleBody(field: FieldConfig, markdown: string): Pro
   return '文章正文已填充。';
 }
 
-/**
- * 尝试通过 Tiptap / ProseMirror API 注入 HTML。
- * ProseMirror 维护独立的文档状态，直接修改 innerHTML 不会同步。
- */
+/** 尝试通过 Tiptap / ProseMirror API 注入 HTML。 */
 async function fillProseMirror(editable: HTMLElement, html: string): Promise<boolean> {
   // 1. 优先使用 Tiptap Editor API（element.editor.commands.setContent）
   // 现代 Tiptap 把编辑器实例挂在 DOM 元素的 .editor 属性上
@@ -208,10 +185,7 @@ async function fillProseMirror(editable: HTMLElement, html: string): Promise<boo
   return false;
 }
 
-/**
- * 查找 Tiptap 编辑器实例。
- * Tiptap 将编辑器实例挂在 .tiptap.ProseMirror 元素的 .editor 属性上。
- */
+/** 查找 Tiptap 编辑器实例。 */
 function findTiptapEditor(element: HTMLElement): any {
   const candidates = [element, ...Array.from(element.querySelectorAll('.ProseMirror, .tiptap'))] as HTMLElement[];
   for (const el of candidates) {
@@ -221,10 +195,7 @@ function findTiptapEditor(element: HTMLElement): any {
   return null;
 }
 
-/**
- * 查找旧版 ProseMirror view 实例。
- * B站专栏、小红书长文等编辑器可能不暴露 Tiptap API，只能从 pmViewDesc 回到 ProseMirror 状态层写入。
- */
+/** 查找旧版 ProseMirror view 实例。 */
 function findProseMirrorView(element: HTMLElement): any {
   const candidates = [element, ...Array.from(element.querySelectorAll('.ProseMirror'))] as HTMLElement[];
   for (const el of candidates) {
@@ -234,10 +205,7 @@ function findProseMirrorView(element: HTMLElement): any {
   return null;
 }
 
-/**
- * 用纯文本模式填充文章正文（用于支持原生 Markdown 的平台如知乎）。
- * 直接设置 innerText，平台会自动解析 Markdown 语法。
- */
+/** 用纯文本模式填充文章正文（用于支持原生 Markdown 的平台如知乎）。 */
 export async function fillArticleBodyAsText(field: FieldConfig, markdown: string): Promise<string> {
   const element = findEditableElement(field.selectors);
   if (!element) {
@@ -293,10 +261,7 @@ export async function fillArticleBodyAsText(field: FieldConfig, markdown: string
   return '文章正文已填充（纯文本模式）。';
 }
 
-/**
- * 按“纯文本段落”填充文章正文，主要用于 B站专栏这类对 HTML 换行很敏感的平台。
- * 这里先把 Markdown 清理成普通文本，再按段落插入，避免一个换行被平台渲染成两段大间距。
- */
+/** 按“纯文本段落”填充文章正文，主要用于 B站专栏这类对 HTML 换行敏感的平台。 */
 export async function fillArticleBodyPlainParagraphs(field: FieldConfig, markdown: string): Promise<string> {
   const element = findEditableElement(field.selectors);
   if (!element) {
@@ -329,10 +294,7 @@ export async function fillArticleBodyPlainParagraphs(field: FieldConfig, markdow
   return '文章正文已填充（纯文本段落）。';
 }
 
-/**
- * 通过 Draft.js 可识别的粘贴/段落插入流程填充正文。
- * 知乎专栏是 Draft.js，直接 innerText 或 insertText 容易只进第一行或丢失空行，所以需要分层回退。
- */
+/** 通过 Draft.js 可识别的粘贴/段落插入流程填充正文。 */
 async function fillDraftEditorAsText(editable: HTMLElement, markdown: string) {
   if (!isDraftEditor(editable)) return false;
 
@@ -369,10 +331,7 @@ function isDraftEditor(editable: HTMLElement) {
   );
 }
 
-/**
- * 直接调用 React 绑定的 onPaste 处理器。
- * Draft.js 的真实状态在 React 内部，触发它自己的粘贴逻辑比只派发 DOM 事件更稳定。
- */
+/** 直接调用 React 绑定的 onPaste 处理器，让 Draft.js 走自己的粘贴逻辑。 */
 function callReactPasteHandler(editable: HTMLElement, markdown: string) {
   const props = getReactProps(editable);
   const onPaste = props?.onPaste;
@@ -418,6 +377,7 @@ function hasExpectedText(editable: HTMLElement, markdown: string) {
  * 按行逐段插入纯文本。
  * 这是最后兜底路径：比一次性 paste 慢，但能绕过知乎/B站对多行文本的截断或换行合并。
  */
+/** 按行逐段插入纯文本，作为一次性 paste 失败后的兜底方案。 */
 async function insertPlainTextByParagraph(editable: HTMLElement, markdown: string) {
   const activeDocument = getActiveDocument(editable);
   const paragraphs = markdown.replace(/\r\n?/g, '\n').split('\n');
@@ -437,10 +397,7 @@ async function insertPlainTextByParagraph(editable: HTMLElement, markdown: strin
   }
 }
 
-/**
- * 用 ProseMirror schema 构造纯文本文档。
- * B站文章编辑器直接操作 DOM 会产生额外空段落，通过 schema 写状态可以保留预期换行。
- */
+/** 用 ProseMirror schema 构造纯文本文档。 */
 async function fillProseMirrorPlainText(editable: HTMLElement, text: string): Promise<boolean> {
   const view = findProseMirrorView(editable);
   const schema = view?.state?.schema;
@@ -463,10 +420,7 @@ async function fillProseMirrorPlainText(editable: HTMLElement, text: string): Pr
   }
 }
 
-/**
- * 将 Markdown 转成平台文章编辑器更容易接受的普通文本。
- * 这里保留有限空行，去掉标题/图片/链接语法，避免专栏编辑器把 Markdown 标记当正文噪声。
- */
+/** 将 Markdown 转成平台文章编辑器更容易接受的普通文本。 */
 function normalizeArticlePlainText(markdown: string) {
   return markdown
     .replace(/\r\n?/g, '\n')
@@ -481,9 +435,7 @@ function normalizeArticlePlainText(markdown: string) {
     .trim();
 }
 
-/**
- * 在元素或其子元素中查找 contenteditable 元素。
- */
+/** 在元素或其子元素中查找 contenteditable 元素。 */
 function findContentEditable(element: Element): HTMLElement | null {
   if (element.getAttribute('contenteditable') === 'true') {
     return element as HTMLElement;

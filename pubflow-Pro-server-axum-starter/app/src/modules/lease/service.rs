@@ -1,10 +1,17 @@
 use chrono::{Duration, NaiveDate, Utc};
 use entity::{lease, license, license_event};
+use pubflow_core::selector_protocol::{
+    ActivationProtocolResponsePayload, client_nonce_hex, decode_activation_request,
+    encode_activation_response,
+};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter,
+    QueryOrder, Set, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration as StdDuration, Instant};
 use uuid::Uuid;
 
 use crate::AppState;
@@ -16,6 +23,8 @@ use super::dto::{
     ActivateLeaseRequest, ActivateLeaseResponse, DeactivateLeaseRequest, DeactivateLeaseResponse,
     RenewLeaseRequest, RenewLeaseResponse, VerifyLeaseRequest, VerifyLeaseResponse,
 };
+
+const LEGACY_MACHINE_HASH_PLACEHOLDER: &str = "client-install-id";
 
 /// 根据 license tier 获取功能列表
 fn features_for_tier(tier: &str) -> Vec<String> {
@@ -73,6 +82,10 @@ fn parse_date_end(date_str: &str) -> Option<chrono::DateTime<Utc>> {
 pub struct LeaseService {
     db: DatabaseConnection,
     jwt_service: crate::shared::jwt::JwtService,
+    redis: Option<deadpool_redis::Pool>,
+    protocol_private_key: String,
+    replay_window_seconds: i64,
+    nonce_ttl_seconds: u64,
 }
 
 impl FromState for LeaseService {
@@ -80,11 +93,110 @@ impl FromState for LeaseService {
         Self {
             db: state.db.clone(),
             jwt_service: state.jwt_service.clone(),
+            redis: state.redis.clone(),
+            protocol_private_key: state.config.selector_protocol_private_key.clone(),
+            replay_window_seconds: state.config.selector_replay_window_seconds,
+            nonce_ttl_seconds: state.config.selector_nonce_ttl_seconds,
         }
     }
 }
 
 impl LeaseService {
+    fn request_install_id(
+        client_install_id: Option<String>,
+        legacy_machine_hash: Option<String>,
+    ) -> Result<String, crate::AppError> {
+        client_install_id
+            .or(legacy_machine_hash)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                PubFlowError::Internal("client_install_id is required".to_string()).into()
+            })
+    }
+
+    fn lease_install_id(lease_model: &lease::Model) -> &str {
+        lease_model
+            .client_install_id
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .unwrap_or(&lease_model.machine_hash)
+    }
+
+    fn validate_timestamp(&self, timestamp_ms: i64) -> Result<(), crate::AppError> {
+        let now_ms = Utc::now().timestamp_millis();
+        let skew_ms = (now_ms - timestamp_ms).abs();
+        if skew_ms > self.replay_window_seconds * 1000 {
+            return Err(PubFlowError::SelectorProtocol("PFAP_BAD_TIMESTAMP".to_string()).into());
+        }
+        Ok(())
+    }
+
+    async fn reserve_nonce(&self, nonce_key: &str) -> bool {
+        if let Some(redis) = &self.redis
+            && let Ok(mut conn) = redis.get().await
+        {
+            use deadpool_redis::redis::AsyncCommands;
+            let result: Result<Option<String>, _> = conn
+                .set_options(
+                    nonce_key,
+                    "1",
+                    deadpool_redis::redis::SetOptions::default()
+                        .conditional_set(deadpool_redis::redis::ExistenceCheck::NX)
+                        .with_expiration(deadpool_redis::redis::SetExpiry::EX(
+                            self.nonce_ttl_seconds,
+                        )),
+                )
+                .await;
+            return matches!(result, Ok(Some(_)));
+        }
+
+        reserve_pfap_nonce_in_memory(nonce_key, self.nonce_ttl_seconds)
+    }
+
+    pub async fn activate_protocol(
+        &self,
+        body: &[u8],
+        ip_address: &str,
+    ) -> Result<Vec<u8>, crate::AppError> {
+        let decoded = decode_activation_request(body, &self.protocol_private_key, "pfap-v1")
+            .map_err(|error| PubFlowError::SelectorProtocol(error.to_string()))?;
+        self.validate_timestamp(decoded.timestamp_ms)?;
+
+        let nonce_key = format!(
+            "pfap:{}:{}",
+            decoded.payload.client_install_id,
+            client_nonce_hex(&decoded.client_nonce)
+        );
+        if !self.reserve_nonce(&nonce_key).await {
+            return Err(PubFlowError::SelectorProtocol("PFAP_REPLAY".to_string()).into());
+        }
+
+        let response = self
+            .activate(
+                ActivateLeaseRequest {
+                    activation_code: decoded.payload.activation_code.clone(),
+                    client_install_id: Some(decoded.payload.client_install_id.clone()),
+                    machine_hash: None,
+                    platform: decoded.payload.platform.clone(),
+                    extension_version: decoded.payload.extension_version.clone(),
+                },
+                ip_address,
+            )
+            .await?;
+        let payload = ActivationProtocolResponsePayload {
+            lease_token: response.lease_token,
+            lease_type: response.lease_type,
+            tier: response.tier,
+            features: response.features,
+            valid_from: response.valid_from.timestamp(),
+            valid_until: response.valid_until.timestamp(),
+            server_time: response.server_time.timestamp(),
+        };
+        encode_activation_response(&payload, &decoded.response_key())
+            .map_err(|error| PubFlowError::SelectorProtocol(error.to_string()).into())
+    }
+
     /// 激活 lease（订阅模式）
     pub async fn activate(
         &self,
@@ -92,6 +204,8 @@ impl LeaseService {
         ip_address: &str,
     ) -> Result<ActivateLeaseResponse, crate::AppError> {
         let now = Utc::now();
+        let client_install_id =
+            Self::request_install_id(req.client_install_id.clone(), req.machine_hash.clone())?;
 
         // 1. 查找 license
         let mut license_model = match license::Entity::find()
@@ -109,7 +223,8 @@ impl LeaseService {
                     status: "failed",
                     reason: Some("license_not_found".to_string()),
                     ip_address: ip_address.to_string(),
-                    machine_hash: Some(req.machine_hash.clone()),
+                    machine_hash: None,
+                    client_install_id: Some(client_install_id.clone()),
                     platform: Some(req.platform.clone()),
                     extension_version: req.extension_version.clone(),
                     user_agent: None,
@@ -129,7 +244,8 @@ impl LeaseService {
                 "failed",
                 Some("license_revoked"),
                 ip_address,
-                Some(req.machine_hash.clone()),
+                None,
+                Some(client_install_id.clone()),
                 Some(req.platform.clone()),
                 req.extension_version.clone(),
             ))
@@ -147,7 +263,8 @@ impl LeaseService {
                 "failed",
                 Some("license_expired"),
                 ip_address,
-                Some(req.machine_hash.clone()),
+                None,
+                Some(client_install_id.clone()),
                 Some(req.platform.clone()),
                 req.extension_version.clone(),
             ))
@@ -177,25 +294,67 @@ impl LeaseService {
             .filter(lease::Column::IsRevoked.eq(false))
             .all(&txn)
             .await?;
-        let unique_machines: std::collections::HashSet<String> =
-            all_leases.iter().map(|l| l.machine_hash.clone()).collect();
-        if !unique_machines.contains(&req.machine_hash)
-            && unique_machines.len() as i32 >= license_model.max_devices
+        let unique_installs: HashSet<String> = all_leases
+            .iter()
+            .map(Self::lease_install_id)
+            .map(ToOwned::to_owned)
+            .collect();
+        let mut migrated_install_id: Option<String> = None;
+        let mut migrated_lease_count = 0u64;
+        if !unique_installs.contains(&client_install_id)
+            && unique_installs.len() as i32 >= license_model.max_devices
         {
-            txn.rollback().await?;
-            self.log_event(LicenseEventInput::from_license(
-                &license_model,
-                None,
-                "activate",
-                "failed",
-                Some("device_limit_reached"),
-                ip_address,
-                Some(req.machine_hash.clone()),
-                Some(req.platform.clone()),
-                req.extension_version.clone(),
-            ))
-            .await;
-            return Err(PubFlowError::DeviceLimitReached.into());
+            if license_model.device_migration_count >= license_model.device_migration_limit {
+                txn.rollback().await?;
+                self.log_event(LicenseEventInput::from_license(
+                    &license_model,
+                    None,
+                    "activate",
+                    "failed",
+                    Some("device_limit_reached"),
+                    ip_address,
+                    None,
+                    Some(client_install_id.clone()),
+                    Some(req.platform.clone()),
+                    req.extension_version.clone(),
+                ))
+                .await;
+                return Err(PubFlowError::DeviceLimitReached.into());
+            }
+
+            let Some(install_to_revoke) = oldest_active_install_id(&all_leases, &client_install_id)
+            else {
+                txn.rollback().await?;
+                return Err(PubFlowError::DeviceLimitReached.into());
+            };
+            let revoked = lease::Entity::update_many()
+                .filter(lease::Column::LicenseId.eq(license_model.id))
+                .filter(lease::Column::IsRevoked.eq(false))
+                .filter(
+                    Condition::any()
+                        .add(lease::Column::ClientInstallId.eq(&install_to_revoke))
+                        .add(lease::Column::MachineHash.eq(&install_to_revoke)),
+                )
+                .set(lease::ActiveModel {
+                    is_revoked: Set(true),
+                    updated_at: Set(now.into()),
+                    ..Default::default()
+                })
+                .exec(&txn)
+                .await?;
+            if revoked.rows_affected == 0 {
+                txn.rollback().await?;
+                return Err(PubFlowError::DeviceLimitReached.into());
+            }
+
+            let mut active_license: license::ActiveModel = license_model.clone().into();
+            active_license.device_migration_count =
+                Set(license_model.device_migration_count.saturating_add(1));
+            active_license.last_migrated_at = Set(Some(now.into()));
+            active_license.updated_at = Set(now.into());
+            license_model = active_license.update(&txn).await?;
+            migrated_install_id = Some(install_to_revoke);
+            migrated_lease_count = revoked.rows_affected;
         }
 
         // 4. 生成 lease
@@ -212,7 +371,8 @@ impl LeaseService {
         let lease_claims = LeaseClaims {
             lease_id: Uuid::new_v4().to_string(),
             license_id: license_model.id.to_string(),
-            machine_hash: req.machine_hash.clone(),
+            client_install_id: client_install_id.clone(),
+            machine_hash: None,
             lease_type: "subscription".to_string(),
             tier: tier.clone(),
             features: features.clone(),
@@ -241,7 +401,8 @@ impl LeaseService {
             policy_version: Set(1),
             is_revoked: Set(false),
             ip_address: Set(ip_address.to_string()),
-            machine_hash: Set(req.machine_hash.clone()),
+            machine_hash: Set(LEGACY_MACHINE_HASH_PLACEHOLDER.to_string()),
+            client_install_id: Set(Some(client_install_id.clone())),
             platform: Set(req.platform.clone()),
             created_at: Set(now.into()),
             updated_at: Set(now.into()),
@@ -250,6 +411,24 @@ impl LeaseService {
         .await?;
 
         txn.commit().await?;
+        if let Some(revoked_install_id) = migrated_install_id {
+            self.log_event(LicenseEventInput::from_license(
+                &license_model,
+                Some(new_lease.id),
+                "device_migrate",
+                "success",
+                Some(&format!(
+                    "auto_revoke_old_install:{revoked_install_id}:{migrated_lease_count}"
+                )),
+                ip_address,
+                None,
+                Some(client_install_id.clone()),
+                Some(new_lease.platform.clone()),
+                req.extension_version.clone(),
+            ))
+            .await;
+        }
+
         self.log_event(LicenseEventInput::from_license(
             &license_model,
             Some(new_lease.id),
@@ -257,7 +436,8 @@ impl LeaseService {
             "success",
             None,
             ip_address,
-            Some(new_lease.machine_hash.clone()),
+            None,
+            Some(client_install_id),
             Some(new_lease.platform.clone()),
             req.extension_version.clone(),
         ))
@@ -280,6 +460,8 @@ impl LeaseService {
         req: VerifyLeaseRequest,
     ) -> Result<VerifyLeaseResponse, crate::AppError> {
         let now = Utc::now();
+        let client_install_id =
+            Self::request_install_id(req.client_install_id.clone(), req.machine_hash.clone())?;
 
         // 1. 验证 lease token 有效性（JWT 验签 + 过期检查）
         let _claims = self
@@ -310,7 +492,7 @@ impl LeaseService {
             self.log_event_for_lease(
                 "verify",
                 "failed",
-                &req.machine_hash,
+                &client_install_id,
                 Some("lease_revoked"),
                 &event_lease,
             )
@@ -318,8 +500,8 @@ impl LeaseService {
             return Ok(response);
         }
 
-        // 4. 检查设备匹配（直接比较 lease 表中的 machine_hash）
-        if lease_model.machine_hash != req.machine_hash {
+        // 4. 检查安装实例匹配
+        if Self::lease_install_id(&lease_model) != client_install_id {
             let event_lease = lease_model.clone();
             let response = VerifyLeaseResponse {
                 valid: false,
@@ -334,7 +516,7 @@ impl LeaseService {
             self.log_event_for_lease(
                 "verify",
                 "failed",
-                &req.machine_hash,
+                &client_install_id,
                 Some("device_mismatch"),
                 &event_lease,
             )
@@ -359,7 +541,7 @@ impl LeaseService {
             self.log_event_for_lease(
                 "verify",
                 "failed",
-                &req.machine_hash,
+                &client_install_id,
                 Some("lease_expired"),
                 &event_lease,
             )
@@ -387,8 +569,14 @@ impl LeaseService {
             server_time: now,
             expires_in_seconds,
         };
-        self.log_event_for_lease("verify", "success", &req.machine_hash, None, &updated_lease)
-            .await;
+        self.log_event_for_lease(
+            "verify",
+            "success",
+            &client_install_id,
+            None,
+            &updated_lease,
+        )
+        .await;
         Ok(response)
     }
 
@@ -398,6 +586,8 @@ impl LeaseService {
         req: RenewLeaseRequest,
     ) -> Result<RenewLeaseResponse, crate::AppError> {
         let now = Utc::now();
+        let client_install_id =
+            Self::request_install_id(req.client_install_id.clone(), req.machine_hash.clone())?;
 
         // 1. 查找当前 lease
         let lease_model = lease::Entity::find()
@@ -414,8 +604,8 @@ impl LeaseService {
             return Err(PubFlowError::InvalidOrderState.into());
         }
 
-        // 3. 检查设备匹配（直接比较 lease 表中的 machine_hash）
-        if lease_model.machine_hash != req.machine_hash {
+        // 3. 检查安装实例匹配
+        if Self::lease_install_id(&lease_model) != client_install_id {
             return Err(PubFlowError::DeviceNotBound.into());
         }
 
@@ -446,7 +636,8 @@ impl LeaseService {
         let lease_claims = LeaseClaims {
             lease_id: lease_model.id.to_string(),
             license_id: lease_model.license_id.to_string(),
-            machine_hash: lease_model.machine_hash.clone(),
+            client_install_id: client_install_id.clone(),
+            machine_hash: None,
             lease_type: lease_model.lease_type.clone(),
             tier: lease_model.tier.clone(),
             features: features.clone(),
@@ -475,7 +666,8 @@ impl LeaseService {
             "success",
             None,
             "unknown",
-            Some(updated.machine_hash.clone()),
+            None,
+            Some(client_install_id),
             Some(updated.platform.clone()),
             Some(updated.min_extension_version.clone()),
         ))
@@ -494,6 +686,8 @@ impl LeaseService {
         req: DeactivateLeaseRequest,
     ) -> Result<DeactivateLeaseResponse, crate::AppError> {
         let now = Utc::now();
+        let client_install_id =
+            Self::request_install_id(req.client_install_id.clone(), req.machine_hash.clone())?;
 
         // 1. 查找 license
         let license_model = license::Entity::find()
@@ -502,10 +696,10 @@ impl LeaseService {
             .await?
             .ok_or(PubFlowError::LicenseNotFound)?;
 
-        // 2. 批量吊销该机器码关联的所有 lease（单条 UPDATE 语句）
+        // 2. 批量吊销该安装实例关联的所有 lease（单条 UPDATE 语句）
         let result = lease::Entity::update_many()
             .filter(lease::Column::LicenseId.eq(license_model.id))
-            .filter(lease::Column::MachineHash.eq(&req.machine_hash))
+            .filter(lease::Column::ClientInstallId.eq(&client_install_id))
             .filter(lease::Column::IsRevoked.eq(false))
             .set(lease::ActiveModel {
                 is_revoked: Set(true),
@@ -521,7 +715,8 @@ impl LeaseService {
             "success",
             Some(&format!("revoked_{}_leases", result.rows_affected)),
             "unknown",
-            Some(req.machine_hash.clone()),
+            None,
+            Some(client_install_id),
             None,
             None,
         ))
@@ -558,6 +753,11 @@ impl LeaseService {
             items.push(super::dto::AdminLeaseItem {
                 id: event.id.to_string(),
                 activation_code: event.activation_code.unwrap_or_default(),
+                client_install_id: event
+                    .client_install_id
+                    .clone()
+                    .or_else(|| event.machine_hash.clone())
+                    .unwrap_or_default(),
                 machine_hash: event.machine_hash.unwrap_or_default(),
                 platform: event.platform.unwrap_or_default(),
                 ip_address: event.ip_address,
@@ -616,13 +816,16 @@ impl LeaseService {
             if event.event_type == "activate" && event.status == "success" {
                 entry.0 += 1;
             }
-            if let Some(machine_hash) = &event.machine_hash
+            if let Some(client_install_id) = event
+                .client_install_id
+                .as_ref()
+                .or(event.machine_hash.as_ref())
                 && matches!(
                     event.event_type.as_str(),
-                    "activate" | "verify" | "renew" | "selector_fetch"
+                    "activate" | "verify" | "renew" | "selector_fetch" | "device_migrate"
                 )
             {
-                entry.1.insert(machine_hash.clone());
+                entry.1.insert(client_install_id.clone());
             }
         }
 
@@ -650,7 +853,7 @@ impl LeaseService {
         &self,
         event_type: &'static str,
         status: &'static str,
-        machine_hash: &str,
+        client_install_id: &str,
         reason: Option<&str>,
         lease_model: &lease::Model,
     ) {
@@ -669,7 +872,8 @@ impl LeaseService {
             status,
             reason,
             &lease_model.ip_address,
-            Some(machine_hash.to_string()),
+            None,
+            Some(client_install_id.to_string()),
             Some(lease_model.platform.clone()),
             Some(lease_model.min_extension_version.clone()),
         ))
@@ -687,6 +891,7 @@ impl LeaseService {
             reason: Set(input.reason),
             ip_address: Set(input.ip_address),
             machine_hash: Set(input.machine_hash),
+            client_install_id: Set(input.client_install_id),
             platform: Set(input.platform),
             extension_version: Set(input.extension_version),
             user_agent: Set(input.user_agent),
@@ -721,6 +926,7 @@ struct LicenseEventInput {
     reason: Option<String>,
     ip_address: String,
     machine_hash: Option<String>,
+    client_install_id: Option<String>,
     platform: Option<String>,
     extension_version: Option<String>,
     user_agent: Option<String>,
@@ -736,6 +942,7 @@ impl LicenseEventInput {
         reason: Option<&str>,
         ip_address: &str,
         machine_hash: Option<String>,
+        client_install_id: Option<String>,
         platform: Option<String>,
         extension_version: Option<String>,
     ) -> Self {
@@ -748,6 +955,7 @@ impl LicenseEventInput {
             reason: reason.map(ToOwned::to_owned),
             ip_address: ip_address.to_string(),
             machine_hash,
+            client_install_id,
             platform,
             extension_version,
             user_agent: None,
@@ -761,7 +969,8 @@ impl LicenseEventInput {
 struct LeaseClaims {
     pub lease_id: String,
     pub license_id: String,
-    pub machine_hash: String,
+    pub client_install_id: String,
+    pub machine_hash: Option<String>,
     pub lease_type: String,
     pub tier: String,
     pub features: Vec<String>,
@@ -769,4 +978,47 @@ struct LeaseClaims {
     pub valid_until: i64,
     pub min_extension_version: String,
     pub policy_version: i32,
+}
+
+fn oldest_active_install_id(
+    leases: &[lease::Model],
+    new_client_install_id: &str,
+) -> Option<String> {
+    let mut oldest_by_install: HashMap<String, chrono::DateTime<chrono::FixedOffset>> =
+        HashMap::new();
+    for lease_model in leases {
+        let install_id = LeaseService::lease_install_id(lease_model);
+        if install_id == new_client_install_id {
+            continue;
+        }
+        let created_at = lease_model.created_at;
+        oldest_by_install
+            .entry(install_id.to_string())
+            .and_modify(|current| {
+                if created_at < *current {
+                    *current = created_at;
+                }
+            })
+            .or_insert(created_at);
+    }
+    oldest_by_install
+        .into_iter()
+        .min_by_key(|(_, created_at)| *created_at)
+        .map(|(install_id, _)| install_id)
+}
+
+fn reserve_pfap_nonce_in_memory(key: &str, ttl_seconds: u64) -> bool {
+    static NONCES: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    let now = Instant::now();
+    let ttl = StdDuration::from_secs(ttl_seconds);
+    let mut nonces = NONCES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .expect("nonce map mutex poisoned");
+    nonces.retain(|_, expires_at| *expires_at > now);
+    if nonces.contains_key(key) {
+        return false;
+    }
+    nonces.insert(key.to_string(), now + ttl);
+    true
 }

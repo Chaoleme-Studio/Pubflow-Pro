@@ -124,82 +124,87 @@ const CATALOG_SEEDS: &[CatalogSeed] = &[
     },
     CatalogSeed {
         kind: "download",
-        code: "macos",
-        name: "macOS",
+        code: "zip",
+        name: "离线包 (ZIP)",
         price: None,
         unit: None,
-        note: None,
+        note: Some("解压后通过开发者模式加载，推荐使用。"),
         amount_cents: None,
-        platform: Some("macos"),
-        chip: Some("Apple Silicon / Intel"),
-        file_name: Some("PubFlow-MachineID-macOS.dmg"),
-        href: Some("/download-files/pubflow-native-macos.dmg"),
+        platform: Some("extension"),
+        chip: Some("Chrome / Edge / Chromium"),
+        file_name: Some("pubflow-pro.zip"),
+        href: Some("/downloads/pubflow-pro.zip"),
         sort_order: 100,
     },
     CatalogSeed {
         kind: "download",
-        code: "windows",
-        name: "Windows",
+        code: "crx",
+        name: "Chrome 扩展 (CRX)",
         price: None,
         unit: None,
-        note: None,
+        note: Some("部分浏览器可能限制 CRX 安装，无法安装时请使用 ZIP。"),
         amount_cents: None,
-        platform: Some("windows"),
-        chip: Some("Windows 10/11 x64"),
-        file_name: Some("PubFlow-MachineID-Windows.exe"),
-        href: Some("/download-files/pubflow-native-windows.exe"),
+        platform: Some("extension"),
+        chip: Some("Chrome / Edge / Chromium"),
+        file_name: Some("pubflow-pro.crx"),
+        href: Some("/downloads/pubflow-pro.crx"),
         sort_order: 110,
-    },
-    CatalogSeed {
-        kind: "download",
-        code: "linux",
-        name: "Linux",
-        price: None,
-        unit: None,
-        note: None,
-        amount_cents: None,
-        platform: Some("linux"),
-        chip: Some("x86_64 / arm64"),
-        file_name: Some("PubFlow-MachineID-Linux.AppImage"),
-        href: Some("/download-files/pubflow-native-linux.AppImage"),
-        sort_order: 120,
     },
 ];
 
 async fn seed_product_catalog(db: &DatabaseConnection) -> Result<(), AppError> {
     for item in CATALOG_SEEDS {
-        if product_catalog::Entity::find()
+        let existing = product_catalog::Entity::find()
             .filter(product_catalog::Column::Kind.eq(item.kind))
             .filter(product_catalog::Column::Code.eq(item.code))
             .one(db)
-            .await?
-            .is_some()
-        {
+            .await?;
+        if item.kind == "plan" && existing.is_some() {
             continue;
         }
-
         let now = Utc::now();
-        product_catalog::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            kind: Set(item.kind.to_string()),
-            code: Set(item.code.to_string()),
-            name: Set(item.name.to_string()),
-            price: Set(item.price.map(ToOwned::to_owned)),
-            unit: Set(item.unit.map(ToOwned::to_owned)),
-            note: Set(item.note.map(ToOwned::to_owned)),
-            amount_cents: Set(item.amount_cents),
-            platform: Set(item.platform.map(ToOwned::to_owned)),
-            chip: Set(item.chip.map(ToOwned::to_owned)),
-            file_name: Set(item.file_name.map(ToOwned::to_owned)),
-            href: Set(item.href.map(ToOwned::to_owned)),
-            sort_order: Set(item.sort_order),
-            is_active: Set(true),
-            created_at: Set(now.into()),
-            updated_at: Set(now.into()),
+        let is_new = existing.is_none();
+        let mut active = if let Some(existing) = existing {
+            existing.into()
+        } else {
+            product_catalog::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                kind: Set(item.kind.to_string()),
+                code: Set(item.code.to_string()),
+                created_at: Set(now.into()),
+                ..Default::default()
+            }
+        };
+        active.name = Set(item.name.to_string());
+        active.price = Set(item.price.map(ToOwned::to_owned));
+        active.unit = Set(item.unit.map(ToOwned::to_owned));
+        active.note = Set(item.note.map(ToOwned::to_owned));
+        active.amount_cents = Set(item.amount_cents);
+        active.original_amount_cents = Set(item.amount_cents);
+        active.platform = Set(item.platform.map(ToOwned::to_owned));
+        active.chip = Set(item.chip.map(ToOwned::to_owned));
+        active.file_name = Set(item.file_name.map(ToOwned::to_owned));
+        active.href = Set(item.href.map(ToOwned::to_owned));
+        active.sort_order = Set(item.sort_order);
+        active.is_active = Set(true);
+        active.updated_at = Set(now.into());
+        if is_new {
+            active.insert(db).await?;
+        } else {
+            active.update(db).await?;
         }
-        .insert(db)
-        .await?;
     }
+
+    product_catalog::Entity::update_many()
+        .filter(product_catalog::Column::Kind.eq("download"))
+        .filter(product_catalog::Column::Code.is_not_in(["zip", "crx"]))
+        .set(product_catalog::ActiveModel {
+            is_active: Set(false),
+            updated_at: Set(Utc::now().into()),
+            ..Default::default()
+        })
+        .exec(db)
+        .await?;
 
     Ok(())
 }
@@ -248,6 +253,9 @@ async fn seed_account(db: &DatabaseConnection, account: &DemoAccount) -> Result<
         source_channel: Set("official".to_string()),
         batch_id: Set(None),
         max_devices: Set(1),
+        device_migration_limit: Set(3),
+        device_migration_count: Set(0),
+        last_migrated_at: Set(None),
         activated_at: Set(Some(paid_at.into())),
         expires_at: Set(Some(expires_at.into())),
         is_revoked: Set(false),
@@ -293,6 +301,7 @@ async fn seed_account(db: &DatabaseConnection, account: &DemoAccount) -> Result<
             is_revoked: Set(false),
             ip_address: Set(lease_ips[i as usize].to_string()),
             machine_hash: Set(account.machine_hash.to_string()),
+            client_install_id: Set(Some(account.machine_hash.to_string())),
             platform: Set(account.platform.to_string()),
             created_at: Set(created.into()),
             updated_at: Set(created.into()),
@@ -342,13 +351,21 @@ async fn seed_lease_if_missing(db: &DatabaseConnection, user_id: i32) -> Result<
 
     for i in 0..3u8 {
         let created = now - Duration::hours((i as i64) * 8);
+        let lease_token = format!("demo-jwt-{}-{}-{}", lic.id, machine_hash, i);
+        let existing_token = lease::Entity::find()
+            .filter(lease::Column::LeaseToken.eq(&lease_token))
+            .one(db)
+            .await?;
+        if existing_token.is_some() {
+            continue;
+        }
         lease::ActiveModel {
             id: Set(Uuid::new_v4()),
             license_id: Set(lic.id),
             lease_type: Set("subscription".to_string()),
             tier: Set("pro".to_string()),
             features: Set(r#"["publish","batch","selector-updates"]"#.to_string()),
-            lease_token: Set(format!("demo-jwt-{}-{}", machine_hash, i)),
+            lease_token: Set(lease_token),
             valid_from: Set(lic.activated_at.unwrap_or(lic.created_at).into()),
             valid_until: Set(valid_until.into()),
             min_extension_version: Set("0.1.0".to_string()),
@@ -356,6 +373,7 @@ async fn seed_lease_if_missing(db: &DatabaseConnection, user_id: i32) -> Result<
             is_revoked: Set(false),
             ip_address: Set(ips[i as usize].to_string()),
             machine_hash: Set(machine_hash.clone()),
+            client_install_id: Set(Some(machine_hash.clone())),
             platform: Set("unknown".to_string()),
             created_at: Set(created.into()),
             updated_at: Set(created.into()),

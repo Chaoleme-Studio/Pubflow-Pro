@@ -6,6 +6,7 @@
  * 适用范围：抖音视频封面弹窗。
  * 文章封面编辑器没有 Semi Upload 组件，不能调用这个函数。
  */
+/** 在抖音页面主世界注入封面文件到 Semi Upload 组件。 */
 export async function injectDouyinCover(
   fileName: string,
   fileType: string,
@@ -31,6 +32,7 @@ export async function injectDouyinCover(
       state?: Record<string, unknown>;
     }
 
+    /** 沿 React fiber 向上查找 Semi Upload 组件实例。 */
     function findUploadInstance(el: Element): UploadInstance | null {
       // Semi Upload 的公开 DOM 只有壳，真正的 fileList 和 handleChange 在 React class instance 上。
       // content script 处于隔离世界拿不到这些对象，所以必须在 MAIN world 沿 React fiber 往上找 stateNode。
@@ -62,11 +64,13 @@ export async function injectDouyinCover(
       return null;
     }
 
+    /** 判断元素是否在视觉可见。 */
     function isVisible(el: Element) {
       const rect = el.getBoundingClientRect();
       return Boolean(rect.width || rect.height || el.getClientRects().length);
     }
 
+    /** 根据可见性、文案、样式和文件列表状态给 Upload 候选元素打分。 */
     function scoreUpload(el: Element, instance: UploadInstance) {
       const text = el.textContent?.trim() || '';
       const className = typeof (el as HTMLElement).className === 'string' ? (el as HTMLElement).className : '';
@@ -147,6 +151,7 @@ export async function injectDouyinCover(
  * 因此这里在 MAIN world 临时 patch HTMLInputElement.prototype.click，
  * 捕获第 3 步产生的临时 input，并直接派发 input/change。
  */
+/** 在抖音文章封面编辑器捕获临时 file input 并注入封面文件。 */
 export async function injectDouyinArticleCover(
   fileName: string,
   fileType: string,
@@ -160,11 +165,13 @@ export async function injectDouyinArticleCover(
     }
     const file = new File([byteArray], fileName, { type: fileType });
 
+    /** 判断元素是否视觉可见。 */
     function isVisible(el: Element) {
       const rect = el.getBoundingClientRect();
       return Boolean(rect.width || rect.height || el.getClientRects().length);
     }
 
+    /** 查找当前打开的文章封面编辑器弹窗。 */
     function findArticleCoverEditor(): HTMLElement | null {
       // 只认文章封面编辑器：必须同时包含“编辑封面 / 替换封面 / 完成”。
       // 视频封面弹窗文案是“设置横封面/设置竖封面”，不能混用。
@@ -180,6 +187,7 @@ export async function injectDouyinArticleCover(
       return null;
     }
 
+    /** 在编辑器弹窗内查找“替换封面”按钮。 */
     function findReplaceButton(scope: HTMLElement): HTMLElement | null {
       const buttons = scope.querySelectorAll<HTMLElement>('button, [role="button"], span, div');
       for (const button of buttons) {
@@ -191,6 +199,7 @@ export async function injectDouyinArticleCover(
       return null;
     }
 
+    /** 将构造好的 File 对象写入 input 并派发 input/change 事件。 */
     function assignFile(input: HTMLInputElement) {
       // 与用户手动选择文件后的浏览器状态保持一致：
       // input.files 不可直接赋数组，需要通过 DataTransfer 构造 FileList。

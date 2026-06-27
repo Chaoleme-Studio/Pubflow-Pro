@@ -22,6 +22,7 @@ const MAIN_KEY_ID = 'main';
 
 let cachedKey: CryptoKey | null = null;
 
+/** 将 Uint8Array 编码为 base64 字符串。 */
 function bytesToBase64(bytes: Uint8Array) {
   let binary = '';
   bytes.forEach((byte) => {
@@ -30,11 +31,13 @@ function bytesToBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
+/** 将 base64 字符串解码为 Uint8Array。 */
 function base64ToBytes(value: string) {
   const binary = atob(value);
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 
+/** 打开用于保存加密密钥的 IndexedDB。 */
 function openKeyDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(KEY_DB_NAME, KEY_DB_VERSION);
@@ -49,6 +52,7 @@ function openKeyDb(): Promise<IDBDatabase> {
   });
 }
 
+/** 从 IndexedDB 读取已存储的 AES 密钥。 */
 async function readStoredKey(): Promise<CryptoKey | null> {
   const db = await openKeyDb();
   return new Promise((resolve, reject) => {
@@ -64,6 +68,7 @@ async function readStoredKey(): Promise<CryptoKey | null> {
   });
 }
 
+/** 将 AES 密钥持久化到 IndexedDB。 */
 async function writeStoredKey(key: CryptoKey): Promise<void> {
   const db = await openKeyDb();
   return new Promise((resolve, reject) => {
@@ -79,6 +84,7 @@ async function writeStoredKey(key: CryptoKey): Promise<void> {
   });
 }
 
+/** 获取或生成加密密钥；优先复用缓存，再从 IndexedDB 或旧版 chrome.storage 迁移。 */
 async function getOrCreateKey(): Promise<CryptoKey> {
   if (cachedKey) return cachedKey;
 
@@ -106,6 +112,7 @@ async function getOrCreateKey(): Promise<CryptoKey> {
   return cachedKey;
 }
 
+/** 从 chrome.storage.local 加载整个加密密钥仓库。 */
 async function loadStore(): Promise<SecretStore> {
   const stored = await browser.storage.local.get(STORAGE_KEYS.secrets);
   const store = stored[STORAGE_KEYS.secrets] as SecretStore | undefined;
@@ -113,10 +120,12 @@ async function loadStore(): Promise<SecretStore> {
   return { version: 1, secrets: {} };
 }
 
+/** 将整个加密密钥仓库写回 chrome.storage.local。 */
 async function saveStore(store: SecretStore) {
   await browser.storage.local.set({ [STORAGE_KEYS.secrets]: store });
 }
 
+/** 读取并解密指定 ID 的密钥。 */
 export async function loadSecret(secretId: string): Promise<string> {
   const store = await loadStore();
   const record = store.secrets[secretId];
@@ -131,6 +140,7 @@ export async function loadSecret(secretId: string): Promise<string> {
   return new TextDecoder().decode(decrypted);
 }
 
+/** 加密并保存指定 ID 的密钥；值为空时删除该密钥。 */
 export async function saveSecret(secretId: string, value: string) {
   const store = await loadStore();
   if (!value) {
@@ -155,6 +165,7 @@ export async function saveSecret(secretId: string, value: string) {
   await saveStore(store);
 }
 
+/** 清理指定前缀下不再需要的密钥，只保留传入的 ID 集合。 */
 export async function pruneSecrets(prefix: string, keepSecretIds: Set<string>) {
   const store = await loadStore();
   let changed = false;

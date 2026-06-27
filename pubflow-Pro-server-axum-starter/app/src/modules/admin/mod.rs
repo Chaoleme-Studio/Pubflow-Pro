@@ -36,8 +36,49 @@ pub fn routes(state: Arc<AppState>) -> ApiRouter {
             post_with(handler::revoke_license, handler::revoke_license_docs),
         )
         .api_route(
+            "/licenses/replace",
+            post_with(handler::replace_license, handler::replace_license_docs),
+        )
+        .api_route(
+            "/licenses/limits",
+            post_with(
+                handler::update_license_limits,
+                handler::update_license_limits_docs,
+            ),
+        )
+        .api_route(
             "/licenses",
             get_with(handler::list_licenses, handler::list_licenses_docs),
+        )
+        .api_route(
+            "/product/catalog",
+            get_with(
+                handler::product_catalog_config,
+                handler::product_catalog_config_docs,
+            )
+            .post_with(
+                handler::save_product_catalog_config,
+                handler::save_product_catalog_config_docs,
+            ),
+        )
+        .api_route(
+            "/versions",
+            get_with(handler::list_app_versions, handler::list_app_versions_docs).post_with(
+                handler::create_app_version,
+                handler::create_app_version_docs,
+            ),
+        )
+        .api_route(
+            "/versions/{id}",
+            get_with(handler::get_app_version, handler::get_app_version_docs)
+                .put_with(
+                    handler::update_app_version,
+                    handler::update_app_version_docs,
+                )
+                .delete_with(
+                    handler::delete_app_version,
+                    handler::delete_app_version_docs,
+                ),
         )
         .api_route(
             "/users",

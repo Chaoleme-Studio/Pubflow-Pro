@@ -5,7 +5,6 @@
 //!
 //! 职责：
 //! - License 签名验证（Ed25519 公钥硬编在 WASM 中）
-//! - Lease token 验证（JWT 格式）
 //! - Selector 数据解密（AES-256-GCM）
 //! - 设备哈希生成
 //! - License 过期检查
@@ -18,6 +17,11 @@
 use base64::Engine;
 use ed25519_dalek::VerifyingKey;
 use pubflow_core::license::License;
+use pubflow_core::selector_protocol::{
+    ActivationProtocolRequestPayload, SelectorProtocolRequestPayload, activation_code_hash,
+    decode_activation_response, decode_response, encode_activation_request, encode_request,
+    start_client_session,
+};
 use wasm_bindgen::prelude::*;
 
 /// 验证 License 签名
@@ -41,120 +45,6 @@ pub fn verify_license(license_json: &str, public_key_hex: &str) -> bool {
         return false;
     };
     license.verify(&verifying_key).is_ok() && !license.is_expired()
-}
-
-/// 验证 Lease Token（JWT 格式）
-///
-/// lease_token: JWT 格式的 lease token
-/// secret: JWT 签名密钥（与服务端共享）
-/// machine_hash: 当前设备的机器码哈希
-///
-/// 返回 JSON 格式的验证结果：
-/// {
-///   "valid": bool,
-///   "status": "active" | "expired" | "device_mismatch" | "invalid",
-///   "expires_at": number (Unix timestamp),
-///   "tier": string,
-///   "features": string[]
-/// }
-#[wasm_bindgen]
-pub fn verify_lease(lease_token: &str, _secret: &str, _machine_hash: &str) -> String {
-    // 1. 解析 JWT（不验证签名，因为这是客户端，只做基本解析）
-    // 注意：真正的签名验证应该在服务端，客户端只做基本的格式和过期检查
-    let parts: Vec<&str> = lease_token.split('.').collect();
-    if parts.len() != 3 {
-        return serde_json::json!({
-            "valid": false,
-            "status": "invalid",
-            "expires_at": 0,
-            "tier": "",
-            "features": []
-        })
-        .to_string();
-    }
-
-    // 2. 解码 payload（第二部分）
-    let payload_bytes = match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(parts[1]) {
-        Ok(bytes) => bytes,
-        Err(_) => {
-            return serde_json::json!({
-                "valid": false,
-                "status": "invalid",
-                "expires_at": 0,
-                "tier": "",
-                "features": []
-            })
-            .to_string();
-        }
-    };
-
-    let payload: serde_json::Value = match serde_json::from_slice(&payload_bytes) {
-        Ok(v) => v,
-        Err(_) => {
-            return serde_json::json!({
-                "valid": false,
-                "status": "invalid",
-                "expires_at": 0,
-                "tier": "",
-                "features": []
-            })
-            .to_string();
-        }
-    };
-
-    // 3. 检查过期时间
-    let now = js_sys::Date::now() as i64 / 1000;
-    let expires_at = payload.get("exp").and_then(|v| v.as_i64()).unwrap_or(0);
-
-    if expires_at > 0 && expires_at < now {
-        let tier = payload
-            .get("tier")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let features: Vec<String> = payload
-            .get("features")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-        return serde_json::json!({
-            "valid": false,
-            "status": "expired",
-            "expires_at": expires_at,
-            "tier": tier,
-            "features": features
-        })
-        .to_string();
-    }
-
-    // 4. 返回有效结果
-    let tier = payload
-        .get("tier")
-        .and_then(|v| v.as_str())
-        .unwrap_or("pro")
-        .to_string();
-    let features: Vec<String> = payload
-        .get("features")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    serde_json::json!({
-        "valid": true,
-        "status": "active",
-        "expires_at": expires_at,
-        "tier": tier,
-        "features": features
-    })
-    .to_string()
 }
 
 /// 检查 Lease 是否即将过期（3 天内）
@@ -183,6 +73,16 @@ pub fn decrypt_selectors(encrypted_json: &str, server_secret: &str, license_code
     }
 }
 
+/// 解密 PFSP 下发的完整 Selector JSON。
+///
+/// PFSP 响应体已经通过会话密钥保护；这里的二次加密只用于避免静态缓存中出现明文 selector。
+#[wasm_bindgen]
+pub fn pfsp_decrypt_selector_json(encrypted_json: &str, activation_code: &str) -> String {
+    let activation_hash = activation_code_hash(activation_code);
+    pubflow_core::selector::decrypt_selector_json(encrypted_json, &activation_hash, activation_code)
+        .unwrap_or_default()
+}
+
 /// 检查 License 是否过期
 ///
 /// expires_at: Unix 时间戳（秒）
@@ -201,6 +101,178 @@ pub fn check_license_expired(expires_at: i64) -> bool {
 #[wasm_bindgen]
 pub fn generate_device_hash(raw_id: &str, salt: &str) -> String {
     pubflow_core::machine::generate_machine_hash(raw_id, salt)
+}
+
+/// 计算激活码哈希，用于 PFSP 请求，不直接传输激活码。
+#[wasm_bindgen]
+pub fn pfsp_activation_code_hash(activation_code: &str) -> String {
+    activation_code_hash(activation_code)
+}
+
+/// 构造 PFSP v1 Selector 拉取请求。
+///
+/// 返回 JSON：
+/// {
+///   "ok": true,
+///   "request_base64": "...",
+///   "response_key_hex": "..."
+/// }
+#[wasm_bindgen]
+pub fn pfsp_build_selector_request(
+    server_public_key_hex: &str,
+    lease_token: &str,
+    client_install_id: &str,
+    activation_code_hash_value: &str,
+    selector_version_known: i32,
+    extension_version: &str,
+    server_time_ms: i64,
+) -> String {
+    let timestamp_ms = if server_time_ms > 0 {
+        server_time_ms
+    } else {
+        js_sys::Date::now() as i64
+    };
+    let context = "pfsp-v1";
+    let session = match start_client_session(server_public_key_hex, timestamp_ms, context) {
+        Ok(session) => session,
+        Err(error) => return pfsp_error(error.to_string()),
+    };
+    let payload = SelectorProtocolRequestPayload {
+        lease_token: lease_token.to_string(),
+        client_install_id: client_install_id.to_string(),
+        activation_code_hash: activation_code_hash_value.to_string(),
+        selector_version_known: if selector_version_known > 0 {
+            Some(selector_version_known)
+        } else {
+            None
+        },
+        extension_version: if extension_version.is_empty() {
+            None
+        } else {
+            Some(extension_version.to_string())
+        },
+    };
+    let request = match encode_request(&payload, &session) {
+        Ok(request) => request,
+        Err(error) => return pfsp_error(error.to_string()),
+    };
+    serde_json::json!({
+        "ok": true,
+        "request_base64": base64::engine::general_purpose::STANDARD.encode(request),
+        "response_key_hex": hex::encode(session.response_key()),
+    })
+    .to_string()
+}
+
+/// 构造 PFAP v1 激活请求。
+#[wasm_bindgen]
+pub fn pfap_build_activation_request(
+    server_public_key_hex: &str,
+    activation_code: &str,
+    client_install_id: &str,
+    platform: &str,
+    extension_version: &str,
+    server_time_ms: i64,
+) -> String {
+    let timestamp_ms = if server_time_ms > 0 {
+        server_time_ms
+    } else {
+        js_sys::Date::now() as i64
+    };
+    let context = "pfap-v1";
+    let session = match start_client_session(server_public_key_hex, timestamp_ms, context) {
+        Ok(session) => session,
+        Err(error) => return pfsp_error(error.to_string()),
+    };
+    let payload = ActivationProtocolRequestPayload {
+        activation_code: activation_code.to_string(),
+        client_install_id: client_install_id.to_string(),
+        platform: platform.to_string(),
+        extension_version: if extension_version.is_empty() {
+            None
+        } else {
+            Some(extension_version.to_string())
+        },
+    };
+    let request = match encode_activation_request(&payload, &session) {
+        Ok(request) => request,
+        Err(error) => return pfsp_error(error.to_string()),
+    };
+    serde_json::json!({
+        "ok": true,
+        "request_base64": base64::engine::general_purpose::STANDARD.encode(request),
+        "response_key_hex": hex::encode(session.response_key()),
+    })
+    .to_string()
+}
+
+/// 解码 PFSP v1 Selector 响应。
+#[wasm_bindgen]
+pub fn pfsp_decode_selector_response(response_base64: &str, response_key_hex: &str) -> String {
+    let response = match base64::engine::general_purpose::STANDARD.decode(response_base64) {
+        Ok(response) => response,
+        Err(error) => return pfsp_error(error.to_string()),
+    };
+    let key_bytes = match hex::decode(response_key_hex) {
+        Ok(bytes) => bytes,
+        Err(error) => return pfsp_error(error.to_string()),
+    };
+    let key: [u8; 32] = match key_bytes.try_into() {
+        Ok(key) => key,
+        Err(_) => return pfsp_error("invalid response key".to_string()),
+    };
+    match decode_response(&response, &key) {
+        Ok(payload) => serde_json::json!({
+            "ok": true,
+            "version": payload.version,
+            "encrypted_selector_blob": payload.encrypted_selector_blob,
+            "checksum": payload.checksum,
+            "min_app_version": payload.min_app_version,
+            "expires_at": payload.expires_at,
+            "server_time": payload.server_time,
+        })
+        .to_string(),
+        Err(error) => pfsp_error(error.to_string()),
+    }
+}
+
+/// 解码 PFAP v1 激活响应。
+#[wasm_bindgen]
+pub fn pfap_decode_activation_response(response_base64: &str, response_key_hex: &str) -> String {
+    let response = match base64::engine::general_purpose::STANDARD.decode(response_base64) {
+        Ok(response) => response,
+        Err(error) => return pfsp_error(error.to_string()),
+    };
+    let key_bytes = match hex::decode(response_key_hex) {
+        Ok(bytes) => bytes,
+        Err(error) => return pfsp_error(error.to_string()),
+    };
+    let key: [u8; 32] = match key_bytes.try_into() {
+        Ok(key) => key,
+        Err(_) => return pfsp_error("invalid response key".to_string()),
+    };
+    match decode_activation_response(&response, &key) {
+        Ok(payload) => serde_json::json!({
+            "ok": true,
+            "lease_token": payload.lease_token,
+            "lease_type": payload.lease_type,
+            "tier": payload.tier,
+            "features": payload.features,
+            "valid_from": payload.valid_from,
+            "valid_until": payload.valid_until,
+            "server_time": payload.server_time,
+        })
+        .to_string(),
+        Err(error) => pfsp_error(error.to_string()),
+    }
+}
+
+fn pfsp_error(message: String) -> String {
+    serde_json::json!({
+        "ok": false,
+        "error": message,
+    })
+    .to_string()
 }
 
 /// WASM 初始化钩子（可选）

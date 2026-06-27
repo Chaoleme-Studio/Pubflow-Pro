@@ -5,6 +5,7 @@ pub use runtime::AppStateConfig;
 use crate::{AppConfig, AppError, ValidationError, shared::jwt::JwtService};
 use deadpool_redis::Pool as RedisPool;
 use sea_orm::{ConnectOptions, Database, DatabaseConnection};
+use sha2::{Digest, Sha256};
 use std::time::Duration;
 
 /// 应用程序运行时状态
@@ -68,6 +69,9 @@ impl AppState {
             config: AppStateConfig {
                 jwt_secret: app_config.secrets.jwt_secret.clone(),
                 selector_secret: app_config.secrets.selector_secret.clone(),
+                selector_protocol_private_key: selector_protocol_private_key(app_config),
+                selector_replay_window_seconds: app_config.secrets.selector_replay_window_seconds,
+                selector_nonce_ttl_seconds: app_config.secrets.selector_nonce_ttl_seconds,
                 machine_salt: app_config.secrets.machine_salt.clone(),
                 admin_username: app_config.secrets.admin_username.clone(),
                 admin_password_hash,
@@ -132,4 +136,23 @@ impl AppState {
             }
         }
     }
+}
+
+fn selector_protocol_private_key(app_config: &AppConfig) -> String {
+    if !app_config
+        .secrets
+        .selector_protocol_private_key
+        .trim()
+        .is_empty()
+    {
+        return app_config.secrets.selector_protocol_private_key.clone();
+    }
+
+    tracing::warn!(
+        "SELECTOR_PROTOCOL_PRIVATE_KEY 未配置，开发环境将从 SELECTOR_SECRET 派生稳定私钥"
+    );
+    let mut hasher = Sha256::new();
+    hasher.update(b"pubflow-selector-protocol-dev-key");
+    hasher.update(app_config.secrets.selector_secret.as_bytes());
+    hex::encode(hasher.finalize())
 }

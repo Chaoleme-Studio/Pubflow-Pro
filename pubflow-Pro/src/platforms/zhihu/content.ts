@@ -8,6 +8,7 @@ import { loadFileForTransfer } from '../../storage/videoTransferStorage';
 import type { ContentData } from '../../types';
 import type { PlatformConfig } from '../types';
 
+/** 上传知乎封面（文章页直接注入 input，视频页通过弹窗选择本地上传）。 */
 async function uploadZhihuCover(
   config: PlatformConfig,
   content: ContentData,
@@ -21,7 +22,7 @@ async function uploadZhihuCover(
 
   // 知乎文章页和视频页的封面是两套组件：
   // - 文章页：常驻隐藏 input.UploadPicture-input，直接选择文件后自动生成封面预览。
-  // - 视频页：点击封面入口打开“选择封面”弹窗，再切到“本地上传”并确认。
+  // - 视频页：点击封面入口打开"选择封面"弹窗，再切到"本地上传"并确认。
   // 文章模式如果没有命中文章 input，直接报错；不要继续打开视频封面弹窗。
   const articleCoverInput = findZhihuArticleCoverInput(fields);
   if (articleCoverInput) {
@@ -38,7 +39,7 @@ async function uploadZhihuCover(
   if (!dialog) return '没有打开知乎封面选择弹窗。';
 
   const selected = await selectZhihuLocalUploadTab(dialog);
-  if (!selected) return '没有切换到知乎封面弹窗的“本地上传”页。';
+  if (!selected) return '没有切换到知乎封面弹窗的"本地上传"页。';
 
   const input = await waitForZhihuCoverInput(8000);
   if (!input) return '没有找到知乎封面弹窗内的图片 input。';
@@ -63,7 +64,7 @@ async function uploadZhihuCover(
 /** 查找知乎文章页常驻的封面 input；文章封面不需要也不应该打开视频封面弹窗。 */
 function findZhihuArticleCoverInput(fields: PlatformConfig['fields']) {
   // 2026-06 实测：知乎文章页的稳定入口是 input.UploadPicture-input[type=file]，
-  // accept=".jpeg, .jpg, .png"，外层文案是“添加文章封面”。
+  // accept=".jpeg, .jpg, .png"，外层文案是"添加文章封面"。
   // 先精确查这个 input，避免被外层 wrapper 或其他编辑器图片 input 抢先命中。
   const exactInput = document.querySelector<HTMLInputElement>('input.UploadPicture-input[type="file"]');
   if (isZhihuArticleCoverInput(exactInput)) return exactInput;
@@ -102,7 +103,7 @@ function findZhihuArticleCoverInput(fields: PlatformConfig['fields']) {
 /** 判断 input 是否属于知乎文章封面，而不是正文图片或视频封面弹窗里的上传控件。 */
 function isZhihuArticleCoverInput(element: Element | null): element is HTMLInputElement {
   // 知乎正文编辑器也可能有图片上传 input；只看 accept=image 过于宽泛。
-  // 这里限定 UploadPicture class 或“添加文章封面”文案，确保拿到的是文章封面 input。
+  // 这里限定 UploadPicture class 或"添加文章封面"文案，确保拿到的是文章封面 input。
   if (!(element instanceof HTMLInputElement) || element.type !== 'file') return false;
   const accept = element.accept || '';
   if (accept.includes('video')) return false;
@@ -172,7 +173,7 @@ function findZhihuCoverEntry(fields: PlatformConfig['fields']) {
   );
 }
 
-/** 打开知乎视频封面弹窗，等待“选择封面/本地上传”弹层出现。 */
+/** 打开知乎视频封面弹窗，等待"选择封面/本地上传"弹层出现。 */
 async function openZhihuCoverDialog(coverElement?: HTMLElement) {
   const existingDialog = findZhihuCoverDialog();
   if (existingDialog) return existingDialog;
@@ -203,9 +204,9 @@ function findZhihuCoverDialog(): HTMLElement | null {
   return null;
 }
 
-/** 切换知乎视频封面弹窗到“本地上传”Tab。 */
+/** 切换知乎视频封面弹窗到"本地上传"Tab。 */
 async function selectZhihuLocalUploadTab(dialog: HTMLElement) {
-  // 视频封面弹窗默认 Tab 是“从视频中截取”，必须切到“本地上传”后才会渲染图片 input。
+  // 视频封面弹窗默认 Tab 是"从视频中截取"，必须切到"本地上传"后才会渲染图片 input。
   // 如果 input 已经存在，说明当前已经在本地上传页，直接返回。
   if (findZhihuImageInput(dialog)) return true;
 
@@ -392,7 +393,7 @@ async function waitForZhihuCoverPreviewChange(beforeSignature: string, timeoutMs
   return false;
 }
 
-/** 填充知乎视频标记弹窗，目标通常是“内容无需标注”等声明项。 */
+/** 填充知乎视频标记弹窗，目标通常是"内容无需标注"等声明项。 */
 async function fillZhihuDeclarationDropdown(config: PlatformConfig, targetText: string) {
   const declConfig = config.fields.declaration || config.fields.originalDeclare;
   if (!declConfig) return;
@@ -467,7 +468,7 @@ function normalizeZhihuOptionText(text: string) {
   return text.replace(/\s+/g, '');
 }
 
-/** 填充知乎“所属领域”下拉，限定在当前打开的 listbox 中选项，减少误点其他控件。 */
+/** 填充知乎"所属领域"下拉，限定在当前打开的 listbox 中选项，减少误点其他控件。 */
 async function fillZhihuDomain(targetText: string) {
   const domainItem = findZhihuFormItem('所属领域');
   const domainCombo = domainItem?.querySelector<HTMLElement>('button[role="combobox"], [role="combobox"]') || null;

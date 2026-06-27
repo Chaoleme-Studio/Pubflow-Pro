@@ -28,10 +28,12 @@ export const FORMAT_SYSTEM = `你是一位专业的 Markdown 文章排版设计�
 - 整体效果要清晰、有层次、专业、适合直接发布
 - 直接返回排版后的完整文章，不要添加任何解释、说明或前后缀`;
 
+/** 构造润色功能的用户提示词，把 Markdown 文章交给 AI 润色。 */
 export function buildPolishUserPrompt(markdown: string): string {
   return `请对以下文章进行 AI 润色：突出主题，保留原意和结构，提升用词的专业度、表达质感和整体流畅度。\n\n${markdown}`;
 }
 
+/** 构造排版功能的用户提示词，让 AI 优化 Markdown 结构和版式。 */
 export function buildFormatUserPrompt(markdown: string): string {
   return `请对以下文章进行 AI 排版：优化 Markdown 结构、标题层级、列表、表格和段落节奏，让文章更清晰、更美观、更适合发布。\n\n${markdown}`;
 }

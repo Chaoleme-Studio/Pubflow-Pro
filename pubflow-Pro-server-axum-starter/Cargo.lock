@@ -3097,6 +3097,7 @@ dependencies = [
  "aes-gcm",
  "base64 0.22.1",
  "chrono",
+ "curve25519-dalek",
  "ed25519-dalek",
  "getrandom 0.2.16",
  "hex",
@@ -3104,6 +3105,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "subtle",
  "thiserror 2.0.12",
 ]
 

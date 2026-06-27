@@ -1,6 +1,7 @@
 import { PLATFORM_ORDER } from '../../platforms';
 import type { PublishRecord, VideoRecord } from '../../types';
 
+/** 生成演示用的视频记录数据。 */
 export function createDemoVideos(): VideoRecord[] {
   const now = Date.now();
   return [
@@ -430,6 +431,7 @@ export function createDemoVideos(): VideoRecord[] {
   ];
 }
 
+/** 根据演示视频生成对应的发布记录数据。 */
 export function createDemoRecords(sourceVideos: VideoRecord[]): PublishRecord[] {
   const now = Date.now();
   return [

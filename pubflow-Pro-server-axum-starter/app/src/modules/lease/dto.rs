@@ -7,8 +7,10 @@ use serde::{Deserialize, Serialize};
 pub struct ActivateLeaseRequest {
     /// 激活码
     pub activation_code: String,
-    /// 设备机器码哈希
-    pub machine_hash: String,
+    /// 浏览器插件安装实例 ID
+    pub client_install_id: Option<String>,
+    /// 旧版兼容字段；订阅版不再表示硬件机器码
+    pub machine_hash: Option<String>,
     /// 平台：windows / macos / linux
     pub platform: String,
     /// 插件版本
@@ -39,8 +41,10 @@ pub struct ActivateLeaseResponse {
 pub struct VerifyLeaseRequest {
     /// lease token
     pub lease_token: String,
-    /// 设备机器码哈希
-    pub machine_hash: String,
+    /// 浏览器插件安装实例 ID
+    pub client_install_id: Option<String>,
+    /// 旧版兼容字段；订阅版不再表示硬件机器码
+    pub machine_hash: Option<String>,
 }
 
 /// 验证 lease 响应
@@ -69,8 +73,10 @@ pub struct VerifyLeaseResponse {
 pub struct RenewLeaseRequest {
     /// 当前 lease token
     pub lease_token: String,
-    /// 设备机器码哈希
-    pub machine_hash: String,
+    /// 浏览器插件安装实例 ID
+    pub client_install_id: Option<String>,
+    /// 旧版兼容字段；订阅版不再表示硬件机器码
+    pub machine_hash: Option<String>,
 }
 
 /// 续租响应
@@ -89,8 +95,10 @@ pub struct RenewLeaseResponse {
 pub struct DeactivateLeaseRequest {
     /// 激活码
     pub activation_code: String,
-    /// 设备机器码哈希
-    pub machine_hash: String,
+    /// 浏览器插件安装实例 ID
+    pub client_install_id: Option<String>,
+    /// 旧版兼容字段；订阅版不再表示硬件机器码
+    pub machine_hash: Option<String>,
 }
 
 /// 解绑设备响应
@@ -107,7 +115,9 @@ pub struct AdminLeaseItem {
     pub id: String,
     /// 激活码
     pub activation_code: String,
-    /// 设备机器码
+    /// 安装实例 ID
+    pub client_install_id: String,
+    /// 旧版兼容字段
     pub machine_hash: String,
     /// 平台
     pub platform: String,

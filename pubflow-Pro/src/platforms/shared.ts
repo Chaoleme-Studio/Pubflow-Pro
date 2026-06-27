@@ -1,5 +1,6 @@
 import type { BlockerConfig, FieldConfig, FillMethod, PlatformConfig, PlatformSelectorConfig } from './types';
 
+/** 通用拦截器配置，用于检测登录态和弹窗等需要人工干预的场景。 */
 export const commonBlockers: BlockerConfig[] = [
   {
     selectors: [
@@ -43,10 +44,7 @@ function fieldFromSelector(
   return { selectors: [selector], fillMethod, ...(multiValue ? { multiValue } : {}) };
 }
 
-/**
- * 将平台 selector 配置中的中文字段映射到运行时字段结构。
- * 如果“简介”和“文章正文”指向同一个编辑器，说明该平台文章页复用正文，不再生成 description。
- */
+/** 将平台 selector 配置中的中文字段映射到运行时字段结构。 */
 function buildFieldsFromSelectorConfig(raw: PlatformSelectorConfig['字段']): PlatformConfig['fields'] {
   const descSelector = raw.简介;
   const bodySelector = raw.文章正文;

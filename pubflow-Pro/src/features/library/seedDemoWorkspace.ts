@@ -22,6 +22,7 @@ export interface SeedDemoWorkspaceResult {
   copiedCovers: number;
 }
 
+/** 获取或创建子目录，返回目录句柄及是否已存在 */
 async function getOrCreateDirectory(
   parent: FileSystemDirectoryHandle,
   name: string,
@@ -33,6 +34,7 @@ async function getOrCreateDirectory(
   }
 }
 
+/** 检查目录中指定文件是否存在 */
 async function fileExists(directory: FileSystemDirectoryHandle, fileName: string) {
   try {
     await directory.getFileHandle(fileName);
@@ -42,6 +44,7 @@ async function fileExists(directory: FileSystemDirectoryHandle, fileName: string
   }
 }
 
+/** 若文件不存在则写入数据，返回是否写入成功 */
 async function writeFileIfMissing(
   directory: FileSystemDirectoryHandle,
   fileName: string,
@@ -55,6 +58,7 @@ async function writeFileIfMissing(
   return true;
 }
 
+/** 向目录中写入文件（覆盖已有文件） */
 async function writeFile(
   directory: FileSystemDirectoryHandle,
   fileName: string,
@@ -66,12 +70,14 @@ async function writeFile(
   await writable.close();
 }
 
+/** 从打包资源中读取样例封面图片 */
 async function fetchPackagedCover(fileName: string) {
   const response = await fetch(`/covers/${fileName}`);
   if (!response.ok) throw new Error(`读取样例封面失败：${fileName}`);
   return response.blob();
 }
 
+/** 创建种子视频数据，将视频 ID 同时设为项目 ID */
 function createSeedVideos() {
   return createDemoVideos().map((video) => ({
     ...video,
@@ -79,10 +85,12 @@ function createSeedVideos() {
   }));
 }
 
+/** 判断视频是否为演示工作区视频（使用打包封面） */
 function isDemoWorkspaceVideo(video: VideoRecord) {
   return !!video.coverFileName && PACKAGED_DEMO_COVER_FILE_NAMES.has(video.coverFileName);
 }
 
+/** 确保视频记录包含 projectId，若无则使用 id 作为默认值 */
 function normalizeProjectVideo(video: VideoRecord): VideoRecord {
   return {
     ...video,
@@ -90,6 +98,7 @@ function normalizeProjectVideo(video: VideoRecord): VideoRecord {
   };
 }
 
+/** 按 ID 合并已有数据与种子数据，种子数据优先覆盖 */
 function upsertById<T extends { id: string }>(existing: T[], seeded: T[]) {
   const seededIds = new Set(seeded.map((item) => item.id));
   return [
@@ -98,6 +107,7 @@ function upsertById<T extends { id: string }>(existing: T[], seeded: T[]) {
   ];
 }
 
+/** 将演示数据种子写入工作区，自动复制打包封面并生成项目目录。 */
 export async function seedDemoWorkspace(): Promise<SeedDemoWorkspaceResult> {
   const storedWorkspace = await loadWorkspaceDirectory();
   if (!storedWorkspace?.handle) throw new Error('请先选择工作区文件夹。');

@@ -4,11 +4,13 @@ import {
   CheckCircle2,
   DatabaseZap,
   Download,
+  GitBranch,
   KeyRound,
   Layers3,
   ListChecks,
   LogIn,
   LogOut,
+  PackageOpen,
   RadioTower,
   RefreshCw,
   Search,
@@ -19,16 +21,29 @@ import {
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import {
   adminLogin,
+  createAdminAppVersion,
+  deleteAdminAppVersion,
   generateLicenses,
   getDauStats,
+  getAdminProductCatalog,
   getSelectorVersion,
+  listAdminAppVersions,
   listAdminLeases,
   listAdminLicenses,
   listAdminOrders,
+  replaceLicense,
+  revokeAdminLicense,
+  saveAdminProductCatalog,
+  updateAdminAppVersion,
+  updateLicenseLimits,
   uploadSelector,
+  type AdminDownloadConfig,
+  type AppVersionItem,
   type AdminLeaseItem,
   type AdminLicenseItem,
   type AdminOrderItem,
+  type AdminPlanConfig,
+  type AdminProductCatalogConfig,
   type DauStat,
   type LicenseSummary,
   type SelectorVersionItem,
@@ -36,7 +51,7 @@ import {
 import AdminOverviewChart from '../components/admin/AdminOverviewChart.vue';
 import { eventLabel, formatDateTime, inDateRange, planLabel, shortHash, sourceLabel, statusLabel, toDateOnly, yuan } from '../utils/format';
 
-type AdminView = 'overview' | 'users' | 'licenses' | 'leases' | 'selectors';
+type AdminView = 'overview' | 'products' | 'versions' | 'users' | 'licenses' | 'leases' | 'selectors';
 
 const adminView = ref<AdminView>('overview');
 const adminToken = ref(sessionStorage.getItem('pubflow_admin_token') || '');
@@ -57,6 +72,22 @@ const remoteLicenses = ref<AdminLicenseItem[]>([]);
 const remoteLeases = ref<AdminLeaseItem[]>([]);
 const dauStats = ref<DauStat[]>([]);
 const selectorVersion = ref<SelectorVersionItem>();
+const productConfig = ref<AdminProductCatalogConfig>({ plans: [], downloads: [] });
+const productPriceMessage = ref('');
+const productDownloadMessage = ref('');
+const productSavingSection = ref<'prices' | 'downloads' | ''>('');
+const appVersions = ref<AppVersionItem[]>([]);
+const versionForm = ref({
+  version: '0.1.0',
+  minAppVersion: '0.1.0',
+  downloadUrl: '/downloads/pubflow-pro.zip',
+  releaseNotes: '',
+  forceUpdate: false,
+  isActive: true,
+});
+const editingVersionId = ref('');
+const versionSaving = ref(false);
+const versionMessage = ref('');
 
 // License 分页和统计
 const licensePage = ref(1);
@@ -80,11 +111,24 @@ const selectorUploadVersion = ref(1);
 const selectorUploadMinVersion = ref('0.1.0');
 const selectorUploadJson = ref(JSON.stringify({
   douyin: {
-    title_input: '#title-input',
-    desc_input: '#desc-input',
-    publish_btn: '#publish-btn',
-    video_upload: '#video-upload',
-    cover_upload: '#cover-upload',
+    平台标识: 'douyin',
+    名称: '抖音创作者',
+    图标: 'DY',
+    发布页地址: 'https://creator.douyin.com/creator-micro/content/upload',
+    匹配域名: ['creator.douyin.com', 'open.douyin.com'],
+    就绪选择器: '.container-drag-VAfIfu, .semi-input.semi-input-default, .editor-comp-publish, [class*="container-drag"]',
+    上传: {
+      上传容器: '.container-drag-VAfIfu, [class*="container-drag"]',
+      文件输入框: ['input[type="file"][accept*="video"]', 'input[type="file"]'],
+      上传完成标记: '.semi-input.semi-input-default, .editor-comp-publish, [class*="video-preview"], [class*="upload-success"]',
+      编辑器就绪标记: '.semi-input.semi-input-default, .editor-comp-publish',
+      超时毫秒: 180000,
+      需要激活标签页: true,
+    },
+    字段: {
+      标题: '.semi-input.semi-input-default',
+      简介: '.editor-comp-publish, .editor-kit-container',
+    },
   },
 }, null, 2));
 const selectorUploadMessage = ref('');
@@ -98,8 +142,17 @@ const generateSalesChannel = ref('third_party');
 const generateLoading = ref(false);
 const generateResult = ref('');
 const showGenerateDialog = ref(false);
+const showReplaceDialog = ref(false);
+const showLimitsDialog = ref(false);
 const modalContentRef = ref<HTMLDivElement>();
 const licenseViewMode = ref<'card' | 'table'>('card');
+const actionLicense = ref<AdminLicenseItem>();
+const replaceReason = ref('');
+const replaceRevokeOld = ref(true);
+const replaceResult = ref('');
+const limitsMaxDevices = ref(1);
+const limitsMigrationLimit = ref(3);
+const limitsReason = ref('');
 
 watch(showGenerateDialog, (open) => {
   if (open) nextTick(() => modalContentRef.value?.focus());
@@ -119,11 +172,46 @@ const licenseFilters = ref(emptyFilters());
 
 const adminTabs = [
   { key: 'overview', label: '总览', icon: Activity },
-  { key: 'users', label: '订单', icon: WalletCards },
-  { key: 'licenses', label: '卡密生成', icon: KeyRound },
+  { key: 'products', label: '商品配置', icon: PackageOpen },
+  { key: 'versions', label: '版本管理', icon: GitBranch },
+  { key: 'users', label: '订单管理', icon: WalletCards },
+  { key: 'licenses', label: '卡密管理', icon: KeyRound },
   { key: 'leases', label: '授权记录', icon: ListChecks },
   { key: 'selectors', label: 'Selector 状态', icon: DatabaseZap },
 ] as const;
+
+const adminViewTitles: Record<AdminView, string> = {
+  overview: '业务驾驶舱',
+  products: '商品配置',
+  versions: '版本管理',
+  users: '订单管理',
+  licenses: '卡密管理',
+  leases: '授权记录',
+  selectors: 'Selector 状态',
+};
+
+const DEFAULT_PLUGIN_DOWNLOADS: AdminDownloadConfig[] = [
+  {
+    code: 'zip',
+    platform: 'extension',
+    name: '离线包 (ZIP)',
+    chip: 'Chrome / Edge / Chromium',
+    fileName: 'pubflow-pro.zip',
+    href: '/downloads/pubflow-pro.zip',
+    isActive: true,
+    sortOrder: 100,
+  },
+  {
+    code: 'crx',
+    platform: 'extension',
+    name: 'Chrome 扩展 (CRX)',
+    chip: 'Chrome / Edge / Chromium',
+    fileName: 'pubflow-pro.crx',
+    href: '/downloads/pubflow-pro.crx',
+    isActive: true,
+    sortOrder: 110,
+  },
+];
 
 const normalizedOrders = computed(() => {
   return remoteOrders.value.map((item) => ({
@@ -148,6 +236,9 @@ const normalizedLicenses = computed(() => {
     user: item.userId ? `用户 #${item.userId}` : '未激活',
     plan: item.plan,
     maxDevices: item.maxDevices,
+    deviceMigrationLimit: item.deviceMigrationLimit,
+    deviceMigrationCount: item.deviceMigrationCount,
+    lastMigratedAt: item.lastMigratedAt ? formatDateTime(item.lastMigratedAt) : '-',
     paidAt: toDateOnly(item.paidAt),
     createdAt: toDateOnly(item.createdAt),
     expiresAt: item.expiresAt ? toDateOnly(item.expiresAt) : '未激活',
@@ -236,6 +327,7 @@ const adminStats = computed(() => [
   { label: '待支付授权', value: String(licenseSummary.value.pending), delta: '等待微信/支付宝回调', icon: KeyRound, tone: 'amber' },
   { label: '已激活授权', value: String(licenseSummary.value.active), delta: `${licenseSummary.value.total} 总授权`, icon: CheckCircle2, tone: 'green' },
 ]);
+const latestAppVersion = computed(() => appVersions.value[0]);
 
 async function loginAdmin() {
   adminLoginError.value = '';
@@ -308,10 +400,15 @@ async function refreshAdminData() {
     applyOverviewTimeRange();
     applyLeaseTimeRange();
 
-    const [users, licenseResult, selector] = await Promise.all([
+    const [users, licenseResult, selector, products, versions] = await Promise.all([
       listAdminOrders(adminToken.value, orderFilters.value),
       listAdminLicenses(adminToken.value, { ...licenseFilters.value, page: licensePage.value, pageSize: licensePageSize.value }),
       getSelectorVersion(adminToken.value),
+      getAdminProductCatalog(adminToken.value).catch((error) => {
+        productPriceMessage.value = error instanceof Error ? error.message : '商品配置接口不可用';
+        return productConfig.value;
+      }),
+      refreshAppVersions(),
       refreshLeases(),
       refreshDauStats(),
     ]);
@@ -320,11 +417,223 @@ async function refreshAdminData() {
     licenseTotal.value = licenseResult.total;
     licenseSummaryData.value = licenseResult.summary;
     selectorVersion.value = selector;
+    productConfig.value = products;
+    appVersions.value = versions;
+    ensurePluginDownloads();
   } catch (error) {
     adminDataError.value = error instanceof Error ? error.message : '后台数据加载失败，请确认服务端已启动';
   } finally {
     adminLoading.value = false;
   }
+}
+
+function ensurePluginDownloads() {
+  const next = [...productConfig.value.downloads];
+  for (const fallback of DEFAULT_PLUGIN_DOWNLOADS) {
+    const existing = next.find((item) => item.code === fallback.code);
+    if (!existing) {
+      next.push({ ...fallback });
+      continue;
+    }
+    existing.platform ||= fallback.platform;
+    existing.name ||= fallback.name;
+    existing.chip ||= fallback.chip;
+    existing.fileName ||= fallback.fileName;
+    existing.href ||= fallback.href;
+    existing.sortOrder ??= fallback.sortOrder;
+  }
+  productConfig.value.downloads = next
+    .filter((item) => ['zip', 'crx'].includes(item.code))
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+}
+
+async function saveProductSection(section: 'prices' | 'downloads') {
+  if (!adminToken.value) return;
+  productSavingSection.value = section;
+  productPriceMessage.value = '';
+  productDownloadMessage.value = '';
+  try {
+    ensurePluginDownloads();
+    productConfig.value = await saveAdminProductCatalog(adminToken.value, productConfig.value);
+    ensurePluginDownloads();
+    if (section === 'prices') {
+      productPriceMessage.value = '价格配置已保存';
+    } else {
+      productDownloadMessage.value = '下载配置已保存';
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '商品配置保存失败';
+    if (section === 'prices') {
+      productPriceMessage.value = message;
+    } else {
+      productDownloadMessage.value = message;
+    }
+  } finally {
+    productSavingSection.value = '';
+  }
+}
+
+function resetPluginDownloads() {
+  productConfig.value.downloads = DEFAULT_PLUGIN_DOWNLOADS.map((item) => ({ ...item }));
+  productDownloadMessage.value = '已恢复默认插件下载项，保存后生效';
+}
+
+async function refreshAppVersions() {
+  if (!adminToken.value) return [];
+  try {
+    versionMessage.value = '';
+    return await listAdminAppVersions(adminToken.value, 20);
+  } catch (error) {
+    versionMessage.value = error instanceof Error ? error.message : '版本记录加载失败';
+    return appVersions.value;
+  }
+}
+
+async function reloadAppVersions() {
+  appVersions.value = await refreshAppVersions();
+}
+
+async function submitAppVersion() {
+  if (!adminToken.value) return;
+  versionSaving.value = true;
+  versionMessage.value = '';
+  try {
+    const payload = {
+      version: versionForm.value.version.trim(),
+      minAppVersion: versionForm.value.minAppVersion.trim() || undefined,
+      downloadUrl: versionForm.value.downloadUrl.trim(),
+      releaseNotes: versionForm.value.releaseNotes.trim() || undefined,
+      forceUpdate: versionForm.value.forceUpdate,
+      isActive: versionForm.value.isActive,
+    };
+    if (editingVersionId.value) {
+      await updateAdminAppVersion(adminToken.value, editingVersionId.value, payload);
+    } else {
+      await createAdminAppVersion(adminToken.value, payload);
+    }
+    appVersions.value = await refreshAppVersions();
+    versionMessage.value = editingVersionId.value ? '版本已保存' : '版本已发布';
+    cancelVersionEdit();
+  } catch (error) {
+    versionMessage.value = error instanceof Error ? error.message : '版本保存失败';
+  } finally {
+    versionSaving.value = false;
+  }
+}
+
+function editAppVersion(item: AppVersionItem) {
+  editingVersionId.value = item.id;
+  versionForm.value = {
+    version: item.version,
+    minAppVersion: item.minAppVersion || item.minVersion || '',
+    downloadUrl: item.downloadUrl,
+    releaseNotes: item.releaseNotes || '',
+    forceUpdate: item.forceUpdate,
+    isActive: item.isActive ?? true,
+  };
+  versionMessage.value = `正在编辑 v${item.version}`;
+}
+
+function cancelVersionEdit() {
+  editingVersionId.value = '';
+  versionForm.value = {
+    version: latestAppVersion.value?.version || '0.1.0',
+    minAppVersion: '0.1.0',
+    downloadUrl: '/downloads/pubflow-pro.zip',
+    releaseNotes: '',
+    forceUpdate: false,
+    isActive: true,
+  };
+}
+
+async function removeAppVersion(item: AppVersionItem) {
+  if (!adminToken.value) return;
+  const confirmed = window.confirm(`确认删除版本 v${item.version}？\n删除后插件和下载中心不会再读取这条记录。`);
+  if (!confirmed) return;
+  versionSaving.value = true;
+  versionMessage.value = '';
+  try {
+    await deleteAdminAppVersion(adminToken.value, item.id);
+    if (editingVersionId.value === item.id) {
+      cancelVersionEdit();
+    }
+    appVersions.value = await refreshAppVersions();
+    versionMessage.value = '版本记录已删除';
+  } catch (error) {
+    versionMessage.value = error instanceof Error ? error.message : '版本删除失败';
+  } finally {
+    versionSaving.value = false;
+  }
+}
+
+function openReplaceDialog(item: AdminLicenseItem) {
+  actionLicense.value = item;
+  replaceReason.value = '';
+  replaceRevokeOld.value = true;
+  replaceResult.value = '';
+  showReplaceDialog.value = true;
+}
+
+async function submitReplaceLicense() {
+  if (!adminToken.value || !actionLicense.value) return;
+  replaceResult.value = '';
+  try {
+    const result = await replaceLicense(adminToken.value, actionLicense.value.activationCode, replaceReason.value, replaceRevokeOld.value);
+    replaceResult.value = `新激活码：${result.newActivationCode}`;
+    await refreshAdminData();
+  } catch (error) {
+    replaceResult.value = error instanceof Error ? error.message : '补发失败';
+  }
+}
+
+async function revokeLicense(item: AdminLicenseItem) {
+  if (!adminToken.value) return;
+  const reason = window.prompt(`确认吊销这个卡密？\n${item.activationCode}\n\n可填写吊销原因：`, '后台手动吊销卡密');
+  if (reason === null) return;
+  try {
+    await revokeAdminLicense(adminToken.value, item.activationCode, reason.trim() || undefined);
+    generateResult.value = `已吊销激活码：${item.activationCode}`;
+    await refreshAdminData();
+  } catch (error) {
+    generateResult.value = error instanceof Error ? error.message : '吊销失败';
+  }
+}
+
+function openLimitsDialog(item: AdminLicenseItem) {
+  actionLicense.value = item;
+  limitsMaxDevices.value = item.maxDevices;
+  limitsMigrationLimit.value = item.deviceMigrationLimit;
+  limitsReason.value = '';
+  showLimitsDialog.value = true;
+}
+
+async function submitLicenseLimits() {
+  if (!adminToken.value || !actionLicense.value) return;
+  try {
+    await updateLicenseLimits(
+      adminToken.value,
+      actionLicense.value.activationCode,
+      limitsMaxDevices.value,
+      limitsMigrationLimit.value,
+      limitsReason.value.trim() || undefined,
+    );
+    showLimitsDialog.value = false;
+    await refreshAdminData();
+  } catch (error) {
+    generateResult.value = error instanceof Error ? error.message : '调整限制失败';
+  }
+}
+
+function planPrice(plan: AdminPlanConfig) {
+  return (plan.originalAmountCents / 100).toLocaleString('zh-CN', { maximumFractionDigits: 2 });
+}
+
+function downloadTitle(item: AdminDownloadConfig) {
+  return `${item.name || item.code} ${item.fileName ? `· ${item.fileName}` : ''}`;
+}
+
+function rawLicenseByCode(code: string) {
+  return remoteLicenses.value.find((raw) => raw.activationCode === code);
 }
 
 async function refreshLeases() {
@@ -489,7 +798,7 @@ if (adminLoggedIn.value) {
       <header class="admin-topbar">
         <div>
           <span>运营后台</span>
-          <h1>{{ adminView === 'overview' ? '业务驾驶舱' : adminView === 'licenses' ? '卡密生成' : adminView === 'users' ? '订单运营' : adminView === 'leases' ? '授权记录' : 'Selector 状态' }}</h1>
+          <h1>{{ adminViewTitles[adminView] }}</h1>
         </div>
         <div class="admin-actions">
           <button class="secondary-button compact" type="button" @click="refreshAdminData">
@@ -547,7 +856,7 @@ if (adminLoggedIn.value) {
             </div>
             <div class="dau-legend">
               <span><i class="legend-dot activations"></i> 激活数</span>
-              <span><i class="legend-dot verifications"></i> 活跃设备数</span>
+              <span><i class="legend-dot verifications"></i> 活跃安装实例</span>
             </div>
           </div>
         </div>
@@ -564,16 +873,180 @@ if (adminLoggedIn.value) {
           </div>
           <div>
             <span>版本治理</span>
-            <strong>{{ selectorVersion ? `Selector v${selectorVersion.version}` : '暂无 Selector 版本' }}</strong>
-            <button class="mini-action" type="button" @click="adminView = 'selectors'">进入版本库</button>
+            <strong>{{ latestAppVersion ? `插件 v${latestAppVersion.version}` : '暂无插件版本' }}</strong>
+            <button class="mini-action" type="button" @click="adminView = 'versions'">进入版本库</button>
           </div>
+        </div>
+      </section>
+
+      <section v-else-if="adminView === 'products'" class="admin-table-view">
+        <div class="operations-head">
+          <div>
+            <span>商品配置</span>
+            <strong>价格和下载分开维护，避免发布配置互相影响</strong>
+          </div>
+        </div>
+
+        <div class="product-admin-layout">
+          <section class="product-config-section">
+            <div class="config-section-head">
+              <div>
+                <span>价格管理</span>
+                <strong>套餐价格、限时折扣、上下架</strong>
+              </div>
+              <button class="primary-button compact" type="button" :disabled="productSavingSection === 'prices'" @click="saveProductSection('prices')">
+                {{ productSavingSection === 'prices' ? '保存中' : '保存价格' }}
+              </button>
+            </div>
+            <p v-if="productPriceMessage" class="generate-result">{{ productPriceMessage }}</p>
+            <div class="product-config-grid">
+              <article v-for="plan in productConfig.plans" :key="plan.id" class="ops-config-panel">
+                <div class="config-panel-head">
+                  <strong>{{ plan.name || plan.id }}</strong>
+                  <span>{{ planPrice(plan) }} 元</span>
+                </div>
+                <div class="ops-field-grid">
+                  <label><span>名称</span><input v-model="plan.name" /></label>
+                  <label><span>原价（分）</span><input v-model.number="plan.originalAmountCents" type="number" min="1" /></label>
+                  <label><span>单位</span><input v-model="plan.unit" placeholder="元/月" /></label>
+                  <label><span>折扣价（分）</span><input v-model.number="plan.discountAmountCents" type="number" min="1" /></label>
+                  <label><span>折扣开始</span><input v-model="plan.discountStartAt" type="datetime-local" /></label>
+                  <label><span>折扣结束</span><input v-model="plan.discountEndAt" type="datetime-local" /></label>
+                </div>
+                <label><span>说明</span><input v-model="plan.note" /></label>
+                <div class="inline-toggle-row">
+                  <label class="inline-toggle"><input v-model="plan.discountEnabled" type="checkbox" /> 启用限时折扣</label>
+                  <label class="inline-toggle"><input v-model="plan.isActive" type="checkbox" /> 上架销售</label>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="product-config-section">
+            <div class="config-section-head">
+              <div>
+                <span>下载管理</span>
+                <strong>浏览器插件分发，只维护 ZIP 和 CRX</strong>
+              </div>
+              <div class="admin-actions">
+                <button class="secondary-button compact" type="button" @click="resetPluginDownloads">恢复默认</button>
+                <button class="primary-button compact" type="button" :disabled="productSavingSection === 'downloads'" @click="saveProductSection('downloads')">
+                  {{ productSavingSection === 'downloads' ? '保存中' : '保存下载' }}
+                </button>
+              </div>
+            </div>
+            <p v-if="productDownloadMessage" class="generate-result">{{ productDownloadMessage }}</p>
+            <div class="download-config-list">
+              <article v-for="item in productConfig.downloads" :key="item.code" class="ops-config-panel download-config-panel">
+                <div class="config-panel-head">
+                  <strong>{{ downloadTitle(item) }}</strong>
+                  <span>{{ item.code.toUpperCase() }}</span>
+                </div>
+                <div class="ops-field-grid">
+                  <label><span>名称</span><input v-model="item.name" /></label>
+                  <label><span>文件名</span><input v-model="item.fileName" /></label>
+                  <label><span>说明</span><input v-model="item.chip" /></label>
+                  <label><span>排序</span><input v-model.number="item.sortOrder" type="number" /></label>
+                </div>
+                <label><span>下载链接</span><input v-model="item.href" placeholder="https://... 或 /downloads/pubflow-pro.zip" /></label>
+                <label class="inline-toggle"><input v-model="item.isActive" type="checkbox" /> 展示下载</label>
+              </article>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section v-else-if="adminView === 'versions'" class="admin-table-view">
+        <div class="operations-head">
+          <div>
+            <span>版本管理</span>
+            <strong>发布插件版本、下载链接和 Markdown 更新日志</strong>
+          </div>
+          <div class="admin-actions">
+            <button class="secondary-button compact" type="button" @click="reloadAppVersions">
+              <RefreshCw :size="14" />
+              刷新
+            </button>
+          </div>
+        </div>
+        <p v-if="versionMessage" class="generate-result">{{ versionMessage }}</p>
+
+        <div class="version-admin-layout">
+          <section class="version-publish-panel">
+            <div class="config-section-head">
+              <div>
+                <span>{{ editingVersionId ? '编辑版本' : '发布新版本' }}</span>
+                <strong>{{ editingVersionId ? '保存后立即影响插件更新检测和下载中心' : '插件启动和下载中心都会读取这里的最新记录' }}</strong>
+              </div>
+            </div>
+            <div class="ops-field-grid">
+              <label>
+                <span>版本号</span>
+                <input v-model="versionForm.version" placeholder="0.2.0" />
+              </label>
+              <label>
+                <span>最低可用版本</span>
+                <input v-model="versionForm.minAppVersion" placeholder="0.1.0" />
+              </label>
+              <label>
+                <span>下载链接</span>
+                <input v-model="versionForm.downloadUrl" placeholder="/downloads/pubflow-pro.zip" />
+              </label>
+            </div>
+            <label>
+              <span>更新日志 Markdown</span>
+              <textarea v-model="versionForm.releaseNotes" class="release-notes-input" placeholder="- 修复发布流程&#10;- 优化授权校验"></textarea>
+            </label>
+            <div class="inline-toggle-row">
+              <label class="inline-toggle"><input v-model="versionForm.forceUpdate" type="checkbox" /> 标记为强提醒更新</label>
+              <label class="inline-toggle"><input v-model="versionForm.isActive" type="checkbox" /> 立即生效</label>
+            </div>
+            <div class="selector-form-actions">
+              <button v-if="editingVersionId" class="secondary-button compact" type="button" :disabled="versionSaving" @click="cancelVersionEdit">
+                取消编辑
+              </button>
+              <button class="primary-button compact" type="button" :disabled="versionSaving" @click="submitAppVersion">
+                {{ versionSaving ? '保存中' : editingVersionId ? '保存版本' : '发布版本' }}
+              </button>
+            </div>
+          </section>
+
+          <section class="version-history-panel">
+            <div class="config-section-head">
+              <div>
+                <span>版本记录</span>
+                <strong>{{ latestAppVersion ? `当前最新 v${latestAppVersion.version}` : '尚未发布版本' }}</strong>
+              </div>
+            </div>
+            <div class="version-history-list">
+              <article v-for="item in appVersions" :key="item.id" class="version-history-item">
+                <div class="version-history-head">
+                  <div>
+                    <strong>v{{ item.version }}</strong>
+                    <span>浏览器插件 · {{ formatDateTime(item.createdAt) }}</span>
+                  </div>
+                  <mark :class="item.forceUpdate ? 'status-amount_mismatch' : 'status-success'">
+                    {{ item.forceUpdate ? '强提醒' : '普通' }}
+                  </mark>
+                </div>
+                <div class="version-history-actions">
+                  <button class="secondary-button compact" type="button" :disabled="versionSaving" @click="editAppVersion(item)">编辑</button>
+                  <button class="secondary-button compact danger-action" type="button" :disabled="versionSaving" @click="removeAppVersion(item)">删除</button>
+                </div>
+                <code class="version-download-url">{{ item.downloadUrl }}</code>
+                <pre v-if="item.releaseNotes" class="version-notes-preview">{{ item.releaseNotes }}</pre>
+                <p v-else class="modal-hint">未填写更新日志。</p>
+              </article>
+              <div v-if="appVersions.length === 0" class="list-empty">暂无版本记录，发布第一条后插件才会收到更新提示。</div>
+            </div>
+          </section>
         </div>
       </section>
 
       <section v-else-if="adminView === 'users'" class="admin-table-view">
         <div class="operations-head">
           <div>
-            <span>订单运营</span>
+            <span>订单管理</span>
             <strong>订单、支付和授权状态集中查询</strong>
           </div>
           <div class="ops-kpis">
@@ -718,8 +1191,14 @@ if (adminLoggedIn.value) {
             <div class="license-card-meta">
               <span>渠道 {{ sourceLabel(item.sourceChannel) }}</span>
               <span>批次 {{ item.batchName }}</span>
+              <span>迁移 {{ item.deviceMigrationCount }}/{{ item.deviceMigrationLimit }}</span>
               <span>到期 {{ item.expiresAt }}</span>
               <span>创建 {{ item.createdAt }}</span>
+            </div>
+            <div class="license-card-actions">
+              <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && openReplaceDialog(rawLicenseByCode(item.code)!)">补发</button>
+              <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && openLimitsDialog(rawLicenseByCode(item.code)!)">限制</button>
+              <button class="secondary-button compact danger-action" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && revokeLicense(rawLicenseByCode(item.code)!)">吊销</button>
             </div>
           </div>
           <div v-if="filteredLicenses.length === 0" class="list-empty">暂无匹配卡密</div>
@@ -727,18 +1206,24 @@ if (adminLoggedIn.value) {
 
         <!-- 表格视图 -->
         <table v-else>
-          <thead><tr><th>激活码</th><th>套餐</th><th>渠道</th><th>批次</th><th>状态</th><th>授权到期</th><th>创建时间</th><th>订单号</th></tr></thead>
+          <thead><tr><th>激活码</th><th>套餐</th><th>渠道</th><th>批次</th><th>状态</th><th>迁移</th><th>授权到期</th><th>创建时间</th><th>订单号</th><th>操作</th></tr></thead>
           <tbody>
-            <tr v-if="filteredLicenses.length === 0"><td colspan="8" class="table-empty">暂无匹配卡密</td></tr>
+            <tr v-if="filteredLicenses.length === 0"><td colspan="10" class="table-empty">暂无匹配卡密</td></tr>
             <tr v-for="item in filteredLicenses" :key="item.code" :class="{ selected: selectedLicense === item.code }" tabindex="0" @click="selectedLicense = item.code" @keydown.enter="selectedLicense = item.code">
               <td><code class="hash-code">{{ item.code }}</code></td>
               <td>{{ planLabel(item.plan) }}</td>
               <td>{{ sourceLabel(item.sourceChannel) }}</td>
               <td>{{ item.batchName }}</td>
               <td><mark :class="`status-${item.status}`">{{ statusLabel(item.status) }}</mark></td>
+              <td>{{ item.deviceMigrationCount }}/{{ item.deviceMigrationLimit }}</td>
               <td>{{ item.expiresAt }}</td>
               <td>{{ item.createdAt }}</td>
               <td>{{ item.orderNo }}</td>
+              <td class="table-actions">
+                <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && openReplaceDialog(rawLicenseByCode(item.code)!)">补发</button>
+                <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && openLimitsDialog(rawLicenseByCode(item.code)!)">限制</button>
+                <button class="secondary-button compact danger-action" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && revokeLicense(rawLicenseByCode(item.code)!)">吊销</button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -764,7 +1249,7 @@ if (adminLoggedIn.value) {
         <div class="operations-head">
           <div>
             <span>授权记录</span>
-            <strong>插件启动、激活、校验、续租和 Selector 拉取事件</strong>
+            <strong>插件启动、激活、校验、续租、设备迁移和 Selector 拉取事件</strong>
           </div>
           <div class="ops-kpis">
             <span><b>{{ remoteLeases.length }}</b>记录总数</span>
@@ -789,7 +1274,7 @@ if (adminLoggedIn.value) {
           </button>
         </div>
         <table>
-          <thead><tr><th>时间</th><th>激活码</th><th>事件</th><th>结果</th><th>IP 地址</th><th>设备</th><th>平台</th><th>授权到期</th><th>原因</th></tr></thead>
+          <thead><tr><th>时间</th><th>激活码</th><th>事件</th><th>结果</th><th>IP 地址</th><th>安装实例</th><th>平台</th><th>授权到期</th><th>原因</th></tr></thead>
           <tbody>
             <tr v-if="paginatedLeases.length === 0"><td colspan="9" class="table-empty">暂无授权记录。</td></tr>
             <tr v-for="item in paginatedLeases" :key="item.id">
@@ -798,7 +1283,7 @@ if (adminLoggedIn.value) {
               <td>{{ eventLabel(item.eventType) }}</td>
               <td><mark :class="`status-${item.status}`">{{ statusLabel(item.status) }}</mark></td>
               <td><code>{{ item.ipAddress || '-' }}</code></td>
-              <td><code class="hash-code">{{ shortHash(item.machineHash) }}</code></td>
+              <td><code class="hash-code">{{ shortHash(item.clientInstallId) }}</code></td>
               <td>{{ item.platform || '-' }}</td>
               <td>{{ item.expiresAt ? formatDateTime(item.expiresAt) : '-' }}</td>
               <td>{{ item.reason || '-' }}</td>
@@ -829,7 +1314,7 @@ if (adminLoggedIn.value) {
             <Layers3 :size="28" />
             <div>
               <strong>Selector 版本状态</strong>
-              <p>Selector 告诉 PubFlow 插件在各平台发布时如何定位输入框和按钮（CSS 选择器）。插件启动时自动拉取最新版本。</p>
+              <p>保留功能：当前 v0.2 Pro 插件使用本地 Selector，这里仅作为未来远程配置版本库，不参与插件运行链路。</p>
             </div>
           </div>
           <div v-if="selectorVersion" class="selector-status-detail">
@@ -904,7 +1389,7 @@ if (adminLoggedIn.value) {
             <input v-model.number="generateQuantity" type="number" min="1" max="100" />
           </label>
           <label>
-            <span>最大设备数</span>
+            <span>最大安装实例数</span>
             <input v-model.number="generateMaxDevices" type="number" min="1" max="10" />
           </label>
           <label>
@@ -925,6 +1410,79 @@ if (adminLoggedIn.value) {
           <button class="primary-button compact" type="button" :disabled="generateLoading" @click="handleGenerateLicenses">
             {{ generateLoading ? '生成中...' : '确认生成' }}
           </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="showReplaceDialog"
+      class="modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="补发激活码"
+      @click.self="showReplaceDialog = false"
+      @keydown.escape="showReplaceDialog = false"
+    >
+      <div class="modal-content" tabindex="-1">
+        <div class="modal-header">
+          <h3>补发激活码</h3>
+          <button class="icon-button" type="button" aria-label="关闭" @click="showReplaceDialog = false">
+            <X :size="20" />
+          </button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-hint">原激活码：{{ actionLicense?.activationCode }}</p>
+          <label>
+            <span>补发原因</span>
+            <input v-model="replaceReason" placeholder="例如用户换机失败、卡密泄露" />
+          </label>
+          <label class="inline-toggle">
+            <input v-model="replaceRevokeOld" type="checkbox" />
+            同时注销原激活码并吊销关联 Lease
+          </label>
+          <p v-if="replaceResult" class="generate-result">{{ replaceResult }}</p>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary-button compact" type="button" @click="showReplaceDialog = false">关闭</button>
+          <button class="primary-button compact" type="button" @click="submitReplaceLicense">确认补发</button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="showLimitsDialog"
+      class="modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="调整设备限制"
+      @click.self="showLimitsDialog = false"
+      @keydown.escape="showLimitsDialog = false"
+    >
+      <div class="modal-content" tabindex="-1">
+        <div class="modal-header">
+          <h3>调整设备限制</h3>
+          <button class="icon-button" type="button" aria-label="关闭" @click="showLimitsDialog = false">
+            <X :size="20" />
+          </button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-hint">当前激活码：{{ actionLicense?.activationCode }}；已迁移 {{ actionLicense?.deviceMigrationCount ?? 0 }} 次。</p>
+          <label>
+            <span>最大安装实例数</span>
+            <input v-model.number="limitsMaxDevices" type="number" min="1" max="20" />
+          </label>
+          <label>
+            <span>迁移次数上限</span>
+            <input v-model.number="limitsMigrationLimit" type="number" min="0" max="100" />
+          </label>
+          <label>
+            <span>调整原因</span>
+            <input v-model="limitsReason" placeholder="例如用户重装系统，补一次迁移额度" />
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary-button compact" type="button" @click="showLimitsDialog = false">取消</button>
+          <button class="primary-button compact" type="button" @click="submitLicenseLimits">保存限制</button>
         </div>
       </div>
     </div>

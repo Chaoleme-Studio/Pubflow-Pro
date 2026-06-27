@@ -11,6 +11,15 @@ pub struct AppStateConfig {
     /// Selector AES 派生主密钥
     pub selector_secret: String,
 
+    /// Selector 二进制协议服务端私钥（hex）
+    pub selector_protocol_private_key: String,
+
+    /// Selector 协议请求允许的时间偏差
+    pub selector_replay_window_seconds: i64,
+
+    /// Selector 协议 nonce 去重保留时间
+    pub selector_nonce_ttl_seconds: u64,
+
     /// 机器码哈希盐
     pub machine_salt: String,
 

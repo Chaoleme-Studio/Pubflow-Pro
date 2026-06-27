@@ -22,6 +22,7 @@ import type { PlatformConfig } from '../types';
 
 const XIAOHONGSHU_IMAGE_DESCRIPTION_SELECTOR = '.tiptap.ProseMirror, [contenteditable="true"]';
 
+/** 获取页面中所有可见的小红书开关卡片，按位置排序 */
 function getXiaohongshuSwitchCards() {
   return Array.from(document.querySelectorAll<HTMLElement>('.custom-switch-card, [class*="switch-card"]'))
     .filter((card) => isVisible(card))
@@ -32,6 +33,7 @@ function getXiaohongshuSwitchCards() {
     });
 }
 
+/** 根据标签查找对应的开关卡片（原创声明或定时发布） */
 function findXiaohongshuSwitchCard(label: '原创声明' | '定时发布') {
   const cards = getXiaohongshuSwitchCards();
 
@@ -40,6 +42,7 @@ function findXiaohongshuSwitchCard(label: '原创声明' | '定时发布') {
   return label === '原创声明' ? cards[0] : cards[cards.length - 1];
 }
 
+/** 等待开关卡片内的可点击开关元素就绪 */
 async function waitForXiaohongshuSwitchReady(card: HTMLElement, timeoutMs = 10000): Promise<HTMLElement | null> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -52,6 +55,7 @@ async function waitForXiaohongshuSwitchReady(card: HTMLElement, timeoutMs = 1000
   return null;
 }
 
+/** 点击小红书开关卡片，切换开关状态 */
 async function clickXiaohongshuSwitchCard(card: HTMLElement) {
   scrollIntoView(card);
   await waitForIdle(250);
@@ -61,6 +65,7 @@ async function clickXiaohongshuSwitchCard(card: HTMLElement) {
   await waitForIdle(700);
 }
 
+/** 填充小红书视频原创声明，处理短视频不支持原创声明的情况 */
 async function fillXiaohongshuVideoOriginalDeclare(config: PlatformConfig): Promise<string> {
   let originalCard = findXiaohongshuSwitchCard('原创声明');
   if (!originalCard) {
@@ -83,6 +88,7 @@ async function fillXiaohongshuVideoOriginalDeclare(config: PlatformConfig): Prom
   return '';
 }
 
+/** 填充小红书定时发布，优先使用开关卡片方式 */
 async function fillXiaohongshuScheduled(config: PlatformConfig, scheduledAt: number) {
   let scheduleCard = findXiaohongshuSwitchCard('定时发布');
   if (!scheduleCard) {
@@ -101,6 +107,7 @@ async function fillXiaohongshuScheduled(config: PlatformConfig, scheduledAt: num
   await fillScheduled(config, scheduledAt);
 }
 
+/** 填充小红书图文描述，支持多种编辑器注入方式 */
 async function fillXiaohongshuImageDescription(value: string) {
   const pageWorldFilled = await fillXiaohongshuImageDescriptionInPageWorld(value);
   if (pageWorldFilled) return true;
@@ -142,6 +149,7 @@ async function fillXiaohongshuImageDescription(value: string) {
   return editor.textContent?.includes(value) || false;
 }
 
+/** 通过页面世界（page world）方式填充图文描述 */
 async function fillXiaohongshuImageDescriptionInPageWorld(value: string) {
   try {
     const response = await browser.runtime.sendMessage({
@@ -154,6 +162,7 @@ async function fillXiaohongshuImageDescriptionInPageWorld(value: string) {
   }
 }
 
+/** 使用 Tiptap 编辑器 API 填充图文描述 */
 async function fillXiaohongshuTiptapDescription(editorElement: HTMLElement, value: string) {
   const tiptapEditor = findXiaohongshuTiptapEditor(editorElement);
   if (!tiptapEditor) return false;
@@ -171,6 +180,7 @@ async function fillXiaohongshuTiptapDescription(editorElement: HTMLElement, valu
   }
 }
 
+/** 在 DOM 元素中查找 Tiptap 编辑器实例 */
 function findXiaohongshuTiptapEditor(element: HTMLElement): any {
   const candidates = [element, ...Array.from(element.querySelectorAll<HTMLElement>('.ProseMirror, .tiptap'))];
   for (const candidate of candidates) {
@@ -180,6 +190,7 @@ function findXiaohongshuTiptapEditor(element: HTMLElement): any {
   return null;
 }
 
+/** 将纯文本转换为小红书 Tiptap 编辑器所需的 HTML 格式 */
 function plainTextToXiaohongshuHtml(value: string) {
   const lines = value.split(/\r?\n/);
   return lines
@@ -187,6 +198,7 @@ function plainTextToXiaohongshuHtml(value: string) {
     .join('');
 }
 
+/** 转义 HTML 特殊字符，防止 XSS 和内容注入问题 */
 function escapeXiaohongshuHtml(value: string) {
   return value
     .replace(/&/g, '&amp;')
@@ -196,6 +208,7 @@ function escapeXiaohongshuHtml(value: string) {
     .replace(/'/g, '&#39;');
 }
 
+/** 上传小红书封面图片 */
 async function uploadXiaohongshuCover(config: PlatformConfig, content: ContentData) {
   if (!content.coverCacheId || !config.fields.cover) return '';
 
@@ -227,6 +240,7 @@ async function uploadXiaohongshuCover(config: PlatformConfig, content: ContentDa
   return changed ? '封面已通过小红书封面弹窗上传并确认。' : '封面已通过小红书封面弹窗上传并确认，请检查封面预览。';
 }
 
+/** 查找小红书封面上传入口元素 */
 function findXiaohongshuCoverEntry(config: PlatformConfig) {
   return (
     findVisibleElement(config.fields.cover?.selectors || []) ||
@@ -238,6 +252,7 @@ function findXiaohongshuCoverEntry(config: PlatformConfig) {
   );
 }
 
+/** 打开小红书封面设置弹窗 */
 async function openXiaohongshuCoverDialog(coverElement?: HTMLElement) {
   const existingDialog = findXiaohongshuCoverDialog();
   if (existingDialog) return existingDialog;
@@ -265,6 +280,7 @@ async function openXiaohongshuCoverDialog(coverElement?: HTMLElement) {
   return null;
 }
 
+/** 查找封面区域可见的悬停点击目标（如"修改封面"按钮） */
 function findVisibleXiaohongshuCoverHoverTarget() {
   const coverArea = document.querySelector<HTMLElement>('.publish-page-content-cover');
   const hoverTargets = coverArea?.querySelectorAll<HTMLElement>('.operator, .text') || [];
@@ -275,6 +291,7 @@ function findVisibleXiaohongshuCoverHoverTarget() {
   return null;
 }
 
+/** 查找小红书封面设置弹窗 */
 function findXiaohongshuCoverDialog(): HTMLElement | null {
   const dialogs = document.querySelectorAll<HTMLElement>(
     '.d-modal.cover-modal, .cover-modal, .d-modal-mask, [role="dialog"], [class*="modal"]',
@@ -288,6 +305,7 @@ function findXiaohongshuCoverDialog(): HTMLElement | null {
   return null;
 }
 
+/** 等待封面弹窗内的图片文件 input 元素出现 */
 async function waitForXiaohongshuCoverInput(timeoutMs: number) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -299,6 +317,7 @@ async function waitForXiaohongshuCoverInput(timeoutMs: number) {
   return null;
 }
 
+/** 在指定范围内查找图片文件 input 元素 */
 function findXiaohongshuImageInput(scope: ParentNode): HTMLInputElement | null {
   const input = scope.querySelector<HTMLInputElement>(
     'input[type="file"][accept*="image"], input[type="file"][accept*=".jpg"], input[type="file"][accept*=".jpeg"], input[type="file"][accept*=".png"]',
@@ -313,6 +332,7 @@ function findXiaohongshuImageInput(scope: ParentNode): HTMLInputElement | null {
   return null;
 }
 
+/** 等待封面弹窗内出现指定文本的按钮 */
 async function waitForXiaohongshuDialogButton(texts: string[], timeoutMs: number) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -324,6 +344,7 @@ async function waitForXiaohongshuDialogButton(texts: string[], timeoutMs: number
   return null;
 }
 
+/** 在指定范围内查找包含指定文本的可点击按钮 */
 function findXiaohongshuButton(scope: HTMLElement, texts: string[]) {
   const buttons = scope.querySelectorAll<HTMLElement>('button, [role="button"], .d-button, [class*="button"]');
   for (const button of buttons) {
@@ -333,6 +354,7 @@ function findXiaohongshuButton(scope: HTMLElement, texts: string[]) {
   return null;
 }
 
+/** 判断元素是否可点击（未禁用、可见且有尺寸） */
 function isClickableXiaohongshuElement(element: HTMLElement) {
   const rect = element.getBoundingClientRect();
   const disabled =
@@ -343,6 +365,7 @@ function isClickableXiaohongshuElement(element: HTMLElement) {
   return !disabled && isVisible(element) && rect.width > 0 && rect.height > 0;
 }
 
+/** 填充小红书内容类型声明下拉选项 */
 async function fillXiaohongshuContentTypeDeclaration(targetText: string) {
   const normalizedTarget = targetText.replace(/\s+/g, '');
   if (!normalizedTarget || normalizedTarget === '不设置' || normalizedTarget === '不声明') return;
@@ -360,6 +383,7 @@ async function fillXiaohongshuContentTypeDeclaration(targetText: string) {
   await waitForIdle(400);
 }
 
+/** 查找内容类型声明下拉框的触发元素 */
 function findXiaohongshuContentTypeDeclarationTrigger(targetText: string) {
   const contents = document.querySelectorAll<HTMLElement>('.d-select-content');
   for (const content of contents) {
@@ -385,6 +409,7 @@ function findXiaohongshuContentTypeDeclarationTrigger(targetText: string) {
   return null;
 }
 
+/** 等待内容类型声明选项出现 */
 async function waitForXiaohongshuContentTypeDeclarationOption(targetText: string, timeoutMs: number) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -395,6 +420,7 @@ async function waitForXiaohongshuContentTypeDeclarationOption(targetText: string
   return null;
 }
 
+/** 查找内容类型声明下拉选项 */
 function findXiaohongshuContentTypeDeclarationOption(targetText: string) {
   const contentOptions = document.querySelectorAll<HTMLElement>(
     '.declaration-drop-down .d-option-content, .declaration-drop-down .d-option-name, .d-dropdown .d-option-content, .d-dropdown .d-option-name',
@@ -421,6 +447,7 @@ function findXiaohongshuContentTypeDeclarationOption(targetText: string) {
   return null;
 }
 
+/** 根据选项内容查找对应的点击处理器（处理选项与点击区域分离的 UI 结构） */
 function findXiaohongshuOptionHandlerForContent(contentOption: HTMLElement) {
   const optionsRoot = contentOption.closest<HTMLElement>('.d-options, .d-dropdown, .declaration-drop-down') || document;
   const handlers = Array.from(optionsRoot.querySelectorAll<HTMLElement>('.d-option-handler'))
@@ -443,6 +470,7 @@ function findXiaohongshuOptionHandlerForContent(contentOption: HTMLElement) {
   return bestDistance <= 32 ? best : null;
 }
 
+/** 点击小红书页面元素，优先使用 CDP 点击，回退到模拟鼠标事件 */
 async function clickXiaohongshuElement(element: HTMLElement) {
   const visibleTarget = isClickableXiaohongshuElement(element)
     ? element
@@ -475,6 +503,7 @@ async function clickXiaohongshuElement(element: HTMLElement) {
   visibleTarget.dispatchEvent(new MouseEvent('click', { ...eventInit, buttons: 0 }));
 }
 
+/** 等待小红书封面弹窗关闭 */
 async function waitForXiaohongshuCoverDialogClosed(timeoutMs: number) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -484,6 +513,7 @@ async function waitForXiaohongshuCoverDialogClosed(timeoutMs: number) {
   return false;
 }
 
+/** 获取当前封面区域的图片签名（用于检测封面变化） */
 function getXiaohongshuCoverSignature() {
   const coverRoot = document.querySelector('.publish-page-content-cover') || document;
   const imageValues = Array.from(coverRoot.querySelectorAll<HTMLImageElement>('img'))
@@ -495,6 +525,7 @@ function getXiaohongshuCoverSignature() {
   return [...imageValues, ...backgroundValues].join('|');
 }
 
+/** 等待封面预览发生变化 */
 async function waitForXiaohongshuCoverPreviewChange(beforeSignature: string, timeoutMs: number) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -505,6 +536,7 @@ async function waitForXiaohongshuCoverPreviewChange(beforeSignature: string, tim
   return false;
 }
 
+/** 填充小红书内容（视频、图文、文章），处理上传、字段填充和平台设置 */
 export async function fillXiaohongshuContent(config: PlatformConfig, content: ContentData, isArticle: boolean = false) {
   let uploadMessage = '';
   let coverMessage = '';

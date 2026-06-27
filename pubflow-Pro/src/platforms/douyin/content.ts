@@ -31,6 +31,7 @@ const BASE64_ENCODE_BATCH_SIZE = 0x8000;
  * 因此先尝试文章封面专用路径；只有当前页面不是文章封面区域时，才继续走视频封面路径。
  * 不要把文章封面失败兜底成视频封面成功判断，否则会出现“代码弹出不该弹的封面窗口”的问题。
  */
+/** 抖音封面上传总入口；先识别文章封面，再回退到视频封面弹窗。 */
 async function uploadDouyinCover(
   config: PlatformConfig,
   content: ContentData,
@@ -97,6 +98,7 @@ async function uploadDouyinCover(
   return '封面已上传（横版+竖版）。';
 }
 
+/** 处理抖音文章封面的专用上传路径。 */
 async function uploadDouyinArticleCover(fields: PlatformConfig['fields'], file: File) {
   const coverElement = findVisibleElement(fields.cover?.selectors || []);
   if (!coverElement || !isDouyinArticleCoverEntry(coverElement)) return '';
@@ -335,10 +337,7 @@ async function waitForDouyinArticleCoverChange(beforeSignature: string, timeoutM
   return false;
 }
 
-/**
- * 通过 background 的 chrome.scripting.executeScript({ world: 'MAIN' })
- * 在页面主世界执行 React fiber 注入，绕过 content script 隔离环境限制。
- */
+/** 通过 background 在页面主世界注入 React fiber 文件，绕过 content script 隔离限制。 */
 async function uploadCoverViaBackground(file: File): Promise<boolean> {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
@@ -370,9 +369,7 @@ async function uploadCoverViaBackground(file: File): Promise<boolean> {
   }
 }
 
-/**
- * 在弹窗中按文本查找按钮
- */
+/** 在封面弹窗中按文本查找可点击按钮。 */
 function findDialogButton(texts: string[]): HTMLElement | null {
   const dialog = findCoverDialog();
   const scope = dialog || document;
@@ -386,6 +383,7 @@ function findDialogButton(texts: string[]): HTMLElement | null {
   return null;
 }
 
+/** 查找抖音视频封面编辑弹窗。 */
 function findCoverDialog(): HTMLElement | null {
   const dialogs = document.querySelectorAll<HTMLElement>(
     '.dy-creator-content-modal-content, .dy-creator-content-modal, [role="dialog"]',
@@ -403,6 +401,7 @@ function findCoverDialog(): HTMLElement | null {
   return null;
 }
 
+/** 轮询等待弹窗中出现指定文本的按钮。 */
 async function waitForDialogButton(texts: string[], timeoutMs: number): Promise<HTMLElement | null> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -413,6 +412,7 @@ async function waitForDialogButton(texts: string[], timeoutMs: number): Promise<
   return null;
 }
 
+/** 判断弹窗按钮是否可见且可点击。 */
 function isClickableDialogButton(button: HTMLElement) {
   const rect = button.getBoundingClientRect();
   const disabled =
@@ -430,6 +430,7 @@ function isClickableDialogButton(button: HTMLElement) {
   );
 }
 
+/** 点击弹窗按钮；优先尝试 CDP 可信点击，失败再派发自定义鼠标事件。 */
 async function clickDialogButton(button: HTMLElement) {
   scrollIntoView(button);
   await waitForIdle(120);
@@ -457,6 +458,7 @@ async function clickDialogButton(button: HTMLElement) {
   button.dispatchEvent(new MouseEvent('click', { ...eventInit, buttons: 0 }));
 }
 
+/** 获取封面弹窗当前活跃步骤的文本。 */
 function getActiveCoverStepText() {
   const dialog = findCoverDialog();
   const scope = dialog || document;
@@ -464,6 +466,7 @@ function getActiveCoverStepText() {
   return activeStep?.textContent?.trim() || '';
 }
 
+/** 轮询等待封面编辑进入指定步骤。 */
 async function waitForCoverStep(text: string, timeoutMs: number) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -473,6 +476,7 @@ async function waitForCoverStep(text: string, timeoutMs: number) {
   return false;
 }
 
+/** 轮询等待封面编辑弹窗关闭。 */
 async function waitForCoverDialogClosed(timeoutMs: number) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -483,6 +487,7 @@ async function waitForCoverDialogClosed(timeoutMs: number) {
   return false;
 }
 
+/** 填充抖音的自主声明/内容标记选项。 */
 async function fillDouyinDeclaration(config: PlatformConfig, targetText: string) {
   if (!config.fields.declaration) return;
   const normalizedTargetText = normalizeDouyinDeclarationText(targetText);
@@ -516,6 +521,7 @@ async function fillDouyinDeclaration(config: PlatformConfig, targetText: string)
   }
 }
 
+/** 规范化声明文案，适配抖音不同版本的文案差异。 */
 function normalizeDouyinDeclarationText(targetText: string) {
   const compact = targetText.replace(/\s+/g, '');
   if (compact === '内容含AI生成') return '内容由AI生成';
@@ -524,6 +530,7 @@ function normalizeDouyinDeclarationText(targetText: string) {
   return targetText;
 }
 
+/** 查找抖音声明设置的触发按钮。 */
 function findDouyinDeclarationTrigger(config: PlatformConfig): HTMLElement | null {
   const selectors = config.fields.declaration?.触发器.split(',').map((selector) => selector.trim()) || [];
   for (const selector of selectors) {
@@ -544,10 +551,12 @@ function findDouyinDeclarationTrigger(config: PlatformConfig): HTMLElement | nul
   return null;
 }
 
+/** 获取当前配置的抖音声明目标文本。 */
 function targetDeclarationText(config: PlatformConfig) {
   return config.fields.declaration?.选项文本 || '无需添加自主声明';
 }
 
+/** 查找抖音声明选择弹窗。 */
 function findDouyinDeclarationDialog(): HTMLElement | null {
   const dialogs = document.querySelectorAll<HTMLElement>(
     '[role="modal"], [role="dialog"], .semi-modal-wrap, .semi-modal, .semi-modal-content',
@@ -561,6 +570,7 @@ function findDouyinDeclarationDialog(): HTMLElement | null {
   return null;
 }
 
+/** 轮询等待抖音声明选择弹窗出现。 */
 async function waitForDouyinDeclarationDialog(timeoutMs: number) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -571,6 +581,7 @@ async function waitForDouyinDeclarationDialog(timeoutMs: number) {
   return null;
 }
 
+/** 在声明弹窗中查找匹配目标文本的选项。 */
 function findDouyinDeclarationOption(dialog: HTMLElement, targetText: string): HTMLElement | null {
   const inputs = dialog.querySelectorAll<HTMLInputElement>('input[type="radio"]');
   for (const input of inputs) {
@@ -591,6 +602,7 @@ function findDouyinDeclarationOption(dialog: HTMLElement, targetText: string): H
   return null;
 }
 
+/** 在声明弹窗中查找确认按钮。 */
 function findDouyinDeclarationConfirmButton(dialog: HTMLElement): HTMLElement | null {
   const buttons = dialog.querySelectorAll<HTMLElement>('button, [role="button"]');
   for (const button of buttons) {
@@ -600,6 +612,7 @@ function findDouyinDeclarationConfirmButton(dialog: HTMLElement): HTMLElement | 
   return null;
 }
 
+/** 填充抖音视频/图文/文章发布页的全部字段。 */
 export async function fillDouyinContent(config: PlatformConfig, content: ContentData, isArticle: boolean = false) {
   let uploadMessage = '';
   let coverMessage = '';

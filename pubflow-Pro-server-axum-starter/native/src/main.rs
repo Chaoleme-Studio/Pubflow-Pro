@@ -85,7 +85,7 @@ fn handle_cli() -> Option<String> {
     if wants_machine_code || wants_json {
         let raw_id = platform::get_raw_machine_id();
         let platform_name = platform::get_platform_name();
-        let salt = option_env!("MACHINE_SALT").unwrap_or("default-salt");
+        let salt = machine_salt();
 
         let response = match raw_id {
             Some(id) => {
@@ -116,6 +116,11 @@ fn handle_cli() -> Option<String> {
     }
 
     None
+}
+
+fn machine_salt() -> &'static str {
+    option_env!("MACHINE_SALT")
+        .expect("MACHINE_SALT env var must be set when building pubflow-native")
 }
 
 /// 从 stdin 读取一条 Native Messaging 消息

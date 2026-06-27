@@ -19,18 +19,25 @@ const CHROMIUM_PROFILE = normalizeLocalPath(LOCAL_CONFIG.PUBFLOW_CHROMIUM_PROFIL
 const MANUAL_BROWSER = parseBooleanEnv(LOCAL_CONFIG.PUBFLOW_MANUAL_BROWSER);
 const USE_EXISTING_CHROMIUM = parseBooleanEnv(LOCAL_CONFIG.PUBFLOW_USE_EXISTING_CHROMIUM);
 const OBFUSCATE = parseBooleanEnv(LOCAL_CONFIG.OBFUSCATE);
+const DEFAULT_LICENSE_API_BASE_URL = (LOCAL_CONFIG.PUBFLOW_LICENSE_API_BASE_URL || '').trim();
+const OFFICIAL_SITE_URL = (LOCAL_CONFIG.PUBFLOW_OFFICIAL_SITE_URL || DEFAULT_LICENSE_API_BASE_URL || '').trim();
+const LICENSE_API_HOST_PERMISSION = toHostPermission(DEFAULT_LICENSE_API_BASE_URL);
 
 if (CHROMIUM_PROFILE) {
   mkdirSync(CHROMIUM_PROFILE, { recursive: true });
 }
 
-// AI 设置页当前只会访问这些 OpenAI Compatible 接口的 /models。
+// AI 设置页会访问 OpenAI Compatible 接口的 /models 和 /chat/completions。
+// 预设域名用于清晰提示，HTTPS 通配兜底给自建中转、One API/New API、Worker 网关。
 const AI_PROVIDER_HOST_PERMISSIONS = [
   'https://api.openai.com/*',
   'https://api.deepseek.com/*',
   'https://dashscope.aliyuncs.com/*',
   'https://api.siliconflow.cn/*',
   'https://api.xiaomimimo.com/*',
+  'https://*/*',
+  'http://localhost/*',
+  'http://127.0.0.1/*',
 ];
 
 // See https://wxt.dev/api/config.html
@@ -45,6 +52,8 @@ export default defineConfig({
     define: {
       // 仅开发环境使用，用于在设置页展示预设工作区路径。
       __PUBFLOW_DEV_WORKSPACE_PATH__: JSON.stringify(DEV_WORKSPACE_PATH),
+      __PUBFLOW_DEFAULT_LICENSE_API_BASE_URL__: JSON.stringify(DEFAULT_LICENSE_API_BASE_URL),
+      __PUBFLOW_OFFICIAL_SITE_URL__: JSON.stringify(OFFICIAL_SITE_URL),
     },
   }),
   webExt: {
@@ -57,10 +66,10 @@ export default defineConfig({
     // “CDP connection closed before response to Extensions.loadUnpacked”。
     ...(USE_EXISTING_CHROMIUM
       ? {
-          chromiumPort: CHROMIUM_PORT,
-          chromiumProfile: CHROMIUM_PROFILE,
-          keepProfileChanges: true,
-        }
+        chromiumPort: CHROMIUM_PORT,
+        chromiumProfile: CHROMIUM_PROFILE,
+        keepProfileChanges: true,
+      }
       : {}),
     chromiumArgs: ['--remote-allow-origins=*'],
     startUrls: ['chrome://extensions/'],
@@ -70,11 +79,18 @@ export default defineConfig({
     short_name: 'PubFlow',
     description: '打开平台发布页后先检测阻挡，由用户确认后按拟真人节奏填充标题、描述和话题。',
     version: '0.1.0',
-    permissions: ['storage', 'unlimitedStorage', 'tabs', 'activeTab', 'sidePanel', 'scripting', 'debugger'],
+    permissions: ['storage', 'unlimitedStorage', 'tabs', 'activeTab', 'sidePanel', 'scripting', 'debugger', 'notifications'],
     // 平台页面注入 + AI 接口访问都依赖这里的 host 权限。
-    host_permissions: [...PLATFORM_MATCH_PATTERNS, ...AI_PROVIDER_HOST_PERMISSIONS],
+    host_permissions: [
+      ...PLATFORM_MATCH_PATTERNS,
+      ...AI_PROVIDER_HOST_PERMISSIONS,
+      ...(LICENSE_API_HOST_PERMISSION ? [LICENSE_API_HOST_PERMISSION] : []),
+    ],
     action: {
       default_title: 'PubFlow',
+    },
+    content_security_policy: {
+      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';",
     },
     web_accessible_resources: [
       {
@@ -128,13 +144,24 @@ function normalizeLocalPath(rawPath?: string): string | undefined {
 
   const unquoted =
     (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+      (trimmed.startsWith("'") && trimmed.endsWith("'"))
       ? trimmed.slice(1, -1)
       : trimmed;
 
   return unquoted
     .replace(/\$HOME(?=\/|\\|$)/g, homedir())
     .replace(/^~(?=\/|\\|$)/, homedir());
+}
+
+function toHostPermission(rawUrl: string): string {
+  if (!rawUrl) return '';
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    return `${url.protocol}//${url.hostname}/*`;
+  } catch {
+    return '';
+  }
 }
 
 function patchMarkstreamCss() {
@@ -154,20 +181,16 @@ function patchMarkstreamCss() {
 
 function protectExtensionRuntimeChunks() {
   const protectedRuntimeChunkPattern = /^(background\.js|content-scripts\/content\.js)$/;
-  const projectRoot = `${toBuildPath(ROOT_DIR)}/`;
-  const projectSourceRoots = [`${projectRoot}src/`, `${projectRoot}entrypoints/`];
   const options: ObfuscatorOptions = {
     compact: true,
-    controlFlowFlattening: true,
-    controlFlowFlatteningThreshold: 0.5,
-    deadCodeInjection: true,
-    deadCodeInjectionThreshold: 0.2,
+    controlFlowFlattening: false,
+    deadCodeInjection: false,
     stringArray: true,
-    stringArrayEncoding: ['rc4'],
-    stringArrayThreshold: 1,
+    stringArrayEncoding: ['base64'],
+    stringArrayThreshold: 0.75,
     splitStrings: true,
-    splitStringsChunkLength: 8,
-    transformObjectKeys: true,
+    splitStringsChunkLength: 16,
+    transformObjectKeys: false,
     unicodeEscapeSequence: false,
   };
 
@@ -194,21 +217,8 @@ function protectExtensionRuntimeChunks() {
   };
 
   function shouldProtectChunk(chunk: { fileName: string; moduleIds?: string[] }): boolean {
-    // background/content 是扩展自动化的核心逻辑，文件名稳定，始终保护。
-    if (protectedRuntimeChunkPattern.test(chunk.fileName)) return true;
-
-    // dashboard、sidepanel、各页面 view 和平台配置都会被 Rollup 拆到 chunks 下。
-    // 只保护包含本项目源码的 chunk，跳过纯第三方库（Vue/Highcharts/markstream 等），
-    // 保留构建速度并降低第三方库被混淆后出现运行时兼容问题的概率。
-    if (!chunk.fileName.startsWith('chunks/') || !chunk.fileName.endsWith('.js')) return false;
-
-    return (chunk.moduleIds || []).some((id) => {
-      const modulePath = toBuildPath(id.split('?')[0] || id);
-      return projectSourceRoots.some((sourceRoot) => modulePath.startsWith(sourceRoot));
-    });
+    // 只保护 background/content。dashboard、sidepanel、settings 等 Vue 页面 chunk
+    // 对运行时动态导入和组件选项更敏感，混淆后容易出现页面局部空白。
+    return protectedRuntimeChunkPattern.test(chunk.fileName);
   }
-}
-
-function toBuildPath(filePath: string): string {
-  return filePath.replace(/\\/g, '/').replace(/\/+$/, '');
 }

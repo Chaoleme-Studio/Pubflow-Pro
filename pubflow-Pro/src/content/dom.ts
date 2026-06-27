@@ -79,6 +79,7 @@ export function querySelectorDeep<T extends Element = Element>(selector: string)
   return findInDeepRoots<T>(getRoot(), visitedRoots, (root) => root.querySelector<T>(selector));
 }
 
+/** 深度查找满足谓词的元素，递归穿透 shadowRoot 和同源 iframe。 */
 export function findDeepElement<T extends Element = Element, S extends T = T>(
   selector: string,
   predicate: (element: T) => element is S,

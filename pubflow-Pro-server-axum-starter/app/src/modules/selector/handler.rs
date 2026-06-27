@@ -1,28 +1,44 @@
 use aide::transform::TransformOperation;
 use axum::Json;
+use axum::body::Bytes;
 use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use std::sync::Arc;
 
 use crate::{ApiResponse, AppError, AppState, shared::FromState};
 
-use super::dto::{
-    FetchSelectorRequest, SelectorResponse, SelectorVersionResponse, UploadSelectorRequest,
-    UploadSelectorResponse,
-};
+use super::dto::{SelectorVersionResponse, UploadSelectorRequest, UploadSelectorResponse};
 use super::service::SelectorService;
 
 pub async fn fetch(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<FetchSelectorRequest>,
-) -> Result<ApiResponse<SelectorResponse>, AppError> {
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    if !content_type.starts_with("application/octet-stream") {
+        return Err(crate::error::PubFlowError::SelectorProtocol(
+            "PFSP_UNSUPPORTED_MEDIA_TYPE".to_string(),
+        )
+        .into());
+    }
     let service = SelectorService::from_state(&state);
-    Ok(ApiResponse::success(service.fetch(req).await?))
+    let bytes = service.fetch_protocol(&body).await?;
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/octet-stream")],
+        bytes,
+    )
+        .into_response())
 }
 
 pub fn fetch_docs(op: TransformOperation) -> TransformOperation {
-    op.description("获取当前加密 Selector")
+    op.description("使用 PFSP v1 二进制协议获取当前加密 Selector")
         .tag("PubFlow Selector")
-        .response::<200, ApiResponse<SelectorResponse>>()
 }
 
 pub async fn version(

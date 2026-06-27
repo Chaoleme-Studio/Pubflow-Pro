@@ -4,6 +4,7 @@ import { composePublishMessage, waitForEditorReady } from '../../content/publish
 import type { ContentData } from '../../types';
 import type { PlatformConfig } from '../types';
 
+/** 填充西瓜视频发布内容（标题、描述、封面、视频）。 */
 export async function fillXiguaContent(config: PlatformConfig, content: ContentData) {
   let uploadMessage = '';
   if (content.videoCacheId) {

@@ -8,6 +8,8 @@ pub mod admin;
 mod docs;
 /// PubFlow Lease 授权模块
 pub mod lease;
+/// PubFlow 前台激活码自助服务模块
+pub mod license_center;
 /// 404 处理
 mod not_found;
 /// PubFlow 前台产品配置模块

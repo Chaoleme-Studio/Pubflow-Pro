@@ -23,6 +23,7 @@ interface StoredWorkspaceHandle {
 }
 
 // 浏览器不会直接让扩展长期持有目录句柄，这里用 IndexedDB 保存授权过的 handle。
+/** 打开保存工作区目录句柄的 IndexedDB。 */
 function openWorkspaceDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -38,6 +39,7 @@ function openWorkspaceDb(): Promise<IDBDatabase> {
   });
 }
 
+/** 在工作区 IndexedDB 上执行一次对象存储操作。 */
 async function withHandleStore<T>(
   mode: IDBTransactionMode,
   callback: (store: IDBObjectStore) => IDBRequest<T>,
@@ -64,6 +66,7 @@ export const defaultWorkspaceSettings: WorkspaceSettings = {
   permission: 'unknown',
 };
 
+/** 加载工作区设置（目录名、权限状态等）。 */
 export async function loadWorkspaceSettings(): Promise<WorkspaceSettings> {
   const stored = await browser.storage.local.get(STORAGE_KEYS.workspaceSettings);
   return {
@@ -72,12 +75,14 @@ export async function loadWorkspaceSettings(): Promise<WorkspaceSettings> {
   } as WorkspaceSettings;
 }
 
+/** 保存工作区设置。 */
 export async function saveWorkspaceSettings(settings: WorkspaceSettings) {
   await browser.storage.local.set({
     [STORAGE_KEYS.workspaceSettings]: settings,
   });
 }
 
+/** 保存用户授权的工作区目录句柄，并更新设置中的目录名和权限状态。 */
 export async function saveWorkspaceDirectory(handle: FileSystemDirectoryHandle) {
   const updatedAt = Date.now();
   await withHandleStore('readwrite', (store) =>
@@ -95,6 +100,7 @@ export async function saveWorkspaceDirectory(handle: FileSystemDirectoryHandle) 
   });
 }
 
+/** 从 IndexedDB 读取已保存的工作区目录句柄。 */
 export async function loadWorkspaceDirectory(): Promise<StoredWorkspaceHandle | null> {
   try {
     return (await withHandleStore('readonly', (store) =>
@@ -105,11 +111,13 @@ export async function loadWorkspaceDirectory(): Promise<StoredWorkspaceHandle | 
   }
 }
 
+/** 清除已保存的工作区目录句柄和设置。 */
 export async function clearWorkspaceDirectory() {
   await withHandleStore('readwrite', (store) => store.delete(WORKSPACE_HANDLE_KEY));
   await saveWorkspaceSettings(defaultWorkspaceSettings);
 }
 
+/** 查询工作区目录的写入权限状态。 */
 export async function queryWorkspacePermission(
   handle: FileSystemDirectoryHandle,
 ): Promise<PermissionState | 'unsupported'> {
@@ -118,6 +126,7 @@ export async function queryWorkspacePermission(
   return permissionHandle.queryPermission({ mode: 'readwrite' });
 }
 
+/** 向用户请求工作区目录的写入权限。 */
 export async function requestWorkspacePermission(
   handle: FileSystemDirectoryHandle,
 ): Promise<PermissionState | 'unsupported'> {
@@ -126,10 +135,12 @@ export async function requestWorkspacePermission(
   return permissionHandle.requestPermission({ mode: 'readwrite' });
 }
 
+/** 生成一个新的项目 ID，格式为 日期-随机串。 */
 export function createProjectId() {
   return `${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+/** 根据项目 ID、标题和类型生成安全的项目文件夹名称。 */
 export function createProjectFolderName(projectId: string, title?: string, contentType?: string) {
   const safeTitle = (title || 'untitled')
     .trim()
@@ -146,12 +157,14 @@ export function createProjectFolderName(projectId: string, title?: string, conte
   return `${projectId}${typeSegment}-${safeTitle || 'untitled'}`;
 }
 
+/** 检查并请求工作区目录的读写权限。 */
 async function ensureReadwritePermission(handle: FileSystemDirectoryHandle) {
   const current = await queryWorkspacePermission(handle);
   if (current === 'granted' || current === 'unsupported') return current;
   return requestWorkspacePermission(handle);
 }
 
+/** 在指定父目录下获取或创建子目录。 */
 async function getOrCreateDirectory(
   parent: FileSystemDirectoryHandle,
   name: string,
@@ -159,6 +172,7 @@ async function getOrCreateDirectory(
   return parent.getDirectoryHandle(name, { create: true });
 }
 
+/** 在工作区目录下写入或覆盖一个文件。 */
 async function writeFile(
   directory: FileSystemDirectoryHandle,
   fileName: string,
@@ -170,6 +184,7 @@ async function writeFile(
   await writable.close();
 }
 
+/** 生成唯一的素材文件名，保留原始扩展名并清理非法字符。 */
 function uniqueAssetName(file: File, prefix: string) {
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
   const base = file.name.replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]+/g, '-').slice(0, 48) || prefix;
@@ -177,6 +192,7 @@ function uniqueAssetName(file: File, prefix: string) {
 }
 
 // 这里负责把“当前草稿”映射到工作区里的项目目录，不存在就创建。
+/** 确保草稿对应的项目目录存在，返回项目相关的句柄和设置。 */
 export async function ensureWorkspaceProject(draft: ContentDraft) {
   const storedWorkspace = await loadWorkspaceDirectory();
   if (!storedWorkspace?.handle) return null;
@@ -205,6 +221,7 @@ export async function ensureWorkspaceProject(draft: ContentDraft) {
   return { projectId, projectName, projectDir, settings };
 }
 
+/** 根据项目目录句柄反查目录名；找不到时按标题生成一个新名称。 */
 async function getProjectDirectoryName(
   projectsDir: FileSystemDirectoryHandle,
   projectDir: FileSystemDirectoryHandle,
@@ -218,6 +235,7 @@ async function getProjectDirectoryName(
   return createProjectFolderName(projectId, title);
 }
 
+/** 将素材文件导入到项目目录的 assets 子目录中。 */
 export async function importProjectAsset(
   draft: ContentDraft,
   file: File,
@@ -241,6 +259,7 @@ export async function importProjectAsset(
   };
 }
 
+/** 根据草稿的平台选择生成平台状态数组。 */
 function draftToPlatformStatuses(draft: ContentDraft, existing?: PlatformStatus[]): PlatformStatus[] {
   return PLATFORM_ORDER.map((platformId) => {
     const prev = existing?.find((item) => item.platformId === platformId);
@@ -253,6 +272,7 @@ function draftToPlatformStatuses(draft: ContentDraft, existing?: PlatformStatus[
   });
 }
 
+/** 将草稿转换为视频记录，复用已有记录的 ID 和创建时间。 */
 function draftToVideoRecord(draft: ContentDraft, existing?: VideoRecord): VideoRecord {
   const now = Date.now();
   const projectId = draft.projectId || existing?.projectId || existing?.id || createProjectId();
@@ -288,6 +308,7 @@ export async function loadProjectManifestByVideo(projectId: string, title?: stri
   return readProjectManifest(projectDir);
 }
 
+/** 将草稿的 manifest 写入项目目录，并更新全局项目索引。 */
 export async function writeProjectManifest(draft: ContentDraft, persistArticleContent?: string) {
   const project = await ensureWorkspaceProject(draft);
   if (!project) return null;
@@ -329,6 +350,7 @@ export interface WorkspaceProjectManifest {
   articleContent?: string;
 }
 
+/** 读取目录下指定 JSON 文件的内容，失败返回 null。 */
 async function readJsonFile(
   directory: FileSystemDirectoryHandle,
   fileName: string,
@@ -343,6 +365,7 @@ async function readJsonFile(
   }
 }
 
+/** 加载工作区中所有有效项目 manifest，并异步清理已软删除的残留目录。 */
 export async function loadAllWorkspaceProjects(): Promise<WorkspaceProjectManifest[]> {
   const storedWorkspace = await loadWorkspaceDirectory();
   if (!storedWorkspace?.handle) return [];
@@ -378,6 +401,7 @@ export async function loadAllWorkspaceProjects(): Promise<WorkspaceProjectManife
   }
 }
 
+/** 清理已软删除但物理目录仍存在的项目文件夹。 */
 async function cleanupDeletedProjectDirs(
   projectsDir: FileSystemDirectoryHandle,
   dirs: Array<{ name: string; handle: FileSystemDirectoryHandle }>,
@@ -396,6 +420,7 @@ async function cleanupDeletedProjectDirs(
 }
 
 // 优先按 manifest 里的 projectId 找目录；目录名可能因为标题或迁移历史保留旧前缀。
+/** 根据 projectId 在工作区中查找对应的项目目录。 */
 async function getProjectDirectoryById(projectId: string, title?: string) {
   const storedWorkspace = await loadWorkspaceDirectory();
   if (!storedWorkspace?.handle || !projectId) return null;
@@ -432,6 +457,7 @@ async function getProjectDirectoryById(projectId: string, title?: string) {
   return null;
 }
 
+/** 读取项目目录下的 project.json 并校验版本。 */
 export async function readProjectManifest(
   projectDir: FileSystemDirectoryHandle,
 ): Promise<WorkspaceProjectManifest | null> {
@@ -464,6 +490,7 @@ export async function readProjectManifest(
   };
 }
 
+/** 用视频和发布记录构造标准化的项目 manifest 对象。 */
 export function createProjectManifest(input: {
   video: VideoRecord;
   records?: PublishRecord[];
@@ -487,6 +514,7 @@ export function createProjectManifest(input: {
   return manifest;
 }
 
+/** 将视频记录和发布记录写入对应的项目目录，不存在项目则创建。 */
 export async function writeProjectData(video: VideoRecord, records: PublishRecord[] = []) {
   const storedWorkspace = await loadWorkspaceDirectory();
   if (!storedWorkspace?.handle) return false;
@@ -514,6 +542,7 @@ export async function writeProjectData(video: VideoRecord, records: PublishRecor
   return true;
 }
 
+/** 递归复制目录内容。 */
 async function copyDirectory(
   source: FileSystemDirectoryHandle,
   target: FileSystemDirectoryHandle,
@@ -530,6 +559,7 @@ async function copyDirectory(
   }
 }
 
+/** 在项目索引中标记项目已删除。 */
 async function markProjectDeletedInIndex(params: {
   projectId: string;
   projectName?: string;
@@ -547,6 +577,7 @@ async function markProjectDeletedInIndex(params: {
   });
 }
 
+/** 在项目 manifest 中写入 deletedAt 时间戳，实现软删除标记。 */
 async function markProjectManifestDeleted(
   projectDir: FileSystemDirectoryHandle,
   deletedAt: number,
@@ -561,6 +592,7 @@ async function markProjectManifestDeleted(
   return true;
 }
 
+/** 删除项目数据：先移动到 Trash，再标记软删除，并尝试移除原目录。 */
 export async function deleteProjectData(video: Pick<VideoRecord, 'id' | 'projectId' | 'title'>) {
   const storedWorkspace = await loadWorkspaceDirectory();
   if (!storedWorkspace?.handle) return { ok: false, reason: 'no-workspace' as const };
@@ -611,6 +643,7 @@ export async function deleteProjectData(video: Pick<VideoRecord, 'id' | 'project
   }
 }
 
+/** 尝试读取项目 assets 子目录下的单个素材文件。 */
 async function tryReadProjectAssetFile(
   projectDir: FileSystemDirectoryHandle,
   subdirName: string,
@@ -628,6 +661,7 @@ async function tryReadProjectAssetFile(
   }
 }
 
+/** 从工作区加载项目相关的视频、封面、音乐和图文素材文件。 */
 export async function loadProjectAssetFiles(params: {
   projectId?: string;
   title?: string;
@@ -677,6 +711,7 @@ export interface PubFlowDataFile {
     platformSettings: Record<string, unknown>;
     globalSettings: Record<string, unknown>;
     serverConfig: Record<string, unknown>;
+    licensingSettings?: Record<string, unknown>;
     aiSettings: Record<string, unknown>;
   };
   projectIndex: Array<{
@@ -691,6 +726,7 @@ export interface PubFlowDataFile {
 const DATA_FILE_NAME = 'pubflow-data.json';
 const REDACTED_SECRET = '';
 
+/** 从设置中移除 API 密钥等敏感信息，避免写入工作区数据文件时泄露。 */
 function redactSettingsSecrets(settings: PubFlowDataFile['settings']): PubFlowDataFile['settings'] {
   const serverConfig = { ...settings.serverConfig };
   if ('apiKey' in serverConfig) {
@@ -714,12 +750,25 @@ function redactSettingsSecrets(settings: PubFlowDataFile['settings']): PubFlowDa
   return {
     ...settings,
     serverConfig,
+    licensingSettings: redactLicensingSettings(settings.licensingSettings),
     aiSettings,
+  };
+}
+
+function redactLicensingSettings(settings: Record<string, unknown> | undefined) {
+  if (!settings) return settings;
+  return {
+    ...settings,
+    activationCode: REDACTED_SECRET,
+    clientInstallId: REDACTED_SECRET,
+    machineHash: REDACTED_SECRET,
+    leaseToken: REDACTED_SECRET,
   };
 }
 
 let cachedHandle: FileSystemDirectoryHandle | null = null;
 
+/** 获取当前可用的工作区目录句柄，会检查并缓存权限状态。 */
 async function getWorkspaceHandle(): Promise<FileSystemDirectoryHandle | null> {
   if (cachedHandle) return cachedHandle;
   const stored = await loadWorkspaceDirectory();
@@ -770,7 +819,7 @@ export async function mergeDataFile(partial: Partial<Omit<PubFlowDataFile, 'vers
     version: 2,
     updatedAt: '',
     draft: {},
-    settings: { platformSettings: {}, globalSettings: {}, serverConfig: {}, aiSettings: {} },
+    settings: { platformSettings: {}, globalSettings: {}, serverConfig: {}, licensingSettings: {}, aiSettings: {} },
     projectIndex: [],
   } satisfies PubFlowDataFile;
 
@@ -788,6 +837,7 @@ export async function mergeDataFile(partial: Partial<Omit<PubFlowDataFile, 'vers
   });
 }
 
+/** 检查当前是否已有可用的工作区目录。 */
 export async function isWorkspaceAvailable(): Promise<boolean> {
   return getWorkspaceHandle().then((h) => h !== null);
 }

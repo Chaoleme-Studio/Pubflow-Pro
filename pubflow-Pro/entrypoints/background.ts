@@ -5,8 +5,12 @@ import { runWeixinChannelsPageWorldAction } from '../src/platforms/weixinChannel
 import type { PageWorldAction, PageWorldPayload } from '../src/platforms/weixinChannels/pageWorld';
 import { loadLibraryData, saveLibraryData } from '../src/storage/libraryStorage';
 import { loadCurrentTask, saveCurrentTask } from '../src/storage/taskStorage';
+import { hasLicenseCredentials, loadLicensingSettings, saveLicensingSettings } from '../src/licensing/licenseStorage';
+import { verifyLicense } from '../src/licensing/licenseManager';
+import { checkExtensionUpdate } from '../src/licensing/updateChecker';
 import type {
   DistributionTask,
+  LicensingSettings,
   PlatformId,
   PlatformStatus,
   PlatformTaskStatus,
@@ -28,6 +32,7 @@ declare const chrome: typeof browser & {
 };
 
 let currentTask: DistributionTask | null = null;
+let licensingSettings: LicensingSettings | null = null;
 let restoreTaskPromise: Promise<void> | null = null;
 const sidePanelPorts = new Set<Browser.runtime.Port>();
 const FILL_COMMAND_MAX_RETRIES = 6;
@@ -45,6 +50,7 @@ const fillCompletionTimers = new Map<PlatformId, ReturnType<typeof setTimeout>>(
 
 export default defineBackground(() => {
   restoreTaskPromise = restoreTask();
+  void checkExtensionUpdate(__PUBFLOW_DEFAULT_LICENSE_API_BASE_URL__, __PUBFLOW_OFFICIAL_SITE_URL__);
 
   browser.action.onClicked.addListener(async () => {
     try {
@@ -92,6 +98,16 @@ async function handleMessage(
 
     if (message.type === 'GET_SIDE_PANEL_STATUS') {
       return ok({ open: sidePanelPorts.size > 0 });
+    }
+
+    if (message.type === 'GET_LICENSE_STATUS') {
+      await ensureLicensingLoaded();
+      return ok(licensingSettings);
+    }
+
+    if (message.type === 'VERIFY_LICENSE') {
+      const result = await verifyCurrentLicense(message.payload?.licensingSettings);
+      return result.ok ? ok(result.settings) : fail(result.error || result.settings.statusMessage || '授权验证失败');
     }
 
     if (message.type === 'HANDLE_WEIXIN_DECLARE_POPUP') {
@@ -264,6 +280,10 @@ async function handleMessage(
 
     if (message.type === 'START_DISTRIBUTION') {
       clearAllFillCompletionTimeouts();
+      const license = await requireActiveLicense();
+      if (!license.ok) {
+        return fail(license.error || license.settings.statusMessage || '授权无效，请先在设置中完成激活。');
+      }
       const supportedPlatforms = message.payload.platforms.filter((platformId) =>
         supportsContentType(PLATFORM_CONFIGS[platformId], message.payload.content.contentType || 'video'),
       );
@@ -292,12 +312,14 @@ async function handleMessage(
 
     if (message.type === 'OPEN_PLATFORM') {
       ensureTask();
+      await requireActiveLicense();
       await openPlatform(message.payload.platformId);
       return ok(currentTask);
     }
 
     if (message.type === 'CONTINUE_FILL') {
       ensureTask();
+      await requireActiveLicense();
       await continueFill(message.payload.platformId);
       return ok(currentTask);
     }
@@ -802,8 +824,21 @@ function updatePlatform(platformId: PlatformId, patch: Partial<DistributionTask[
 /** 从 storage 恢复当前运行任务，扩展重载后继续保持侧边栏状态。 */
 async function restoreTask() {
   currentTask = await loadCurrentTask();
+  licensingSettings = await loadLicensingSettings();
+  await verifyLicenseOnStartup();
   if (currentTask) {
     await normalizeAndPersistCurrentTask();
+  }
+}
+
+async function verifyLicenseOnStartup() {
+  if (!licensingSettings || !hasLicenseCredentials(licensingSettings)) return;
+  try {
+    const result = await verifyLicense(licensingSettings);
+    licensingSettings = result.settings;
+    await saveLicensingSettings(licensingSettings);
+  } catch (error) {
+    console.warn('[PubFlow] 启动授权验证失败', error);
   }
 }
 
@@ -812,6 +847,28 @@ async function ensureTaskRestored() {
   if (!restoreTaskPromise) return;
   await restoreTaskPromise;
   restoreTaskPromise = null;
+}
+
+async function ensureLicensingLoaded() {
+  if (!licensingSettings) {
+    licensingSettings = await loadLicensingSettings();
+  }
+}
+
+async function verifyCurrentLicense(input?: LicensingSettings) {
+  licensingSettings = input || await loadLicensingSettings();
+  const result = await verifyLicense(licensingSettings);
+  licensingSettings = result.settings;
+  await saveLicensingSettings(licensingSettings);
+  return result;
+}
+
+async function requireActiveLicense() {
+  const result = await verifyCurrentLicense();
+  if (!result.ok) {
+    throw new Error(result.error || result.settings.statusMessage || '授权无效，请先在设置中完成激活。');
+  }
+  return result;
 }
 
 /** 持久化当前任务，并广播给 dashboard/sidepanel 刷新 UI。 */

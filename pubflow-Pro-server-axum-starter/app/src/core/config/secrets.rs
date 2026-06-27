@@ -9,7 +9,6 @@ use super::section::ConfigSection;
 /// 包含应用的敏感信息，如密钥和令牌，应妥善保管。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-#[derive(Default)]
 pub struct SecretsConfig {
     /// JWT 签名密钥（必需，至少 32 字符）
     pub jwt_secret: String,
@@ -19,6 +18,15 @@ pub struct SecretsConfig {
 
     /// Selector AES 派生主密钥
     pub selector_secret: String,
+
+    /// Selector 二进制协议服务端私钥（32 字节 hex）
+    pub selector_protocol_private_key: String,
+
+    /// Selector 协议请求时间窗口（秒）
+    pub selector_replay_window_seconds: i64,
+
+    /// Selector 协议 nonce 去重 TTL（秒）
+    pub selector_nonce_ttl_seconds: u64,
 
     /// 机器码哈希盐
     pub machine_salt: String,
@@ -36,6 +44,24 @@ pub struct SecretsConfig {
     pub admin_password_hash: String,
 }
 
+impl Default for SecretsConfig {
+    fn default() -> Self {
+        Self {
+            jwt_secret: String::new(),
+            redis_url: None,
+            selector_secret: String::new(),
+            selector_protocol_private_key: String::new(),
+            selector_replay_window_seconds: 120,
+            selector_nonce_ttl_seconds: 600,
+            machine_salt: String::new(),
+            admin_token: String::new(),
+            admin_username: String::new(),
+            admin_password: String::new(),
+            admin_password_hash: String::new(),
+        }
+    }
+}
+
 impl ConfigSection for SecretsConfig {
     fn section_name(&self) -> &str {
         "secrets"
@@ -51,6 +77,24 @@ impl ConfigSection for SecretsConfig {
             }
             if let Some(secret) = obj.get("selector_secret").and_then(|v| v.as_str()) {
                 self.selector_secret = secret.to_string();
+            }
+            if let Some(secret) = obj
+                .get("selector_protocol_private_key")
+                .and_then(|v| v.as_str())
+            {
+                self.selector_protocol_private_key = secret.to_string();
+            }
+            if let Some(seconds) = obj
+                .get("selector_replay_window_seconds")
+                .and_then(|v| v.as_i64())
+            {
+                self.selector_replay_window_seconds = seconds;
+            }
+            if let Some(seconds) = obj
+                .get("selector_nonce_ttl_seconds")
+                .and_then(|v| v.as_u64())
+            {
+                self.selector_nonce_ttl_seconds = seconds;
             }
             if let Some(salt) = obj.get("machine_salt").and_then(|v| v.as_str()) {
                 self.machine_salt = salt.to_string();
@@ -80,6 +124,18 @@ impl ConfigSection for SecretsConfig {
         }
         if self.selector_secret.len() < 32 {
             return Err("Selector 主密钥长度必须至少 32 个字符".to_string());
+        }
+        if !self.selector_protocol_private_key.is_empty()
+            && (self.selector_protocol_private_key.len() != 64
+                || hex::decode(&self.selector_protocol_private_key).is_err())
+        {
+            return Err("Selector 协议私钥必须是 32 字节 hex".to_string());
+        }
+        if self.selector_replay_window_seconds <= 0 {
+            return Err("Selector 协议时间窗口必须大于 0".to_string());
+        }
+        if self.selector_nonce_ttl_seconds < 60 {
+            return Err("Selector 协议 nonce TTL 必须至少 60 秒".to_string());
         }
         if self.machine_salt.len() < 16 {
             return Err("机器码盐长度必须至少 16 个字符".to_string());
@@ -116,6 +172,19 @@ impl ConfigSection for SecretsConfig {
         }
         if let Ok(secret) = env::var("SELECTOR_SECRET") {
             self.selector_secret = secret;
+        }
+        if let Ok(secret) = env::var("SELECTOR_PROTOCOL_PRIVATE_KEY") {
+            self.selector_protocol_private_key = secret;
+        }
+        if let Ok(seconds) = env::var("SELECTOR_REPLAY_WINDOW_SECONDS")
+            && let Ok(parsed) = seconds.parse()
+        {
+            self.selector_replay_window_seconds = parsed;
+        }
+        if let Ok(seconds) = env::var("SELECTOR_NONCE_TTL_SECONDS")
+            && let Ok(parsed) = seconds.parse()
+        {
+            self.selector_nonce_ttl_seconds = parsed;
         }
         if let Ok(salt) = env::var("MACHINE_SALT") {
             self.machine_salt = salt;

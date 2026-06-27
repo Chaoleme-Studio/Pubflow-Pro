@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::error::PubFlowError;
+use crate::product::service::ProductService;
 use crate::shared::FromState;
 use crate::shared::plan::{new_activation_code, normalize_plan};
 use crate::{AppState, ValidationError};
@@ -38,7 +39,9 @@ impl PurchaseService {
     ) -> Result<CreateOrderResponse, crate::AppError> {
         let plan = normalize_plan(&req.plan)?;
         let channel = normalize_channel(&req.channel)?;
-        let amount_cents = plan_amount_cents(plan);
+        let amount_cents = ProductService::new(self.db.clone())
+            .plan_amount_cents(plan)
+            .await?;
         let order_no = new_order_no();
 
         let inserted = order::ActiveModel {
@@ -163,6 +166,9 @@ impl PurchaseService {
             source_channel: Set("official".to_string()),
             batch_id: Set(None),
             max_devices: Set(1),
+            device_migration_limit: Set(3),
+            device_migration_count: Set(0),
+            last_migrated_at: Set(None),
             activated_at: Set(None),
             expires_at: Set(None),
             is_revoked: Set(false),
@@ -276,14 +282,6 @@ fn normalize_channel(channel: &str) -> Result<&'static str, ValidationError> {
         "wechat" => Ok("wechat"),
         "alipay" => Ok("alipay"),
         _ => Err(ValidationError::custom("channel 必须是 wechat 或 alipay")),
-    }
-}
-
-fn plan_amount_cents(plan: &str) -> i32 {
-    match plan {
-        "monthly" => 1490,
-        "yearly" => 9900,
-        _ => unreachable!("plan should be validated by normalize_plan"),
     }
 }
 

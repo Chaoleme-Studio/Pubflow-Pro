@@ -30,8 +30,8 @@
 │                                                                 │
 │  1. 用户在插件中输入激活码                                        │
 │  2. 插件调用 POST /v1/lease/activate                             │
-│  3. 服务端校验激活码 → 绑定设备 → 签发 JWT lease token             │
-│  4. 插件存储 lease token                                         │
+│  3. 服务端校验激活码 → 绑定插件安装标识 → 签发 JWT lease token      │
+│  4. 插件自动加密存储 lease token                                  │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -42,11 +42,11 @@
 │                                                                 │
 │  插件启动                                                        │
 │    │                                                            │
-│    ├─→ WASM 本地校验 lease token（解析 JWT，检查 exp）            │
-│    │     └─→ 快速判断：有效 / 即将过期 / 已过期                   │
+│    ├─→ 读取本地 lease token                                      │
+│    │     └─→ 客户端不信任本地 JWT 解析结果作为授权依据             │
 │    │                                                            │
-│    ├─→ POST /v1/lease/verify（服务端校验）                       │
-│    │     └─→ 检查：签名、设备匹配、过期、吊销状态                 │
+│    ├─→ POST /v1/selector/fetch（PFSP 自定义协议）                 │
+│    │     └─→ 检查：lease 签名、安装标识、过期、吊销状态            │
 │    │                                                            │
 │    ├─→ 请求加密 Selector 数据                                    │
 │    │     └─→ WASM 解密：AES-256-GCM(密钥 = SHA256(secret+激活码))│
@@ -62,7 +62,7 @@
 | 数据 | 加密方式 | 存储位置 | 解密方 |
 |------|---------|---------|-------|
 | Selector 配置 | AES-256-GCM | PostgreSQL | WASM（客户端） |
-| Lease Token | JWT (HS256) | 客户端本地存储 | 服务端验证 + WASM 本地校验 |
+| Lease Token | JWT (HS256) | 客户端加密存储 | 服务端验签 + 安装标识/状态校验 |
 | 管理员密码 | Argon2 | 环境变量 | 服务端验证 |
 | 订单查询令牌 | SHA-256 keyed hash | 客户端（URL 参数） | 服务端验证 |
 
@@ -84,7 +84,7 @@
 自定义 Claims：
   - lease_id        租约唯一 ID
   - license_id      关联的 license ID
-  - machine_hash    设备机器码（SHA-256 哈希）
+  - machine_hash    当前版本为插件安装标识，后续永久版可升级为 Native 设备码
   - lease_type      租约类型（subscription）
   - tier            许可等级（pro/enterprise）
   - features        功能列表（publish, batch, selector-updates 等）
@@ -94,9 +94,13 @@
   - policy_version  策略版本号
 标准 Claims（由 JWT 库自动注入）：exp, iat
 验证：
-  - 客户端 WASM：解析 payload，检查 exp（无需联网）
-  - 服务端：验签 + 设备匹配 + 过期检查 + 吊销状态
+  - 客户端：仅持有 token，不把未验签 payload 作为授权依据
+  - 服务端：验签 + 安装标识匹配 + 过期检查 + 吊销状态
 ```
+
+更完整的 PFSP、自定义协议、WASM、Native 与授权边界说明见 [README-加密授权方案.md](./README-加密授权方案.md)。
+
+部署、端口、Nginx 反代、插件生产打包配置见 [README-部署说明.md](./README-部署说明.md)。
 
 ## 项目结构
 

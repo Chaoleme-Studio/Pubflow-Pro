@@ -16,6 +16,12 @@ pub fn routes(state: Arc<AppState>) -> ApiRouter {
         .use_headers()
         .finish()
         .unwrap();
+    let activate_protocol_limiter = GovernorConfigBuilder::default()
+        .per_second(2)
+        .burst_size(5)
+        .use_headers()
+        .finish()
+        .unwrap();
 
     // 验证限流器（宽松）
     let verify_limiter = GovernorConfigBuilder::default()
@@ -46,6 +52,11 @@ pub fn routes(state: Arc<AppState>) -> ApiRouter {
             "/activate",
             post_with(handler::activate, handler::activate_docs)
                 .layer(GovernorLayer::new(activate_limiter)),
+        )
+        .api_route(
+            "/activate-protocol",
+            post_with(handler::activate_protocol, handler::activate_protocol_docs)
+                .layer(GovernorLayer::new(activate_protocol_limiter)),
         )
         .api_route(
             "/verify",
