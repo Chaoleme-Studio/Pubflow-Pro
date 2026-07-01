@@ -80,7 +80,8 @@ const appVersions = ref<AppVersionItem[]>([]);
 const versionForm = ref({
   version: '0.1.0',
   minAppVersion: '0.1.0',
-  downloadUrl: '/downloads/pubflow-pro.zip',
+  downloadUrl: '/v1/downloads/',
+  downloadUrlMirror: '',
   releaseNotes: '',
   forceUpdate: false,
   isActive: true,
@@ -196,8 +197,8 @@ const DEFAULT_PLUGIN_DOWNLOADS: AdminDownloadConfig[] = [
     platform: 'extension',
     name: '离线包 (ZIP)',
     chip: 'Chrome / Edge / Chromium',
-    fileName: 'pubflow-pro.zip',
-    href: '/downloads/pubflow-pro.zip',
+    fileName: 'pubflow-extension.zip',
+    href: '/v1/downloads/pubflow-extension.zip',
     isActive: true,
     sortOrder: 100,
   },
@@ -206,8 +207,8 @@ const DEFAULT_PLUGIN_DOWNLOADS: AdminDownloadConfig[] = [
     platform: 'extension',
     name: 'Chrome 扩展 (CRX)',
     chip: 'Chrome / Edge / Chromium',
-    fileName: 'pubflow-pro.crx',
-    href: '/downloads/pubflow-pro.crx',
+    fileName: 'pubflow-extension.crx',
+    href: '/v1/downloads/pubflow-extension.crx',
     isActive: true,
     sortOrder: 110,
   },
@@ -328,6 +329,17 @@ const adminStats = computed(() => [
   { label: '已激活授权', value: String(licenseSummary.value.active), delta: `${licenseSummary.value.total} 总授权`, icon: CheckCircle2, tone: 'green' },
 ]);
 const latestAppVersion = computed(() => appVersions.value[0]);
+
+function expandDownloadUrl(base: string, file: string): string {
+  const trimmed = base.trim();
+  if (!trimmed) return '';
+  if (trimmed.endsWith(file)) return trimmed;
+  const baseWithoutSlash = trimmed.replace(/\/+$/, '');
+  if (/^https?:\/\//i.test(baseWithoutSlash)) {
+    return `${baseWithoutSlash}/${file}`;
+  }
+  return `${baseWithoutSlash}/${file}`.replace(/\/+/g, '/');
+}
 
 async function loginAdmin() {
   adminLoginError.value = '';
@@ -502,6 +514,7 @@ async function submitAppVersion() {
       version: versionForm.value.version.trim(),
       minAppVersion: versionForm.value.minAppVersion.trim() || undefined,
       downloadUrl: versionForm.value.downloadUrl.trim(),
+      downloadUrlMirror: versionForm.value.downloadUrlMirror.trim() || undefined,
       releaseNotes: versionForm.value.releaseNotes.trim() || undefined,
       forceUpdate: versionForm.value.forceUpdate,
       isActive: versionForm.value.isActive,
@@ -527,6 +540,7 @@ function editAppVersion(item: AppVersionItem) {
     version: item.version,
     minAppVersion: item.minAppVersion || item.minVersion || '',
     downloadUrl: item.downloadUrl,
+    downloadUrlMirror: item.downloadUrlMirror || '',
     releaseNotes: item.releaseNotes || '',
     forceUpdate: item.forceUpdate,
     isActive: item.isActive ?? true,
@@ -539,7 +553,8 @@ function cancelVersionEdit() {
   versionForm.value = {
     version: latestAppVersion.value?.version || '0.1.0',
     minAppVersion: '0.1.0',
-    downloadUrl: '/downloads/pubflow-pro.zip',
+    downloadUrl: '/v1/downloads/',
+    downloadUrlMirror: '',
     releaseNotes: '',
     forceUpdate: false,
     isActive: true,
@@ -948,7 +963,7 @@ if (adminLoggedIn.value) {
                   <label><span>说明</span><input v-model="item.chip" /></label>
                   <label><span>排序</span><input v-model.number="item.sortOrder" type="number" /></label>
                 </div>
-                <label><span>下载链接</span><input v-model="item.href" placeholder="https://... 或 /downloads/pubflow-pro.zip" /></label>
+                <label><span>下载链接</span><input v-model="item.href" placeholder="https://... 或 /v1/downloads/pubflow-extension.zip" /></label>
                 <label class="inline-toggle"><input v-model="item.isActive" type="checkbox" /> 展示下载</label>
               </article>
             </div>
@@ -990,9 +1005,14 @@ if (adminLoggedIn.value) {
               </label>
               <label>
                 <span>下载链接</span>
-                <input v-model="versionForm.downloadUrl" placeholder="/downloads/pubflow-pro.zip" />
+                <input v-model="versionForm.downloadUrl" placeholder="/v1/downloads/" />
+              </label>
+              <label>
+                <span>镜像链接（可选）</span>
+                <input v-model="versionForm.downloadUrlMirror" placeholder="https://github.com/.../releases/download/v0.1.0/" />
               </label>
             </div>
+            <p class="form-hint muted">两个版本均为 Chrome Manifest V3 扩展，系统会自动拼接 pubflow-extension.zip 和 pubflow-extension.crx。</p>
             <label>
               <span>更新日志 Markdown</span>
               <textarea v-model="versionForm.releaseNotes" class="release-notes-input" placeholder="- 修复发布流程&#10;- 优化授权校验"></textarea>
@@ -1034,6 +1054,27 @@ if (adminLoggedIn.value) {
                   <button class="secondary-button compact danger-action" type="button" :disabled="versionSaving" @click="removeAppVersion(item)">删除</button>
                 </div>
                 <code class="version-download-url">{{ item.downloadUrl }}</code>
+                <a
+                  v-for="file in ['pubflow-extension.zip', 'pubflow-extension.crx']"
+                  :key="file"
+                  class="version-download-link"
+                  :href="expandDownloadUrl(item.downloadUrl, file)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {{ expandDownloadUrl(item.downloadUrl, file) }}
+                </a>
+                <code v-if="item.downloadUrlMirror" class="version-download-url mirror-url">镜像前缀：{{ item.downloadUrlMirror }}</code>
+                <a
+                  v-for="file in item.downloadUrlMirror ? ['pubflow-extension.zip', 'pubflow-extension.crx'] : []"
+                  :key="`mirror-${file}`"
+                  class="version-download-link mirror-link"
+                  :href="expandDownloadUrl(item.downloadUrlMirror || '', file)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  镜像：{{ expandDownloadUrl(item.downloadUrlMirror || '', file) }}
+                </a>
                 <pre v-if="item.releaseNotes" class="version-notes-preview">{{ item.releaseNotes }}</pre>
                 <p v-else class="modal-hint">未填写更新日志。</p>
               </article>

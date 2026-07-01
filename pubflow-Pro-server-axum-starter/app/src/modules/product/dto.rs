@@ -54,6 +54,7 @@ pub struct ProductVersionResponse {
     pub min_version: String,
     pub min_app_version: Option<String>,
     pub download_url: String,
+    pub download_url_mirror: Option<String>,
     pub release_notes: String,
     pub force_update: bool,
     pub created_at: DateTime<Utc>,

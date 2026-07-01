@@ -10,6 +10,7 @@ pub struct Model {
     pub version: String,
     pub min_app_version: Option<String>,
     pub download_url: String,
+    pub download_url_mirror: Option<String>,
     pub release_notes: Option<String>,
     pub force_update: bool,
     pub is_active: bool,

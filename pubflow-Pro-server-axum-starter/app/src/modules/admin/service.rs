@@ -4,6 +4,7 @@ use entity::{
     product_catalog, user,
 };
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, PaginatorTrait,
@@ -31,6 +32,7 @@ pub struct AdminService {
     jwt_service: crate::shared::jwt::JwtService,
     admin_username: String,
     admin_password_hash: String,
+    downloads_fs_path: String,
 }
 
 impl FromState for AdminService {
@@ -40,6 +42,7 @@ impl FromState for AdminService {
             jwt_service: state.jwt_service.clone(),
             admin_username: state.config.admin_username.clone(),
             admin_password_hash: state.config.admin_password_hash.clone(),
+            downloads_fs_path: state.config.downloads_fs_path.clone(),
         }
     }
 }
@@ -243,9 +246,9 @@ impl AdminService {
             incoming_download_codes.push(code.clone());
             let href = trim_string(Some(item.href))
                 .ok_or_else(|| ValidationError::custom("下载链接不能为空"))?;
-            if item.is_active && !is_supported_download_href(&href) {
+            if item.is_active && !is_supported_download_base(&href) {
                 return Err(ValidationError::custom(
-                    "下载链接必须是 http(s)、/downloads/、/download-files/ 或 /static/downloads/ 直链",
+                    "下载链接必须是 http(s) 或 /v1/downloads/ 直链",
                 )
                 .into());
             }
@@ -335,11 +338,14 @@ impl AdminService {
             req.version,
             req.min_app_version,
             req.download_url,
+            req.download_url_mirror,
             req.release_notes,
             req.force_update,
             req.is_active,
             now,
-        )?
+            &self.downloads_fs_path,
+        )
+        .await?
         .insert(&self.db)
         .await?;
 
@@ -362,11 +368,14 @@ impl AdminService {
             req.version,
             req.min_app_version,
             req.download_url,
+            req.download_url_mirror,
             req.release_notes,
             req.force_update,
             req.is_active,
             now,
-        )?;
+            &self.downloads_fs_path,
+        )
+        .await?;
         let updated = active.update(&self.db).await?;
 
         Ok(to_admin_app_version_item(updated))
@@ -1131,6 +1140,7 @@ fn to_admin_app_version_item(row: app_version::Model) -> AdminAppVersionItem {
         version: row.version,
         min_app_version: row.min_app_version,
         download_url: row.download_url,
+        download_url_mirror: row.download_url_mirror,
         release_notes: row.release_notes,
         force_update: row.force_update,
         is_active: row.is_active,
@@ -1139,16 +1149,18 @@ fn to_admin_app_version_item(row: app_version::Model) -> AdminAppVersionItem {
     }
 }
 
-fn fill_app_version_active_model(
+async fn fill_app_version_active_model(
     mut active: app_version::ActiveModel,
     platform: Option<String>,
     version: String,
     min_app_version: Option<String>,
     download_url: String,
+    download_url_mirror: Option<String>,
     release_notes: Option<String>,
     force_update: Option<bool>,
     is_active: Option<bool>,
     now: DateTime<Utc>,
+    downloads_fs_path: &str,
 ) -> Result<app_version::ActiveModel, crate::AppError> {
     let version =
         trim_string(Some(version)).ok_or_else(|| ValidationError::custom("版本号不能为空"))?;
@@ -1156,17 +1168,19 @@ fn fill_app_version_active_model(
 
     let download_url = trim_string(Some(download_url))
         .ok_or_else(|| ValidationError::custom("下载链接不能为空"))?;
-    if !is_supported_download_href(&download_url) {
-        return Err(ValidationError::custom(
-            "下载链接必须是 http(s)、/downloads/、/download-files/ 或 /static/downloads/ 直链",
-        )
-        .into());
+    if !is_supported_download_base(&download_url) {
+        return Err(
+            ValidationError::custom("下载链接必须是 http(s) 或 /v1/downloads/ 前缀").into(),
+        );
     }
+
+    validate_download_packages(&download_url, downloads_fs_path).await?;
 
     active.platform = Set(normalize_app_platform(platform));
     active.version = Set(version);
     active.min_app_version = Set(trim_string(min_app_version));
     active.download_url = Set(download_url);
+    active.download_url_mirror = Set(trim_string(download_url_mirror));
     active.release_notes = Set(trim_string(release_notes));
     active.force_update = Set(force_update.unwrap_or(false));
     active.is_active = Set(is_active.unwrap_or(true));
@@ -1257,12 +1271,152 @@ fn validate_version_text(version: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
-fn is_supported_download_href(href: &str) -> bool {
+fn is_supported_download_base(href: &str) -> bool {
     href.starts_with("https://")
         || href.starts_with("http://")
-        || href.starts_with("/downloads/")
-        || href.starts_with("/download-files/")
-        || href.starts_with("/static/downloads/")
+        || href.starts_with("/v1/downloads/")
+}
+
+/// 把 /v1/downloads/ 本地下载前缀映射到文件系统路径。
+///
+/// - `/v1/downloads/` 开头的本地路径会映射到 `downloads_fs_path` 指定的目录。
+/// - `http(s)://` 路径会发送 HEAD 请求检查。
+async fn validate_download_packages(
+    base_url: &str,
+    downloads_fs_path: &str,
+) -> Result<(), crate::AppError> {
+    if base_url.ends_with(".zip") || base_url.ends_with(".crx") {
+        let package_name = if base_url.ends_with(".crx") {
+            "pubflow-extension.crx"
+        } else {
+            "pubflow-extension.zip"
+        };
+        return validate_download_package(base_url, downloads_fs_path, package_name, true).await;
+    }
+
+    const REQUIRED_PACKAGE_NAMES: [&str; 1] = ["pubflow-extension.zip"];
+    const OPTIONAL_PACKAGE_NAMES: [&str; 1] = ["pubflow-extension.crx"];
+
+    for name in REQUIRED_PACKAGE_NAMES {
+        validate_download_package(base_url, downloads_fs_path, name, true).await?;
+    }
+    for name in OPTIONAL_PACKAGE_NAMES {
+        validate_download_package(base_url, downloads_fs_path, name, false).await?;
+    }
+
+    Ok(())
+}
+
+async fn validate_download_package(
+    base_url: &str,
+    downloads_fs_path: &str,
+    name: &str,
+    required: bool,
+) -> Result<(), crate::AppError> {
+    let is_local = is_local_download_base(base_url);
+    if is_local {
+        if downloads_fs_path.is_empty() {
+            return Err(ValidationError::custom(
+                "未配置本地下载路径，请设置 DOWNLOADS_FS_PATH 或配置文件中的 downloads_fs_path",
+            )
+            .into());
+        }
+        let path = PathBuf::from(downloads_fs_path).join(name);
+        let meta = match tokio::fs::metadata(&path).await {
+            Ok(meta) => meta,
+            Err(error) if !required && error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(());
+            }
+            Err(error) => {
+                return Err(ValidationError::custom(format!(
+                    "无法读取下载文件 {}：{}",
+                    path.display(),
+                    error
+                ))
+                .into());
+            }
+        };
+        if meta.len() == 0 {
+            return Err(
+                ValidationError::custom(format!("下载文件 {} 大小为 0", path.display())).into(),
+            );
+        }
+        return Ok(());
+    }
+
+    if base_url.starts_with("http://") || base_url.starts_with("https://") {
+        let url = normalize_package_url(base_url, name);
+        let client = reqwest::Client::new();
+        let response = client
+            .head(&url)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await;
+        let response = match response {
+            Ok(response)
+                if response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED
+                    || response.status() == reqwest::StatusCode::FORBIDDEN =>
+            {
+                client
+                    .get(&url)
+                    .header(reqwest::header::RANGE, "bytes=0-0")
+                    .timeout(std::time::Duration::from_secs(10))
+                    .send()
+                    .await
+            }
+            other => other,
+        };
+        match response {
+            Ok(response) if response.status().is_success() => {
+                let content_length = response
+                    .headers()
+                    .get("content-length")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<u64>().ok());
+                if content_length == Some(0) {
+                    return Err(
+                        ValidationError::custom(format!("下载链接 {} 文件大小为 0", url)).into(),
+                    );
+                }
+            }
+            Ok(response) if !required && response.status() == reqwest::StatusCode::NOT_FOUND => {
+                return Ok(());
+            }
+            Ok(response) => {
+                return Err(ValidationError::custom(format!(
+                    "下载链接 {} 返回状态码 {}",
+                    url,
+                    response.status()
+                ))
+                .into());
+            }
+            Err(error) if !required => {
+                tracing::warn!(url = %url, error = %error, "optional download package is not reachable");
+                return Ok(());
+            }
+            Err(error) => {
+                return Err(ValidationError::custom(format!("无法访问 {}：{}", url, error)).into());
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn is_local_download_base(base_url: &str) -> bool {
+    base_url.starts_with("/v1/downloads/")
+}
+
+fn normalize_package_url(base_url: &str, name: &str) -> String {
+    if base_url.ends_with(name) {
+        return base_url.to_string();
+    }
+    if base_url.starts_with("http://") || base_url.starts_with("https://") {
+        let base = base_url.trim_end_matches('/');
+        format!("{base}/{name}")
+    } else {
+        format!("{base_url}/{name}").replace("//", "/")
+    }
 }
 
 fn is_extension_download_config(item: &product_catalog::Model) -> bool {

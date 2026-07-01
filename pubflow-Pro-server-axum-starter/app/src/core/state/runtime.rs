@@ -28,4 +28,7 @@ pub struct AppStateConfig {
 
     /// 管理端登录密码哈希（Argon2 格式）
     pub admin_password_hash: String,
+
+    /// 扩展下载包本地文件系统路径
+    pub downloads_fs_path: String,
 }

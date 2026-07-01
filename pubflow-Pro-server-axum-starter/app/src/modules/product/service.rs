@@ -203,6 +203,7 @@ fn to_product_version_response(row: app_version::Model) -> ProductVersionRespons
         min_version,
         min_app_version: row.min_app_version,
         download_url: row.download_url,
+        download_url_mirror: row.download_url_mirror,
         release_notes: row.release_notes.unwrap_or_default(),
         force_update: row.force_update,
         created_at: row.created_at.with_timezone(&Utc),

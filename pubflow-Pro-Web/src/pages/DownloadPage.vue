@@ -19,8 +19,8 @@ const fallbackDownloads: DownloadItem[] = [
     name: '离线包 (ZIP)',
     desc: '解压后通过开发者模式加载，适合企业内网部署。',
     icon: FileArchive,
-    href: '/downloads/pubflow-pro.zip',
-    fileName: 'pubflow-pro.zip',
+    href: '/v1/downloads/pubflow-extension.zip',
+    fileName: 'pubflow-extension.zip',
     badge: '推荐',
   },
   {
@@ -28,8 +28,8 @@ const fallbackDownloads: DownloadItem[] = [
     name: 'Chrome 扩展 (CRX)',
     desc: '部分浏览器会限制 CRX 安装，打不开时请使用 ZIP。',
     icon: Chrome,
-    href: '/downloads/pubflow-pro.crx',
-    fileName: 'pubflow-pro.crx',
+    href: '/v1/downloads/pubflow-extension.crx',
+    fileName: 'pubflow-extension.crx',
     badge: '备用',
   },
 ];
@@ -42,6 +42,19 @@ const downloads = computed(() => remoteDownloads.value.length ? remoteDownloads.
 const activeItem = () => downloads.value.find((d) => d.id === selectedId.value) || downloads.value[0];
 
 onMounted(async () => {
+  try {
+    recentVersions.value = await getRecentAppVersions(3);
+    const latest = recentVersions.value[0];
+    if (latest) {
+      expandedVersionIds.value = new Set([latest.id]);
+      remoteDownloads.value = versionDownloads(latest);
+      selectedId.value = 'pubflow-extension.zip';
+      return;
+    }
+  } catch (error) {
+    console.warn('[PubFlow Web] 版本日志加载失败，继续读取商品下载配置', error);
+  }
+
   try {
     const catalog = await getProductCatalog();
     remoteDownloads.value = catalog.downloads
@@ -63,15 +76,39 @@ onMounted(async () => {
   } catch (error) {
     console.warn('[PubFlow Web] 下载配置加载失败，已使用本地备用链接', error);
   }
-
-  try {
-    recentVersions.value = await getRecentAppVersions(3);
-    const latest = recentVersions.value[0];
-    if (latest) expandedVersionIds.value = new Set([latest.id]);
-  } catch (error) {
-    console.warn('[PubFlow Web] 版本日志加载失败，已隐藏更新日志', error);
-  }
 });
+
+function versionDownloads(version: AppVersionItem): DownloadItem[] {
+  return [
+    {
+      id: 'pubflow-extension.zip',
+      name: '离线包 (ZIP)',
+      desc: version.downloadUrlMirror ? '默认走服务器下载；GitHub 镜像可在更新日志中打开。' : '解压后通过开发者模式加载，适合企业内网部署。',
+      icon: FileArchive,
+      href: expandDownloadUrl(version.downloadUrl, 'pubflow-extension.zip'),
+      fileName: 'pubflow-extension.zip',
+      badge: '推荐',
+    },
+    {
+      id: 'pubflow-extension.crx',
+      name: 'Chrome 扩展 (CRX)',
+      desc: '部分浏览器会限制 CRX 安装，打不开时请使用 ZIP。',
+      icon: Chrome,
+      href: expandDownloadUrl(version.downloadUrl, 'pubflow-extension.crx'),
+      fileName: 'pubflow-extension.crx',
+      badge: '备用',
+    },
+  ];
+}
+
+function expandDownloadUrl(base: string, file: string): string {
+  const trimmed = base.trim();
+  if (!trimmed) return '';
+  if (trimmed.endsWith(file)) return trimmed;
+  const baseWithoutSlash = trimmed.replace(/\/+$/, '');
+  if (/^https?:\/\//i.test(baseWithoutSlash)) return `${baseWithoutSlash}/${file}`;
+  return `${baseWithoutSlash}/${file}`.replace(/\/+/g, '/');
+}
 
 function doDownload(item: DownloadItem) {
   if (!item.href) return;
@@ -119,6 +156,7 @@ function toggleVersion(id: string) {
         </button>
       </div>
     </section>
+    <p class="download-mv3-hint">两个版本均为 Chrome Manifest V3 扩展。</p>
     <section class="download-notes-row">
       <div><Check :size="16" /> 支持抖音、视频号、小红书、B站、快手等平台</div>
       <div><Check :size="16" /> 通过激活码授权，无需登录账号</div>

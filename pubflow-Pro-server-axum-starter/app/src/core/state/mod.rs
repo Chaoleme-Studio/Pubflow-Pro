@@ -75,6 +75,7 @@ impl AppState {
                 machine_salt: app_config.secrets.machine_salt.clone(),
                 admin_username: app_config.secrets.admin_username.clone(),
                 admin_password_hash,
+                downloads_fs_path: app_config.downloads_fs_path.clone(),
             },
         })
     }

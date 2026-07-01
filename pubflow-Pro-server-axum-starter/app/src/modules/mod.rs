@@ -6,6 +6,8 @@
 pub mod admin;
 /// API 文档路由
 mod docs;
+/// PubFlow 下载模块
+pub mod download;
 /// PubFlow Lease 授权模块
 pub mod lease;
 /// PubFlow 前台激活码自助服务模块

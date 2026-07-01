@@ -132,8 +132,8 @@ const CATALOG_SEEDS: &[CatalogSeed] = &[
         amount_cents: None,
         platform: Some("extension"),
         chip: Some("Chrome / Edge / Chromium"),
-        file_name: Some("pubflow-pro.zip"),
-        href: Some("/downloads/pubflow-pro.zip"),
+        file_name: Some("pubflow-extension.zip"),
+        href: Some("/v1/downloads/pubflow-extension.zip"),
         sort_order: 100,
     },
     CatalogSeed {
@@ -146,8 +146,8 @@ const CATALOG_SEEDS: &[CatalogSeed] = &[
         amount_cents: None,
         platform: Some("extension"),
         chip: Some("Chrome / Edge / Chromium"),
-        file_name: Some("pubflow-pro.crx"),
-        href: Some("/downloads/pubflow-pro.crx"),
+        file_name: Some("pubflow-extension.crx"),
+        href: Some("/v1/downloads/pubflow-extension.crx"),
         sort_order: 110,
     },
 ];

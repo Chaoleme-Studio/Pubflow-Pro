@@ -26,6 +26,8 @@ pubflow-workspace/
 
 # Build output
 dist/
+downloads/
+pubflow-Pro-server-axum-starter/downloads
 target/
 
 # Editor directories and files
@@ -41,6 +43,6 @@ target/
 
 
 
-
+pubflow-Pro/public/wasm
 __pycache__
 scripts/deploy-to-nucbox.py

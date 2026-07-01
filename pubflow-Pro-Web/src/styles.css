@@ -260,6 +260,17 @@ button {
   border-color: var(--border-brand);
 }
 
+.form-hint {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+.form-hint.muted {
+  color: var(--text-4);
+}
+
 .hero-section {
   position: relative;
   min-height: 100svh;
@@ -1343,6 +1354,14 @@ h2 {
   margin: 24px auto 0;
   color: var(--text-3);
   font-size: 14px;
+}
+
+.download-mv3-hint {
+  width: min(1180px, calc(100vw - 44px));
+  margin: 14px auto 0;
+  font-size: 13px;
+  color: var(--text-4);
+  text-align: center;
 }
 
 .download-notes-row div {
@@ -2436,6 +2455,45 @@ mark {
   color: var(--text-2);
   border-radius: var(--radius-sm);
   background: rgba(0, 0, 0, 0.18);
+}
+
+.version-download-link {
+  display: block;
+  padding: 8px 10px;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  color: var(--brand-400);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  background: rgba(54, 125, 255, 0.08);
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.version-download-link:hover {
+  color: var(--brand);
+  background: rgba(54, 125, 255, 0.14);
+}
+
+.version-download-link + .version-download-link,
+.version-download-url + .version-download-link,
+.version-download-link + .version-download-url {
+  margin-top: 6px;
+}
+
+.version-download-url.mirror-url {
+  margin-top: 10px;
+  color: var(--text-3);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.version-download-link.mirror-link {
+  color: var(--accent-cyan);
+  background: rgba(142, 232, 255, 0.08);
+}
+
+.version-download-link.mirror-link:hover {
+  color: #b8f0ff;
+  background: rgba(142, 232, 255, 0.14);
 }
 
 .version-notes-preview {

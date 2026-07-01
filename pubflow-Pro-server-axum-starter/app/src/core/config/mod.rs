@@ -17,6 +17,7 @@ pub use server::ServerConfig;
 use crate::error::ConfigError;
 use config::{Config, Environment, File};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 /// 应用程序配置入口
 ///
@@ -24,7 +25,6 @@ use serde::{Deserialize, Serialize};
 /// 通过 `load()` 方法从配置文件和环境变量加载配置，支持多层次优先级管理。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-#[derive(Default)]
 pub struct AppConfig {
     /// 服务器配置
     pub server: ServerConfig,
@@ -43,6 +43,23 @@ pub struct AppConfig {
 
     /// Redis 连接池配置
     pub redis: RedisConfig,
+
+    /// 扩展下载包本地文件系统路径（用于发布时校验 /downloads/ 下的文件）
+    pub downloads_fs_path: String,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            server: ServerConfig::default(),
+            database: DatabaseConfig::default(),
+            logging: LoggingConfig::default(),
+            secrets: SecretsConfig::default(),
+            cors: CorsConfig::default(),
+            redis: RedisConfig::default(),
+            downloads_fs_path: "./downloads".to_string(),
+        }
+    }
 }
 
 impl AppConfig {
@@ -88,6 +105,7 @@ impl AppConfig {
 
         // 应用环境变量覆盖（最高优先级）
         app_config.apply_env_overrides()?;
+        app_config.normalize_downloads_fs_path();
 
         // 验证配置
         app_config.validate()?;
@@ -111,6 +129,7 @@ impl AppConfig {
         self.secrets = app_config.secrets;
         self.cors = app_config.cors;
         self.redis = app_config.redis;
+        self.downloads_fs_path = app_config.downloads_fs_path;
 
         Ok(())
     }
@@ -138,7 +157,27 @@ impl AppConfig {
             })?;
         }
 
+        // 兼容直接通过 DOWNLOADS_FS_PATH 环境变量指定下载目录
+        if let Ok(value) = std::env::var("DOWNLOADS_FS_PATH") {
+            if !value.trim().is_empty() {
+                self.downloads_fs_path = value.trim().to_string();
+            }
+        }
+
         Ok(())
+    }
+
+    fn normalize_downloads_fs_path(&mut self) {
+        let value = self.downloads_fs_path.trim();
+        if value.is_empty() || Path::new(value).exists() {
+            return;
+        }
+
+        // 本地开发脚本从 server 目录启动，扩展构建产物放在项目根目录 downloads/。
+        // 部署环境从 backend 目录启动，./downloads 会存在，所以不会走到这里。
+        if matches!(value, "./downloads" | "downloads") && Path::new("../downloads").exists() {
+            self.downloads_fs_path = "../downloads".to_string();
+        }
     }
 
     /// 验证所有配置段

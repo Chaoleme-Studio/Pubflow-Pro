@@ -6,6 +6,7 @@ interface ExtensionUpdatePayload {
   latest_version?: string;
   min_version?: string;
   download_url?: string;
+  download_url_mirror?: string;
   release_notes?: string;
   force_update?: boolean;
 }
@@ -28,7 +29,7 @@ export async function checkExtensionUpdate(apiBaseUrl: string, officialSiteUrl: 
     const currentVersion = browser.runtime.getManifest().version || '0.0.0';
     if (compareVersion(latestVersion, currentVersion) <= 0) return;
 
-    const downloadUrl = String(data.download_url ?? '').trim()
+    const downloadUrl = String(data.download_url ?? data.download_url_mirror ?? '').trim()
       || `${officialSiteUrl.replace(/\/+$/, '')}/download`;
     await notifyUpdate(latestVersion, downloadUrl, Boolean(data.force_update));
   } catch (error) {

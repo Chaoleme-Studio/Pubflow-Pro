@@ -104,6 +104,7 @@ export interface AppVersionItem {
   minVersion: string;
   minAppVersion?: string;
   downloadUrl: string;
+  downloadUrlMirror?: string;
   releaseNotes: string;
   forceUpdate: boolean;
   isActive?: boolean;
@@ -115,6 +116,7 @@ export interface CreateAppVersionParams {
   version: string;
   minAppVersion?: string;
   downloadUrl: string;
+  downloadUrlMirror?: string;
   releaseNotes?: string;
   forceUpdate?: boolean;
   isActive?: boolean;
@@ -260,15 +262,15 @@ export const FALLBACK_PRODUCT_CATALOG: ProductCatalog = {
       platform: 'extension',
       name: '离线包 (ZIP)',
       chip: 'Chrome / Edge / Chromium',
-      fileName: 'pubflow-pro.zip',
-      href: '/downloads/pubflow-pro.zip',
+      fileName: 'pubflow-extension.zip',
+      href: '/v1/downloads/pubflow-extension.zip',
     },
     {
       platform: 'extension',
       name: 'Chrome 扩展 (CRX)',
       chip: 'Chrome / Edge / Chromium',
-      fileName: 'pubflow-pro.crx',
-      href: '/downloads/pubflow-pro.crx',
+      fileName: 'pubflow-extension.crx',
+      href: '/v1/downloads/pubflow-extension.crx',
     },
   ],
 };
@@ -459,6 +461,7 @@ export async function createAdminAppVersion(
       version: params.version,
       min_app_version: params.minAppVersion,
       download_url: params.downloadUrl,
+      download_url_mirror: params.downloadUrlMirror,
       release_notes: params.releaseNotes,
       force_update: params.forceUpdate,
       is_active: params.isActive,
@@ -488,6 +491,7 @@ export async function updateAdminAppVersion(
       version: params.version,
       min_app_version: params.minAppVersion,
       download_url: params.downloadUrl,
+      download_url_mirror: params.downloadUrlMirror,
       release_notes: params.releaseNotes,
       force_update: params.forceUpdate,
       is_active: params.isActive,
@@ -1019,6 +1023,7 @@ function normalizeVersionItem(item: Record<string, unknown>): AppVersionItem {
     minVersion,
     minAppVersion: stringOrUndefined(item.min_app_version ?? item.minAppVersion ?? minVersion),
     downloadUrl: String(item.download_url ?? item.downloadUrl ?? ''),
+    downloadUrlMirror: stringOrUndefined(item.download_url_mirror ?? item.downloadUrlMirror),
     releaseNotes: String(item.release_notes ?? item.releaseNotes ?? ''),
     forceUpdate: Boolean(item.force_update ?? item.forceUpdate),
     isActive: item.is_active === undefined && item.isActive === undefined

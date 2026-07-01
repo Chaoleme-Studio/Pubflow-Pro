@@ -32,6 +32,9 @@ pub enum PubFlowError {
     #[error("应用版本不存在")]
     AppVersionNotFound,
 
+    #[error("下载文件不存在")]
+    DownloadNotFound,
+
     #[error("订单不存在")]
     OrderNotFound,
 
@@ -79,6 +82,8 @@ impl IntoResponse for PubFlowError {
             Self::SelectorNotFound => ApiError::new(StatusCode::NOT_FOUND, self.to_string())
                 .with_detail(ErrorDetail::new(DOMAIN, Reason::NotFound)),
             Self::AppVersionNotFound => ApiError::new(StatusCode::NOT_FOUND, self.to_string())
+                .with_detail(ErrorDetail::new(DOMAIN, Reason::NotFound)),
+            Self::DownloadNotFound => ApiError::new(StatusCode::NOT_FOUND, self.to_string())
                 .with_detail(ErrorDetail::new(DOMAIN, Reason::NotFound)),
             Self::OrderNotFound => ApiError::new(StatusCode::NOT_FOUND, self.to_string())
                 .with_detail(ErrorDetail::new(DOMAIN, Reason::NotFound)),

@@ -12,6 +12,8 @@ mod m20260609_000003_add_client_install_id;
 mod m20260623_000001_add_device_migration_fields;
 mod m20260626_000001_product_ops_license_replacement;
 mod m20260627_000001_create_app_versions;
+mod m20260701_000001_add_app_version_mirror_url;
+mod m20260701_000002_normalize_extension_download_urls;
 
 pub struct Migrator;
 
@@ -31,6 +33,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260623_000001_add_device_migration_fields::Migration),
             Box::new(m20260626_000001_product_ops_license_replacement::Migration),
             Box::new(m20260627_000001_create_app_versions::Migration),
+            Box::new(m20260701_000001_add_app_version_mirror_url::Migration),
+            Box::new(m20260701_000002_normalize_extension_download_urls::Migration),
         ]
     }
 }
