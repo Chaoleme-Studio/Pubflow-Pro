@@ -11,10 +11,38 @@ interface ActivateLeasePayload {
 }
 
 interface ProtocolVersionPayload {
+  version?: number;
+  min_app_version?: string;
+  minAppVersion?: string;
+  created_at?: string;
+  createdAt?: string;
+  protocol_version?: number;
+  protocolVersion?: number;
+  protocol_key_version?: number;
+  protocolKeyVersion?: number;
   protocol_public_key?: string;
   protocolPublicKey?: string;
+  protocol_public_key_expires_at?: string;
+  protocolPublicKeyExpiresAt?: string;
+  protocol_signature_algorithm?: string;
+  protocolSignatureAlgorithm?: string;
+  protocol_signing_key_id?: string;
+  protocolSigningKeyId?: string;
+  protocol_signed_payload?: string;
+  protocolSignedPayload?: string;
+  protocol_signature?: string;
+  protocolSignature?: string;
   server_time_ms?: number;
   serverTimeMs?: number;
+}
+
+export interface ProtocolInfo {
+  publicKey: string;
+  serverTimeMs: number;
+  selectorVersion: number;
+  protocolKeyVersion: number;
+  minAppVersion: string;
+  protocolPublicKeyExpiresAt?: string;
 }
 
 interface BuildRequestResult {
@@ -43,6 +71,8 @@ interface ApiErrorPayload {
 }
 
 const INSTALL_ID_KEY = 'pubflow:install-id';
+const BUILT_IN_PROTOCOL_PUBLIC_KEY = normalizeProtocolPublicKey(__PUBFLOW_PROTOCOL_PUBLIC_KEY__);
+const BUILT_IN_PROTOCOL_TRUST_ROOT_P256_SPKI = normalizeBase64Url(__PUBFLOW_PROTOCOL_TRUST_ROOT_P256_SPKI__);
 
 export async function ensureInstallId() {
   const stored = await browser.storage.local.get(INSTALL_ID_KEY);
@@ -111,10 +141,11 @@ export async function activateLease(settings: LicensingSettings): Promise<Licens
     leaseToken,
     validUntil: data.valid_until || data.validUntil,
     serverTime: data.server_time || data.serverTime,
+    serverTimeCheckedAt: Math.floor(Date.now() / 1000),
   };
 }
 
-async function fetchProtocolInfo(apiBaseUrl: string): Promise<{ publicKey: string; serverTimeMs: number }> {
+export async function fetchProtocolInfo(apiBaseUrl: string): Promise<ProtocolInfo> {
   const response = await fetchWithReadableNetworkError(
     `${apiBaseUrl}/v1/selector/version`,
     undefined,
@@ -125,14 +156,84 @@ async function fetchProtocolInfo(apiBaseUrl: string): Promise<{ publicKey: strin
   }
   const payload = await response.json().catch(() => ({}));
   const data = (payload?.data ?? payload) as ProtocolVersionPayload;
-  const key = data.protocol_public_key || data.protocolPublicKey;
-  if (!key) {
+  const serverKey = normalizeProtocolPublicKey(data.protocol_public_key || data.protocolPublicKey);
+  if (!serverKey && !BUILT_IN_PROTOCOL_PUBLIC_KEY) {
     throw new Error('服务端未返回授权协议公钥');
   }
+  const hasPinnedKey = !!BUILT_IN_PROTOCOL_PUBLIC_KEY;
+  const matchesPinnedKey = hasPinnedKey && (!serverKey || serverKey === BUILT_IN_PROTOCOL_PUBLIC_KEY);
+  if (
+    hasPinnedKey
+    && serverKey
+    && serverKey !== BUILT_IN_PROTOCOL_PUBLIC_KEY
+    && !await verifySignedProtocolKey(data, serverKey)
+  ) {
+    throw new Error('授权协议配置不匹配，请安装最新版本或联系支持。');
+  }
+  if (!matchesPinnedKey && !hasPinnedKey && !await verifySignedProtocolKey(data, serverKey)) {
+    throw new Error('授权协议配置未受信任，请安装最新版本或联系支持。');
+  }
   return {
-    publicKey: key,
+    publicKey: matchesPinnedKey ? BUILT_IN_PROTOCOL_PUBLIC_KEY : serverKey,
     serverTimeMs: Number(data.server_time_ms || data.serverTimeMs || 0),
+    selectorVersion: Number(data.version || 0),
+    protocolKeyVersion: Number(data.protocol_key_version || data.protocolKeyVersion || 0),
+    minAppVersion: data.min_app_version || data.minAppVersion || '',
+    protocolPublicKeyExpiresAt: data.protocol_public_key_expires_at || data.protocolPublicKeyExpiresAt,
   };
+}
+
+function normalizeProtocolPublicKey(value: string | undefined) {
+  return (value || '').trim().toLowerCase();
+}
+
+async function verifySignedProtocolKey(data: ProtocolVersionPayload, serverKey: string): Promise<boolean> {
+  if (!BUILT_IN_PROTOCOL_TRUST_ROOT_P256_SPKI || !serverKey) return false;
+  const signatureAlgorithm = data.protocol_signature_algorithm || data.protocolSignatureAlgorithm;
+  const signature = data.protocol_signature || data.protocolSignature;
+  const signedPayload = data.protocol_signed_payload || data.protocolSignedPayload;
+  if (signatureAlgorithm !== 'ECDSA_P256_SHA256' || !signature) return false;
+  if (!signedPayload || !signedPayloadMatchesVersion(data, signedPayload, serverKey)) return false;
+
+  const rootSpki = base64UrlToBytes(BUILT_IN_PROTOCOL_TRUST_ROOT_P256_SPKI);
+  const expectedKeyId = await protocolSigningKeyId(rootSpki);
+  const signingKeyId = data.protocol_signing_key_id || data.protocolSigningKeyId;
+  if (signingKeyId && signingKeyId !== expectedKeyId) return false;
+
+  const key = await crypto.subtle.importKey(
+    'spki',
+    bytesToArrayBuffer(rootSpki),
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['verify'],
+  );
+  return crypto.subtle.verify(
+    { name: 'ECDSA', hash: 'SHA-256' },
+    key,
+    bytesToArrayBuffer(base64UrlToBytes(signature)),
+    new TextEncoder().encode(signedPayload),
+  );
+}
+
+function signedPayloadMatchesVersion(data: ProtocolVersionPayload, signedPayload: string, serverKey: string) {
+  const keyVersion = Number(data.protocol_key_version || data.protocolKeyVersion || 0);
+  const protocolVersion = Number(data.protocol_version || data.protocolVersion || 0);
+  const minAppVersion = data.min_app_version || data.minAppVersion || '';
+  const lines = new Set(signedPayload.split('\n'));
+  return lines.has('pubflow-protocol-key-v1')
+    && lines.has(`key_version:${keyVersion}`)
+    && lines.has(`protocol_version:${protocolVersion}`)
+    && lines.has(`protocol_public_key:${serverKey}`)
+    && lines.has(`min_app_version:${minAppVersion.trim()}`);
+}
+
+async function protocolSigningKeyId(publicKeySpki: Uint8Array) {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytesToArrayBuffer(publicKeySpki)));
+  return `p256:${bytesToBase64Url(digest)}`;
+}
+
+function normalizeBase64Url(value: string | undefined) {
+  return (value || '').trim();
 }
 
 function detectPlatform() {
@@ -207,8 +308,17 @@ function base64ToBytes(value: string): Uint8Array {
   return bytes;
 }
 
+function base64UrlToBytes(value: string): Uint8Array {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized.padEnd(normalized.length + (4 - normalized.length % 4) % 4, '=');
+  return base64ToBytes(padded);
+}
+
 function base64ToArrayBuffer(value: string): ArrayBuffer {
-  const bytes = base64ToBytes(value);
+  return bytesToArrayBuffer(base64ToBytes(value));
+}
+
+function bytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const buffer = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(buffer).set(bytes);
   return buffer;
@@ -220,4 +330,11 @@ function bytesToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(byte);
   }
   return btoa(binary);
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  return bytesToBase64(bytes)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
 }

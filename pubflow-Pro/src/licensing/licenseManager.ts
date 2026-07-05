@@ -1,6 +1,7 @@
 import type { LicensingSettings } from '../types';
 import { defaultLicensingSettings } from '../storage/settingsStorage';
 import { activateLease } from './activation';
+import { buildDeviceProof } from './deviceProof';
 
 export interface LicenseVerificationResult {
   ok: boolean;
@@ -15,6 +16,24 @@ interface VerifyLeasePayload {
   validUntil?: string;
   server_time?: string;
   serverTime?: string;
+}
+
+interface ApiErrorPayload {
+  error?: {
+    message?: string;
+    errors?: Array<{
+      reason?: string;
+      message?: string;
+    }>;
+  };
+  message?: string;
+}
+
+class LicenseApiError extends Error {
+  constructor(message: string, readonly code = '') {
+    super(message);
+    this.name = 'LicenseApiError';
+  }
 }
 
 export async function verifyLicense(input: LicensingSettings): Promise<LicenseVerificationResult> {
@@ -39,12 +58,18 @@ export async function verifyLicense(input: LicensingSettings): Promise<LicenseVe
     const activeSettings = settings.leaseToken && settings.clientInstallId
       ? settings
       : await activateLease(settings);
-    const verifiedSettings = activeSettings.leaseToken && activeSettings.clientInstallId
-      ? await verifyLease(activeSettings)
-      : activeSettings;
+    let verifiedSettings = activeSettings;
+    if (activeSettings.leaseToken && activeSettings.clientInstallId) {
+      try {
+        verifiedSettings = await verifyLease(activeSettings);
+      } catch (error) {
+        if (!isDeviceProofRecoveryError(error)) throw error;
+        verifiedSettings = await recoverBrowserDeviceKeyLoss(activeSettings);
+      }
+    }
 
     if (isLicenseExpired(verifiedSettings)) {
-      throw new Error('该激活码已过期。');
+      throw new Error('授权验证已到期，请联网重新验证后继续发布。');
     }
 
     return {
@@ -69,21 +94,25 @@ export async function verifyLicense(input: LicensingSettings): Promise<LicenseVe
 }
 
 export function isLicenseExpired(settings: LicensingSettings) {
-  return typeof settings.validUntil === 'number' && settings.validUntil > 0 && settings.validUntil * 1000 <= Date.now();
+  return typeof settings.validUntil === 'number'
+    && settings.validUntil > 0
+    && settings.validUntil <= currentLicenseTime(settings);
 }
 
 async function verifyLease(settings: LicensingSettings): Promise<LicensingSettings> {
   const apiBaseUrl = settings.apiBaseUrl.replace(/\/+$/, '');
+  const deviceProof = await buildDeviceProof(apiBaseUrl, settings.leaseToken, settings.clientInstallId);
   const response = await fetch(`${apiBaseUrl}/v1/lease/verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       lease_token: settings.leaseToken,
       client_install_id: settings.clientInstallId,
+      device_proof: deviceProof,
     }),
   });
   if (!response.ok) {
-    throw new Error(await readApiError(response, `授权验证失败：${response.status}`));
+    throw await readApiError(response, `授权验证失败：${response.status}`);
   }
 
   const payload = await response.json().catch(() => ({}));
@@ -92,21 +121,42 @@ async function verifyLease(settings: LicensingSettings): Promise<LicensingSettin
     throw new Error(mapLeaseStatus(data.status) || '授权无效。');
   }
 
+  const serverTime = parseServerTimestamp(data.server_time || data.serverTime);
   return {
     ...settings,
     validUntil: parseServerTimestamp(data.valid_until || data.validUntil) || settings.validUntil,
-    serverTime: parseServerTimestamp(data.server_time || data.serverTime) || settings.serverTime,
+    serverTime: serverTime || settings.serverTime,
+    serverTimeCheckedAt: serverTime ? Math.floor(Date.now() / 1000) : settings.serverTimeCheckedAt,
   };
 }
 
-async function readApiError(response: Response, fallbackMessage: string): Promise<string> {
+async function recoverBrowserDeviceKeyLoss(settings: LicensingSettings): Promise<LicensingSettings> {
+  const reactivated = await activateLease({
+    ...settings,
+    leaseToken: '',
+    statusMessage: '',
+  });
+  return verifyLease(reactivated);
+}
+
+function isDeviceProofRecoveryError(error: unknown) {
+  if (error instanceof LicenseApiError) {
+    return /DEVICE_AUTH_FAILED|DEVICE_PROOF_INVALID|DEVICE_CHALLENGE_REQUIRED|DEVICE_CHALLENGE_EXPIRED|DEVICE_PUBLIC_KEY_REQUIRED/i.test(error.code);
+  }
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /DEVICE_AUTH_FAILED|DEVICE_PROOF_INVALID|DEVICE_CHALLENGE_REQUIRED|DEVICE_CHALLENGE_EXPIRED|DEVICE_PUBLIC_KEY_REQUIRED/i.test(message);
+}
+
+async function readApiError(response: Response, fallbackMessage: string): Promise<LicenseApiError> {
   const contentType = response.headers.get('content-type') || '';
   if (contentType.includes('application/json')) {
-    const payload = await response.json().catch(() => null) as { message?: string; error?: { message?: string } } | null;
-    return payload?.error?.message || payload?.message || fallbackMessage;
+    const payload = await response.json().catch(() => null) as ApiErrorPayload | null;
+    const code = extractApiErrorCode(payload);
+    return new LicenseApiError(mapLicenseApiError(code || payload?.error?.message || payload?.message || fallbackMessage), code);
   }
   const text = await response.text().catch(() => '');
-  return text.trim() || fallbackMessage;
+  const message = text.trim() || fallbackMessage;
+  return new LicenseApiError(mapLicenseApiError(message), message);
 }
 
 function parseServerTimestamp(value: string | undefined): number | undefined {
@@ -115,17 +165,43 @@ function parseServerTimestamp(value: string | undefined): number | undefined {
   return Number.isFinite(timestamp) ? Math.floor(timestamp / 1000) : undefined;
 }
 
+function currentLicenseTime(settings: LicensingSettings) {
+  const localNow = Math.floor(Date.now() / 1000);
+  if (
+    typeof settings.serverTime === 'number'
+    && settings.serverTime > 0
+    && typeof settings.serverTimeCheckedAt === 'number'
+    && settings.serverTimeCheckedAt > 0
+  ) {
+    return settings.serverTime + Math.max(0, localNow - settings.serverTimeCheckedAt);
+  }
+  return localNow;
+}
+
 function mapLeaseStatus(status: string | undefined) {
   if (!status) return '';
-  if (/expired/i.test(status)) return '该激活码已过期。';
+  if (/expired/i.test(status)) return '授权验证已到期，请联网重新验证后继续发布。';
   if (/device_mismatch/i.test(status)) return '该激活码已绑定其他设备。';
   if (/revoked/i.test(status)) return '该激活码已被吊销。';
   return `授权无效：${status}`;
 }
 
+export function mapLicenseApiError(message: string) {
+  if (/DEVICE_AUTH_FAILED|DEVICE_PROOF_INVALID|DEVICE_CHALLENGE_REQUIRED|DEVICE_CHALLENGE_EXPIRED|DEVICE_PUBLIC_KEY_REQUIRED/i.test(message)) {
+    return '授权设备验证失败，请重新验证。';
+  }
+  return message || '授权验证失败';
+}
+
+function extractApiErrorCode(payload: ApiErrorPayload | null) {
+  const detail = payload?.error?.errors?.[0];
+  return detail?.message || detail?.reason || payload?.error?.message || payload?.message || '';
+}
+
 function classifyLicenseError(error: unknown): LicensingSettings['status'] {
   const message = error instanceof Error ? error.message : String(error || '');
-  if (/expired|LICENSE_EXPIRED|lease_expired|过期/i.test(message)) return 'expired';
+  if (/授权验证已到期|lease_expired/i.test(message)) return 'restricted';
+  if (/LICENSE_EXPIRED|该激活码已过期/i.test(message)) return 'expired';
   if (/DEVICE_MISMATCH|device_mismatch|设备/i.test(message)) return 'device_mismatch';
   if (/unconfigured|未配置/i.test(message)) return 'unconfigured';
   return 'invalid';

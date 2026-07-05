@@ -7,6 +7,10 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# 根目录生产环境配置（含真实服务器凭证）
+.env.production
+.env.local
+
 node_modules
 .output
 .output_副本

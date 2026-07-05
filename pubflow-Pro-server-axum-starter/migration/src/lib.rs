@@ -14,6 +14,9 @@ mod m20260626_000001_product_ops_license_replacement;
 mod m20260627_000001_create_app_versions;
 mod m20260701_000001_add_app_version_mirror_url;
 mod m20260701_000002_normalize_extension_download_urls;
+mod m20260704_000001_add_browser_device_key_to_leases;
+mod m20260704_000002_add_admin_audit_fields_to_license_events;
+mod m20260705_000001_add_deleted_at_to_licenses;
 
 pub struct Migrator;
 
@@ -35,6 +38,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20260627_000001_create_app_versions::Migration),
             Box::new(m20260701_000001_add_app_version_mirror_url::Migration),
             Box::new(m20260701_000002_normalize_extension_download_urls::Migration),
+            Box::new(m20260704_000001_add_browser_device_key_to_leases::Migration),
+            Box::new(m20260704_000002_add_admin_audit_fields_to_license_events::Migration),
+            Box::new(m20260705_000001_add_deleted_at_to_licenses::Migration),
         ]
     }
 }

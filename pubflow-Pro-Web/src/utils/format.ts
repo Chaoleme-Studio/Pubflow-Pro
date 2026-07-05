@@ -1,5 +1,6 @@
 export function planLabel(plan: string) {
-  return plan === 'yearly' ? '年卡' : '月卡';
+  if (plan === 'yearly') return '年卡';
+  return '月卡';
 }
 
 export function sourceLabel(source: string) {
@@ -20,6 +21,7 @@ export function statusLabel(status: string) {
     expired: '已过期',
     success: '成功',
     failed: '失败',
+    warning: '警告',
     disabled: '已停用',
     deleted: '已删除',
     amount_mismatch: '金额异常',
@@ -34,6 +36,26 @@ export function eventLabel(type: string) {
     renew: '续租',
     deactivate: '解绑',
     device_migrate: '设备迁移',
+    device_rebind: '设备重绑',
+    self_replace: '自助补发',
+    self_revoke: '自助注销',
+    self_reset_devices: '自助解绑设备',
+    adjust_limits: '调整设备额度',
+    admin_revoke: '后台吊销',
+    admin_delete: '后台删除',
+    admin_freeze: '后台冻结',
+    admin_unfreeze: '后台解冻',
+    admin_unbind_device: '后台解绑设备',
+    generate_licenses: '批量生成卡密',
+    replace: '后台补发',
+    product_catalog_save: '商品配置保存',
+    app_version_create: '版本发布',
+    app_version_update: '版本更新',
+    app_version_delete: '版本删除',
+    selector_publish: 'Selector 发布',
+    permit: '发布许可',
+    challenge: '设备挑战',
+    risk_flag: '风控标记',
     selector_fetch: 'Selector 拉取',
   };
   return map[type] || type || '-';

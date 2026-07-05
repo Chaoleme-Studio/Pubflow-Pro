@@ -10,17 +10,22 @@ use uuid::Uuid;
 use crate::error::PubFlowError;
 use crate::product::service::ProductService;
 use crate::shared::FromState;
-use crate::shared::plan::{new_activation_code, normalize_plan};
+use crate::shared::plan::{device_migration_limit_for_plan, new_activation_code, normalize_plan};
 use crate::{AppState, ValidationError};
 
+use super::alipay::{AlipayClient, AlipayPrecreateInput};
 use super::dto::{
     AlipayNotifyRequest, CreateOrderRequest, CreateOrderResponse, OrderStatusResponse,
     PaymentCallbackRequest, PaymentCallbackResponse, WechatPayNotifyRequest,
 };
+use std::collections::HashMap;
 
 pub struct PurchaseService {
     db: DatabaseConnection,
     query_secret: String,
+    alipay: AlipayClient,
+    alipay_subject_prefix: String,
+    reseller_url: String,
 }
 
 impl FromState for PurchaseService {
@@ -28,6 +33,9 @@ impl FromState for PurchaseService {
         Self {
             db: state.db.clone(),
             query_secret: state.config.jwt_secret.clone(),
+            alipay_subject_prefix: state.config.payment.alipay.subject_prefix.clone(),
+            alipay: AlipayClient::new(state.config.payment.alipay.clone()),
+            reseller_url: state.config.payment.reseller_url.clone(),
         }
     }
 }
@@ -63,13 +71,23 @@ impl PurchaseService {
 
         let query_token = generate_query_token(&inserted.order_no, &self.query_secret);
 
+        let (pay_url, qr_code) = self
+            .build_pay_payload(
+                &inserted.channel,
+                &inserted.order_no,
+                &inserted.plan,
+                inserted.amount_cents,
+            )
+            .await?;
+
         Ok(CreateOrderResponse {
             order_no: inserted.order_no.clone(),
             plan: inserted.plan,
             amount_cents: inserted.amount_cents,
             channel: inserted.channel.clone(),
             status: inserted.status,
-            pay_url: build_provider_pay_url(&inserted.channel, &inserted.order_no),
+            pay_url,
+            qr_code,
             query_token,
         })
     }
@@ -156,6 +174,7 @@ impl PurchaseService {
         let now = Utc::now();
         let activation_code = new_activation_code();
         let license_id = Uuid::new_v4();
+        let device_migration_limit = device_migration_limit_for_plan(&confirmed_order.plan)?;
 
         license::ActiveModel {
             id: Set(license_id),
@@ -166,12 +185,13 @@ impl PurchaseService {
             source_channel: Set("official".to_string()),
             batch_id: Set(None),
             max_devices: Set(1),
-            device_migration_limit: Set(3),
+            device_migration_limit: Set(device_migration_limit),
             device_migration_count: Set(0),
             last_migrated_at: Set(None),
             activated_at: Set(None),
             expires_at: Set(None),
             is_revoked: Set(false),
+            deleted_at: Set(None),
             created_at: Set(now.into()),
             updated_at: Set(now.into()),
         }
@@ -236,6 +256,41 @@ impl PurchaseService {
             .await
     }
 
+    pub async fn confirm_alipay_notify(
+        &self,
+        raw_body: &[u8],
+    ) -> Result<PaymentCallbackResponse, crate::AppError> {
+        if !self.alipay.verify_notify(raw_body)? {
+            return Err(ValidationError::custom("支付宝通知验签失败").into());
+        }
+
+        let params: HashMap<String, String> =
+            url::form_urlencoded::parse(raw_body).into_owned().collect();
+        let out_trade_no = params
+            .get("out_trade_no")
+            .cloned()
+            .ok_or_else(|| ValidationError::custom("支付宝通知缺少 out_trade_no"))?;
+        let trade_status = params
+            .get("trade_status")
+            .cloned()
+            .ok_or_else(|| ValidationError::custom("支付宝通知缺少 trade_status"))?;
+        if trade_status != "TRADE_SUCCESS" && trade_status != "TRADE_FINISHED" {
+            return Ok(PaymentCallbackResponse {
+                order_no: out_trade_no,
+                status: "pending".to_string(),
+                activation_code: None,
+                expires_at: None,
+            });
+        }
+        let total_amount = params
+            .get("total_amount")
+            .ok_or_else(|| ValidationError::custom("支付宝通知缺少 total_amount"))?;
+        let amount_cents = parse_yuan_to_cents(total_amount)?;
+
+        self.confirm_provider_paid(&out_trade_no, Some(amount_cents))
+            .await
+    }
+
     async fn confirm_provider_paid(
         &self,
         order_no: &str,
@@ -275,6 +330,31 @@ impl PurchaseService {
             license_id: order_model.license_id.map(|id| id.to_string()),
         })
     }
+
+    async fn build_pay_payload(
+        &self,
+        channel: &str,
+        order_no: &str,
+        plan: &str,
+        amount_cents: i32,
+    ) -> Result<(String, Option<String>), crate::AppError> {
+        match channel {
+            "alipay" if self.alipay.is_enabled() => {
+                let output = self
+                    .alipay
+                    .precreate(AlipayPrecreateInput {
+                        out_trade_no: order_no.to_string(),
+                        subject: format!("{} {}", self.alipay_subject_prefix, plan_label(plan)),
+                        total_amount: cents_to_yuan(amount_cents),
+                    })
+                    .await?;
+                Ok((output.qr_code.clone(), Some(output.qr_code)))
+            }
+            "alipay" => Ok((self.reseller_url.clone(), None)),
+            "wechat" => Ok((format!("https://pay.weixin.qq.com/native/{order_no}"), None)),
+            _ => unreachable!("channel should be validated by normalize_channel"),
+        }
+    }
 }
 
 fn normalize_channel(channel: &str) -> Result<&'static str, ValidationError> {
@@ -282,17 +362,6 @@ fn normalize_channel(channel: &str) -> Result<&'static str, ValidationError> {
         "wechat" => Ok("wechat"),
         "alipay" => Ok("alipay"),
         _ => Err(ValidationError::custom("channel 必须是 wechat 或 alipay")),
-    }
-}
-
-fn build_provider_pay_url(channel: &str, order_no: &str) -> String {
-    match channel {
-        "wechat" => format!("https://pay.weixin.qq.com/native/{order_no}"),
-        "alipay" => format!(
-            "https://openapi.alipay.com/gateway.do?out_trade_no={}",
-            url::form_urlencoded::byte_serialize(order_no.as_bytes()).collect::<String>()
-        ),
-        _ => unreachable!("channel should be validated by normalize_channel"),
     }
 }
 
@@ -311,6 +380,18 @@ fn parse_yuan_to_cents(value: &str) -> Result<i32, ValidationError> {
         .parse::<i32>()
         .map_err(|_| ValidationError::custom("支付宝 total_amount 格式无效"))?;
     Ok(yuan_value * 100 + cents_value)
+}
+
+fn cents_to_yuan(amount_cents: i32) -> String {
+    format!("{}.{:02}", amount_cents / 100, amount_cents.abs() % 100)
+}
+
+fn plan_label(plan: &str) -> &'static str {
+    match plan {
+        "monthly" => "月卡",
+        "yearly" => "年卡",
+        _ => "授权",
+    }
 }
 
 fn new_order_no() -> String {

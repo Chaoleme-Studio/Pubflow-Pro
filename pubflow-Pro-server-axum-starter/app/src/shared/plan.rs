@@ -23,6 +23,16 @@ pub fn duration_for_plan(plan: &str) -> Result<Duration, ValidationError> {
     }
 }
 
+/// 按订阅时长折算设备迁移/自助解绑额度。
+///
+/// 当前策略：每 30 天给 3 次，至少 3 次。这样月卡 3 次、年卡 36 次，
+/// 避免长周期订阅仍只有月卡级别的恢复额度。
+pub fn device_migration_limit_for_plan(plan: &str) -> Result<i32, ValidationError> {
+    let days = duration_for_plan(plan)?.num_days();
+    let periods = (days / 30).max(1);
+    Ok((periods * 3).clamp(3, 100) as i32)
+}
+
 pub fn new_activation_code() -> String {
     let mut rng = rand::rng();
     let suffix: String = (0..16)
@@ -36,4 +46,15 @@ pub fn new_activation_code() -> String {
         })
         .collect();
     format!("PF-{}", suffix)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migration_limit_scales_with_subscription_duration() {
+        assert_eq!(device_migration_limit_for_plan("monthly").unwrap(), 3);
+        assert_eq!(device_migration_limit_for_plan("yearly").unwrap(), 36);
+    }
 }

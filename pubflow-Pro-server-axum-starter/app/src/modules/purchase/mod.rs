@@ -4,6 +4,7 @@ use aide::axum::routing::{get_with, post_with};
 use std::sync::Arc;
 use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 
+mod alipay;
 pub mod dto;
 mod handler;
 pub mod service;

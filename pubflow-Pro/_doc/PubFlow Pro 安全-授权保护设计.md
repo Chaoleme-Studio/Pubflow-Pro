@@ -7,6 +7,19 @@
 
 ---
 
+## 0. 当前落地状态（2026-07-04）
+
+本文保留完整安全架构和后续买断制方向，部分章节是设计预案，不代表订阅版当前全部启用。当前项目落地状态以此段为准：
+
+- 订阅版不引入 Native Helper，不增加用户安装成本；买断制/永久授权再单独规划 Native Helper。
+- 订阅版使用服务端 30 天 lease + 浏览器实例级 ECDSA P-256 设备密钥。
+- 点击“开始发布”时申请一次 `start_distribution` permit，TTL 为 30 分钟；`OPEN_PLATFORM` 和 `CONTINUE_FILL` 暂不做授权校验，优先保证发布体验顺滑。
+- 平台 selector 全部以内置 `src/platforms/*/selectors.ts` 为准；远程 selector/PFSP 代码保留但已暂时废弃，不进入发布主链路。
+- 自助解绑每日最多 10 次，并消耗迁移额度；迁移额度按订阅时长折算，每 30 天 3 次，月卡 3 次、年卡 36 次。
+- device proof 当前只签服务端 challenge；permit 已绑定 lease、operation 和 task hash。更高安全等级可后续把 `lease_id / purpose / client_install_id` 纳入签名上下文。
+
+---
+
 ## 1. 结论先行
 
 PubFlow 是浏览器扩展，不是微信/抖音小程序。用户拿到扩展包后，JS、WASM、资源文件、运行时 DOM 调用都在本机。因此它不存在绝对安全，只能做成本控制。
@@ -316,7 +329,7 @@ Native Helper 用设备私钥签名 nonce
 推荐策略：
 
 - 每个 license 允许绑定 `maxDevices` 台设备。
-- 用户可在官网自助解绑，但限制频率，例如每 30 天 2 次。
+- 订阅版当前按订阅时长折算迁移额度：每 30 天 3 次，月卡 3 次、年卡 36 次；自助解绑每日最多 10 次，并消耗迁移额度。
 - 风险订单或频繁换绑转人工审核。
 - 永久买断版也应保留设备数限制。
 

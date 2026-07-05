@@ -23,6 +23,8 @@ import {
   adminLogin,
   createAdminAppVersion,
   deleteAdminAppVersion,
+  deleteAdminLicense,
+  freezeAdminLicense,
   generateLicenses,
   getDauStats,
   getAdminProductCatalog,
@@ -34,6 +36,8 @@ import {
   replaceLicense,
   revokeAdminLicense,
   saveAdminProductCatalog,
+  unbindAdminLicenseDevice,
+  unfreezeAdminLicense,
   updateAdminAppVersion,
   updateLicenseLimits,
   uploadSelector,
@@ -46,6 +50,7 @@ import {
   type AdminProductCatalogConfig,
   type DauStat,
   type LicenseSummary,
+  type Plan,
   type SelectorVersionItem,
 } from '../api';
 import AdminOverviewChart from '../components/admin/AdminOverviewChart.vue';
@@ -135,7 +140,7 @@ const selectorUploadJson = ref(JSON.stringify({
 const selectorUploadMessage = ref('');
 
 // 生成激活码相关
-const generatePlan = ref<'monthly' | 'yearly'>('monthly');
+const generatePlan = ref<Plan>('monthly');
 const generateQuantity = ref(10);
 const generateMaxDevices = ref(1);
 const generateBatchName = ref('');
@@ -157,6 +162,10 @@ const limitsReason = ref('');
 
 watch(showGenerateDialog, (open) => {
   if (open) nextTick(() => modalContentRef.value?.focus());
+});
+
+watch(adminView, () => {
+  if (adminLoggedIn.value) void refreshCurrentView();
 });
 
 const emptyFilters = () => ({
@@ -250,6 +259,7 @@ const normalizedLicenses = computed(() => {
     sourceChannel: item.sourceChannel || '-',
     batchName: item.batchName || '-',
     amountCents: item.amountCents || 0,
+    clientInstallIds: item.clientInstallIds,
   }));
 });
 
@@ -355,7 +365,7 @@ async function loginAdmin() {
     localStorage.removeItem('pubflow_admin_login_attempts');
     localStorage.removeItem('pubflow_admin_locked_until');
     adminLoggedIn.value = true;
-    void refreshAdminData();
+    void refreshCurrentView();
   } catch {
     recordLoginFailure();
     adminLoginError.value ||= '用户名或密码错误';
@@ -394,13 +404,25 @@ async function handleGenerateLicenses() {
     });
     generateResult.value = `成功生成 ${result.items.length} 个激活码`;
     showGenerateDialog.value = false;
-    // 刷新列表
-    await refreshAdminData();
+    await refreshLicensesOnly();
   } catch (error) {
     generateResult.value = error instanceof Error ? error.message : '生成失败';
   } finally {
     generateLoading.value = false;
   }
+}
+
+async function refreshLicensesOnly() {
+  if (!adminToken.value) return;
+  adminDataError.value = '';
+  const licenseResult = await listAdminLicenses(adminToken.value, {
+    ...licenseFilters.value,
+    page: licensePage.value,
+    pageSize: licensePageSize.value,
+  });
+  remoteLicenses.value = licenseResult.items;
+  licenseTotal.value = licenseResult.total;
+  licenseSummaryData.value = licenseResult.summary;
 }
 
 async function refreshAdminData() {
@@ -432,6 +454,36 @@ async function refreshAdminData() {
     productConfig.value = products;
     appVersions.value = versions;
     ensurePluginDownloads();
+  } catch (error) {
+    adminDataError.value = error instanceof Error ? error.message : '后台数据加载失败，请确认服务端已启动';
+  } finally {
+    adminLoading.value = false;
+  }
+}
+
+async function refreshCurrentView() {
+  if (!adminToken.value) return;
+  adminLoading.value = true;
+  adminDataError.value = '';
+  try {
+    if (adminView.value === 'licenses') {
+      await refreshLicensesOnly();
+    } else if (adminView.value === 'versions') {
+      appVersions.value = await refreshAppVersions();
+    } else if (adminView.value === 'products') {
+      productConfig.value = await getAdminProductCatalog(adminToken.value);
+      ensurePluginDownloads();
+    } else if (adminView.value === 'leases') {
+      applyLeaseTimeRange();
+      await refreshLeases();
+      await refreshDauStats();
+    } else if (adminView.value === 'selectors') {
+      selectorVersion.value = await getSelectorVersion(adminToken.value);
+    } else if (adminView.value === 'users') {
+      remoteOrders.value = await listAdminOrders(adminToken.value, orderFilters.value);
+    } else {
+      await refreshAdminData();
+    }
   } catch (error) {
     adminDataError.value = error instanceof Error ? error.message : '后台数据加载失败，请确认服务端已启动';
   } finally {
@@ -595,7 +647,7 @@ async function submitReplaceLicense() {
   try {
     const result = await replaceLicense(adminToken.value, actionLicense.value.activationCode, replaceReason.value, replaceRevokeOld.value);
     replaceResult.value = `新激活码：${result.newActivationCode}`;
-    await refreshAdminData();
+    await refreshLicensesOnly();
   } catch (error) {
     replaceResult.value = error instanceof Error ? error.message : '补发失败';
   }
@@ -608,9 +660,85 @@ async function revokeLicense(item: AdminLicenseItem) {
   try {
     await revokeAdminLicense(adminToken.value, item.activationCode, reason.trim() || undefined);
     generateResult.value = `已吊销激活码：${item.activationCode}`;
-    await refreshAdminData();
+    await refreshLicensesOnly();
   } catch (error) {
     generateResult.value = error instanceof Error ? error.message : '吊销失败';
+  }
+}
+
+async function deleteLicense(item: AdminLicenseItem) {
+  if (!adminToken.value) return;
+  const firstConfirm = window.confirm(`确认删除这个卡密？\n${item.activationCode}\n\n删除后默认不会再出现在卡密列表，关联授权会立即失效。`);
+  if (!firstConfirm) return;
+  const typedCode = window.prompt('为避免误删，请输入完整激活码确认删除：');
+  if (typedCode === null) return;
+  if (typedCode.trim().toUpperCase() !== item.activationCode.toUpperCase()) {
+    generateResult.value = '激活码输入不一致，已取消删除。';
+    return;
+  }
+  const reason = window.prompt('填写删除原因：', '后台删除测试卡密');
+  if (reason === null) return;
+  try {
+    const result = await deleteAdminLicense(adminToken.value, item.activationCode, reason.trim() || undefined);
+    generateResult.value = `已删除 ${item.activationCode}，失效 ${result.revokedLeases} 条授权`;
+    await refreshLicensesOnly();
+  } catch (error) {
+    generateResult.value = error instanceof Error ? error.message : '删除卡密失败';
+  }
+}
+
+async function freezeLicense(item: AdminLicenseItem) {
+  if (!adminToken.value) return;
+  const reason = window.prompt(`确认冻结当前活跃设备授权？\n${item.activationCode}\n\n这不会吊销卡密，但会让现有设备 lease 失效。`, '后台冻结当前设备授权');
+  if (reason === null) return;
+  try {
+    const result = await freezeAdminLicense(adminToken.value, item.activationCode, reason.trim() || undefined);
+    generateResult.value = `已冻结 ${item.activationCode}，失效 ${result.revokedLeases} 条授权`;
+    await refreshLicensesOnly();
+  } catch (error) {
+    generateResult.value = error instanceof Error ? error.message : '冻结失败';
+  }
+}
+
+async function unfreezeLicense(item: AdminLicenseItem) {
+  if (!adminToken.value) return;
+  const reason = window.prompt(`确认解除冻结？\n${item.activationCode}\n\n用户需要重新验证或重新激活后才能获得新 lease。`, '后台解除冻结');
+  if (reason === null) return;
+  const resetMigrationCount = window.confirm('是否同时重置迁移/解绑次数？\n仅在客服确认误伤时建议选择“确定”。');
+  try {
+    const result = await unfreezeAdminLicense(adminToken.value, item.activationCode, reason.trim() || undefined, resetMigrationCount);
+    generateResult.value = `已解冻 ${item.activationCode}，当前迁移次数 ${result.deviceMigrationCount}`;
+    await refreshLicensesOnly();
+  } catch (error) {
+    generateResult.value = error instanceof Error ? error.message : '解冻失败';
+  }
+}
+
+async function unbindLicenseDevice(item: AdminLicenseItem) {
+  if (!adminToken.value) return;
+  const defaultInstallId = item.clientInstallIds.find(Boolean) || item.machineHashes.find(Boolean) || '';
+  const clientInstallId = window.prompt(`输入要解绑的 client_install_id：\n${item.activationCode}`, defaultInstallId);
+  if (clientInstallId === null) return;
+  const normalizedClientInstallId = clientInstallId.trim();
+  if (!normalizedClientInstallId) {
+    generateResult.value = '设备标识不能为空';
+    return;
+  }
+  const reason = window.prompt('填写后台解绑原因：', '客服后台解绑单个设备');
+  if (reason === null) return;
+  const consumeMigration = window.confirm('是否消耗一次用户迁移/解绑额度？\n正常换机建议选择“确定”，误伤修复选择“取消”。');
+  try {
+    const result = await unbindAdminLicenseDevice(
+      adminToken.value,
+      item.activationCode,
+      normalizedClientInstallId,
+      reason.trim() || undefined,
+      consumeMigration,
+    );
+    generateResult.value = `已解绑设备，失效 ${result.revokedLeases} 条授权，迁移 ${result.deviceMigrationCount}/${result.deviceMigrationLimit}`;
+    await refreshLicensesOnly();
+  } catch (error) {
+    generateResult.value = error instanceof Error ? error.message : '解绑设备失败';
   }
 }
 
@@ -633,7 +761,7 @@ async function submitLicenseLimits() {
       limitsReason.value.trim() || undefined,
     );
     showLimitsDialog.value = false;
-    await refreshAdminData();
+    await refreshLicensesOnly();
   } catch (error) {
     generateResult.value = error instanceof Error ? error.message : '调整限制失败';
   }
@@ -702,13 +830,13 @@ function applyLeaseTimeRange() {
 function resetOrderFilters() {
   orderFilters.value = emptyFilters();
   orderPage.value = 1;
-  void refreshAdminData();
+  void refreshCurrentView();
 }
 
 function resetLicenseFilters() {
   licenseFilters.value = emptyFilters();
   licensePage.value = 1;
-  void refreshAdminData();
+  void refreshLicensesOnly();
 }
 
 function csvEscape(value: string): string {
@@ -751,7 +879,7 @@ async function submitSelectorUpload() {
 }
 
 if (adminLoggedIn.value) {
-  void refreshAdminData();
+  void refreshCurrentView();
 }
 </script>
 
@@ -816,7 +944,7 @@ if (adminLoggedIn.value) {
           <h1>{{ adminViewTitles[adminView] }}</h1>
         </div>
         <div class="admin-actions">
-          <button class="secondary-button compact" type="button" @click="refreshAdminData">
+          <button class="secondary-button compact" type="button" @click="refreshCurrentView">
             <RefreshCw :size="16" />
             {{ adminLoading ? '同步中' : '同步' }}
           </button>
@@ -1128,7 +1256,7 @@ if (adminLoggedIn.value) {
           <label><span>授权到期结束</span><input v-model="orderFilters.expiresTo" type="date" /></label>
           <div class="filter-actions">
             <button class="secondary-button compact" type="button" @click="resetOrderFilters">重置</button>
-            <button class="primary-button compact" type="button" @click="refreshAdminData">查询</button>
+            <button class="primary-button compact" type="button" @click="orderPage = 1; refreshCurrentView()">查询</button>
           </div>
         </div>
         <table>
@@ -1217,7 +1345,7 @@ if (adminLoggedIn.value) {
           <label><span>授权到期结束</span><input v-model="licenseFilters.expiresTo" type="date" /></label>
           <div class="filter-actions">
             <button class="secondary-button compact" type="button" @click="resetLicenseFilters">重置</button>
-            <button class="primary-button compact" type="button" @click="refreshAdminData">查询</button>
+            <button class="primary-button compact" type="button" @click="licensePage = 1; refreshLicensesOnly()">查询</button>
           </div>
         </div>
 
@@ -1238,8 +1366,12 @@ if (adminLoggedIn.value) {
             </div>
             <div class="license-card-actions">
               <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && openReplaceDialog(rawLicenseByCode(item.code)!)">补发</button>
-              <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && openLimitsDialog(rawLicenseByCode(item.code)!)">限制</button>
+              <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && openLimitsDialog(rawLicenseByCode(item.code)!)">额度</button>
+              <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && freezeLicense(rawLicenseByCode(item.code)!)">冻结</button>
+              <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && unfreezeLicense(rawLicenseByCode(item.code)!)">解冻</button>
+              <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && unbindLicenseDevice(rawLicenseByCode(item.code)!)">解绑设备</button>
               <button class="secondary-button compact danger-action" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && revokeLicense(rawLicenseByCode(item.code)!)">吊销</button>
+              <button class="secondary-button compact danger-action" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && deleteLicense(rawLicenseByCode(item.code)!)">删除</button>
             </div>
           </div>
           <div v-if="filteredLicenses.length === 0" class="list-empty">暂无匹配卡密</div>
@@ -1262,8 +1394,12 @@ if (adminLoggedIn.value) {
               <td>{{ item.orderNo }}</td>
               <td class="table-actions">
                 <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && openReplaceDialog(rawLicenseByCode(item.code)!)">补发</button>
-                <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && openLimitsDialog(rawLicenseByCode(item.code)!)">限制</button>
+                <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && openLimitsDialog(rawLicenseByCode(item.code)!)">额度</button>
+                <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && freezeLicense(rawLicenseByCode(item.code)!)">冻结</button>
+                <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && unfreezeLicense(rawLicenseByCode(item.code)!)">解冻</button>
+                <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && unbindLicenseDevice(rawLicenseByCode(item.code)!)">解绑设备</button>
                 <button class="secondary-button compact danger-action" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && revokeLicense(rawLicenseByCode(item.code)!)">吊销</button>
+                <button class="secondary-button compact danger-action" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && deleteLicense(rawLicenseByCode(item.code)!)">删除</button>
               </td>
             </tr>
           </tbody>
@@ -1273,15 +1409,15 @@ if (adminLoggedIn.value) {
           <div>
             <label class="page-size-select">
               每页
-              <select v-model.number="licensePageSize" @change="licensePage = 1; refreshAdminData()">
+              <select v-model.number="licensePageSize" @change="licensePage = 1; refreshLicensesOnly()">
                 <option :value="10">10</option>
                 <option :value="20">20</option>
                 <option :value="50">50</option>
                 <option :value="100">100</option>
               </select>
             </label>
-            <button type="button" :disabled="licensePage <= 1" @click="licensePage -= 1; refreshAdminData()">上一页</button>
-            <button type="button" :disabled="licensePage >= licenseTotalPages" @click="licensePage += 1; refreshAdminData()">下一页</button>
+            <button type="button" :disabled="licensePage <= 1" @click="licensePage -= 1; refreshLicensesOnly()">上一页</button>
+            <button type="button" :disabled="licensePage >= licenseTotalPages" @click="licensePage += 1; refreshLicensesOnly()">下一页</button>
           </div>
         </div>
       </section>
@@ -1315,14 +1451,16 @@ if (adminLoggedIn.value) {
           </button>
         </div>
         <table>
-          <thead><tr><th>时间</th><th>激活码</th><th>事件</th><th>结果</th><th>IP 地址</th><th>安装实例</th><th>平台</th><th>授权到期</th><th>原因</th></tr></thead>
+          <thead><tr><th>时间</th><th>激活码</th><th>事件</th><th>结果</th><th>操作者</th><th>目标</th><th>IP 地址</th><th>安装实例</th><th>平台</th><th>授权到期</th><th>原因</th></tr></thead>
           <tbody>
-            <tr v-if="paginatedLeases.length === 0"><td colspan="9" class="table-empty">暂无授权记录。</td></tr>
+            <tr v-if="paginatedLeases.length === 0"><td colspan="11" class="table-empty">暂无授权记录。</td></tr>
             <tr v-for="item in paginatedLeases" :key="item.id">
               <td>{{ formatDateTime(item.createdAt) }}</td>
               <td><code class="hash-code">{{ shortHash(item.activationCode) }}</code></td>
               <td>{{ eventLabel(item.eventType) }}</td>
               <td><mark :class="`status-${item.status}`">{{ statusLabel(item.status) }}</mark></td>
+              <td>{{ item.operator || '-' }}</td>
+              <td><code class="hash-code">{{ item.targetId ? shortHash(item.targetId) : '-' }}</code></td>
               <td><code>{{ item.ipAddress || '-' }}</code></td>
               <td><code class="hash-code">{{ shortHash(item.clientInstallId) }}</code></td>
               <td>{{ item.platform || '-' }}</td>

@@ -43,6 +43,7 @@ const emit = defineEmits<{
   applyProviderPreset: [provider: AIProviderConfig];
   fetchAiModels: [];
   verifyLicense: [];
+  resetLicenseSettings: [];
   selectWorkspace: [];
   clearWorkspace: [];
   restoreFromWorkspace: [];
@@ -87,6 +88,9 @@ const licenseFeedbackClass = computed(() => {
   if (props.licensingSettings.status === 'active') {
     return 'border-emerald-200 bg-emerald-50 text-emerald-700';
   }
+  if (props.licensingSettings.status === 'restricted') {
+    return 'border-amber-200 bg-amber-50 text-amber-700';
+  }
   if (
     props.licensingSettings.status === 'invalid'
     || props.licensingSettings.status === 'expired'
@@ -99,6 +103,18 @@ const licenseFeedbackClass = computed(() => {
 
 const licenseFeedbackText = computed(() => {
   return props.licensingSettings.statusMessage || '';
+});
+
+const licenseBadgeText = computed(() => {
+  if (props.licensingSettings.status === 'active') return '已授权';
+  if (props.licensingSettings.status === 'restricted') return '受限模式';
+  return '未授权';
+});
+
+const licenseBadgeClass = computed(() => {
+  if (props.licensingSettings.status === 'active') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (props.licensingSettings.status === 'restricted') return 'border-amber-200 bg-amber-50 text-amber-700';
+  return 'border-slate-200 bg-slate-50 text-slate-600';
 });
 
 const activationCodeDisplayValue = computed(() => {
@@ -118,6 +134,28 @@ const licenseValidUntilText = computed(() => {
     hour: '2-digit',
     minute: '2-digit',
   });
+});
+
+const licenseLeaseNotice = computed(() => {
+  if (props.licensingSettings.status === 'restricted') {
+    return props.licensingSettings.statusMessage || '授权验证已到期，请联网重新验证后继续发布。';
+  }
+  if (props.licensingSettings.status !== 'active') return '';
+  const validUntil = props.licensingSettings.validUntil;
+  if (typeof validUntil !== 'number' || validUntil <= 0) return '';
+  const secondsLeft = validUntil - Math.floor(Date.now() / 1000);
+  if (secondsLeft <= 0) return '授权验证已到期，请联网重新验证后继续发布。';
+  const daysLeft = Math.ceil(secondsLeft / 86400);
+  if (daysLeft <= 7) return `授权验证将在 ${daysLeft} 天内到期，请保持联网完成续租。`;
+  return '';
+});
+
+const licenseLeaseNoticeClass = computed(() => {
+  const validUntil = props.licensingSettings.validUntil;
+  if (typeof validUntil !== 'number' || validUntil <= 0) return 'border-amber-200 bg-amber-50 text-amber-700';
+  const secondsLeft = validUntil - Math.floor(Date.now() / 1000);
+  if (secondsLeft <= 0) return 'border-red-200 bg-red-50 text-red-700';
+  return 'border-amber-200 bg-amber-50 text-amber-700';
 });
 
 function hasModelOptions(providerId: string) {
@@ -163,6 +201,7 @@ function updateActivationCode(event: Event) {
   props.licensingSettings.leaseToken = '';
   props.licensingSettings.validUntil = undefined;
   props.licensingSettings.serverTime = undefined;
+  props.licensingSettings.serverTimeCheckedAt = undefined;
   props.licensingSettings.status = 'unconfigured';
   props.licensingSettings.statusMessage = '';
 }
@@ -522,16 +561,21 @@ watch(
         </div>
         <span
           class="rounded-md border px-3 py-1.5 text-xs font-bold"
-          :class="licensingSettings.status === 'active'
-            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-            : 'border-amber-200 bg-amber-50 text-amber-700'"
+          :class="licenseBadgeClass"
         >
-          {{ licensingSettings.status === 'active' ? '已授权' : '未授权' }}
+          {{ licenseBadgeText }}
         </span>
       </div>
 
       <div v-if="licensingSettings.status === 'active'" class="mt-4 max-w-xl rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
         授权有效<span v-if="licenseValidUntilText">，有效期至 {{ licenseValidUntilText }}</span>
+      </div>
+      <div
+        v-if="licenseLeaseNotice"
+        class="mt-3 max-w-xl rounded-md border px-3 py-2 text-sm font-semibold"
+        :class="licenseLeaseNoticeClass"
+      >
+        {{ licenseLeaseNotice }}
       </div>
 
       <div class="mt-4 grid max-w-xl gap-4">
@@ -567,6 +611,13 @@ watch(
 
       <div class="mt-4 flex flex-wrap items-center gap-2">
         <button class="pf-btn-primary" type="button" @click="emit('verifyLicense')">激活并验证授权</button>
+        <button
+          class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-600 hover:border-red-300 hover:text-red-600"
+          type="button"
+          @click="emit('resetLicenseSettings')"
+        >
+          重置授权配置
+        </button>
       </div>
 
       <div

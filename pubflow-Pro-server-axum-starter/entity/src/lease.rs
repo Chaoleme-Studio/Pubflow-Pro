@@ -46,6 +46,15 @@ pub struct Model {
     /// 浏览器插件安装实例 ID，不是硬件机器码。
     pub client_install_id: Option<String>,
 
+    /// 浏览器实例设备公钥 hash。
+    pub device_key_id: Option<String>,
+
+    /// 浏览器实例设备公钥（SPKI，base64url）。
+    pub device_public_key_spki: Option<String>,
+
+    /// 浏览器实例设备密钥算法。
+    pub device_key_algorithm: Option<String>,
+
     /// 平台：macos / windows / linux
     pub platform: String,
 

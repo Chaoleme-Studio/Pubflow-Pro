@@ -11,3 +11,9 @@ logs
 .serena
 
 config/local.toml
+
+# Local Alipay materials for build-time embedding.
+# Files in this folder are read by app/build.rs and baked into the backend binary.
+secrets/alipay/*
+!secrets/alipay/.gitkeep
+!secrets/alipay/README.md

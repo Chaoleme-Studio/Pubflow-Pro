@@ -1,13 +1,14 @@
 use aide::transform::TransformOperation;
 use axum::Json;
+use axum::body::Bytes;
 use axum::extract::{Path, RawQuery, State};
 use std::sync::Arc;
 
 use crate::{ApiResponse, AppError, AppState, shared::FromState};
 
 use super::dto::{
-    AlipayNotifyRequest, CreateOrderRequest, CreateOrderResponse, OrderStatusResponse,
-    PaymentCallbackRequest, PaymentCallbackResponse, WechatPayNotifyRequest,
+    CreateOrderRequest, CreateOrderResponse, OrderStatusResponse, PaymentCallbackRequest,
+    PaymentCallbackResponse, WechatPayNotifyRequest,
 };
 use super::service::PurchaseService;
 
@@ -55,20 +56,21 @@ pub fn wechat_notify_docs(op: TransformOperation) -> TransformOperation {
         .response::<200, ApiResponse<PaymentCallbackResponse>>()
 }
 
-pub async fn alipay_notify(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<AlipayNotifyRequest>,
-) -> Result<ApiResponse<PaymentCallbackResponse>, AppError> {
+pub async fn alipay_notify(State(state): State<Arc<AppState>>, body: Bytes) -> &'static str {
     let service = PurchaseService::from_state(&state);
-    Ok(ApiResponse::success(
-        service.confirm_alipay_paid(req).await?,
-    ))
+    match service.confirm_alipay_notify(&body).await {
+        Ok(_) => "success",
+        Err(error) => {
+            tracing::warn!(error = %error, "alipay notify failed");
+            "failure"
+        }
+    }
 }
 
 pub fn alipay_notify_docs(op: TransformOperation) -> TransformOperation {
     op.description("支付宝异步通知，成功后自动开通 License")
         .tag("PubFlow Purchase")
-        .response::<200, ApiResponse<PaymentCallbackResponse>>()
+        .response::<200, String>()
 }
 
 pub async fn status(

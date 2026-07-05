@@ -1,6 +1,7 @@
 # 多平台文章发布调研报告
 
 > 调研时间：2026-05-22
+> 当前实现状态：2026-07-04 已接入抖音、B站、知乎、微博文章填充；小红书文章 selector 有预留但发布入口暂不开放；快手、视频号、西瓜仍不支持文章。
 > 调研方式：Chrome DevTools MCP 逐平台快照分析
 > 范围：只覆盖“文章/专栏/长文”发布流程。视频和普通图文流程分别见 `platform-video-发布元素定位.md`、`platform-image-图文发布调研.md`。
 
@@ -14,7 +15,7 @@
 | B站 | `https://member.bilibili.com/platform/upload/text/new-edit` | 专栏文章（iframe内编辑器） | EVA3编辑器 |
 | 小红书 | `https://creator.xiaohongshu.com/publish/publish?source=official&from=menu&target=article` | 写长文（Tiptap编辑器） | 2025年新功能 |
 | 知乎 | `https://zhuanlan.zhihu.com/write` | 知乎专栏（原生Markdown） | 最成熟的编辑器 |
-| 微博 | `https://weibo.com/` | 首页发布框（无独立文章） | 图文视频共用 |
+| 微博 | `https://card.weibo.com/article/v5/editor#/draft` | 头条文章编辑器 | 当前代码已接入文章页；首页发布框仍用于普通图文/视频 |
 | 快手 | ❌ 不支持 | 无文章模式 | 仅视频/图文 |
 | 视频号 | ❌ 不支持 | 无文章模式 | 仅视频/图文 |
 | 西瓜 | ❌ 不支持 | 无文章模式 | 仅视频 |
@@ -647,9 +648,9 @@ function cleanHtmlForPlatform(html: string, platform: string): string {
 10. 格式兼容性处理
 
 ### P3 - 低优先级
-11. AI润色/排版功能
-12. Git风格diff预览
-13. 微博"头条文章"支持
+11. 更多平台真实回归
+12. 小红书文章入口开放评估
+13. 富文本图片插入稳定性优化
 
 ---
 

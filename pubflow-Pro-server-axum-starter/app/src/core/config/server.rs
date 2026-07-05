@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::env;
 
 use super::section::ConfigSection;
 
@@ -12,7 +13,7 @@ pub struct ServerConfig {
     /// 服务器绑定地址（默认：127.0.0.1）
     pub host: String,
 
-    /// 服务器监听端口（默认：3001）
+    /// 服务器监听端口（默认：5189）
     pub port: u16,
 
     /// 请求超时时间，单位秒（默认：30）
@@ -23,7 +24,7 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             host: "127.0.0.1".to_string(),
-            port: 3001,
+            port: 5189,
             timeout: 30,
         }
     }
@@ -55,6 +56,33 @@ impl ConfigSection for ServerConfig {
         }
         if self.timeout == 0 {
             return Err("服务器超时时间必须大于 0".to_string());
+        }
+        Ok(())
+    }
+
+    fn apply_env_overrides(&mut self) -> Result<(), String> {
+        if let Ok(host) = env::var("APP_SERVER_HOST").or_else(|_| env::var("SERVER_HOST")) {
+            let host = host.trim();
+            if !host.is_empty() {
+                self.host = host.to_string();
+            }
+        }
+        if let Ok(port) = env::var("APP_SERVER_PORT").or_else(|_| env::var("SERVER_PORT")) {
+            let port = port.trim();
+            if !port.is_empty() {
+                self.port = port
+                    .parse::<u16>()
+                    .map_err(|error| format!("服务器端口环境变量无效：{error}"))?;
+            }
+        }
+        if let Ok(timeout) = env::var("APP_SERVER_TIMEOUT").or_else(|_| env::var("SERVER_TIMEOUT"))
+        {
+            let timeout = timeout.trim();
+            if !timeout.is_empty() {
+                self.timeout = timeout
+                    .parse::<u64>()
+                    .map_err(|error| format!("服务器超时环境变量无效：{error}"))?;
+            }
         }
         Ok(())
     }

@@ -2,7 +2,10 @@ mod runtime;
 
 pub use runtime::AppStateConfig;
 
-use crate::{AppConfig, AppError, ValidationError, shared::jwt::JwtService};
+use crate::{
+    AppConfig, AppError, ValidationError, core::config::parse_jwt_previous_secrets,
+    shared::jwt::JwtService,
+};
 use deadpool_redis::Pool as RedisPool;
 use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 use sha2::{Digest, Sha256};
@@ -46,7 +49,12 @@ impl AppState {
     pub async fn init(app_config: &AppConfig) -> Result<Self, AppError> {
         let db = Self::create_db_connection(app_config).await?;
         let redis = Self::create_redis_pool(app_config).await?;
-        let jwt_service = JwtService::new(app_config.clone().secrets.jwt_secret.clone());
+        let jwt_service = JwtService::with_key_versions(
+            app_config.secrets.jwt_secret.clone(),
+            app_config.secrets.jwt_key_version,
+            parse_jwt_previous_secrets(&app_config.secrets.jwt_previous_secrets)
+                .map_err(ValidationError::custom)?,
+        );
 
         // 如果没有提供密码哈希，则从明文密码生成
         let admin_password_hash = if app_config.secrets.admin_password_hash.is_empty() {
@@ -68,14 +76,21 @@ impl AppState {
             jwt_service,
             config: AppStateConfig {
                 jwt_secret: app_config.secrets.jwt_secret.clone(),
+                jwt_key_version: app_config.secrets.jwt_key_version,
                 selector_secret: app_config.secrets.selector_secret.clone(),
                 selector_protocol_private_key: selector_protocol_private_key(app_config),
+                selector_protocol_key_version: app_config.secrets.selector_protocol_key_version,
+                selector_protocol_signing_private_key: app_config
+                    .secrets
+                    .selector_protocol_signing_private_key
+                    .clone(),
                 selector_replay_window_seconds: app_config.secrets.selector_replay_window_seconds,
                 selector_nonce_ttl_seconds: app_config.secrets.selector_nonce_ttl_seconds,
                 machine_salt: app_config.secrets.machine_salt.clone(),
                 admin_username: app_config.secrets.admin_username.clone(),
                 admin_password_hash,
                 downloads_fs_path: app_config.downloads_fs_path.clone(),
+                payment: app_config.payment.clone(),
             },
         })
     }

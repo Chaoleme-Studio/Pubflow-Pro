@@ -9,19 +9,29 @@ import { PLATFORM_MATCH_PATTERNS } from './src/platforms';
 import { obfuscate, type ObfuscatorOptions } from 'javascript-obfuscator';
 
 const ROOT_DIR = dirname(fileURLToPath(import.meta.url));
-const LOCAL_CONFIG = {
-  ...readLocalConfig(resolve(ROOT_DIR, '.env')),
+const WORKSPACE_DIR = resolve(ROOT_DIR, '..');
+const WXT_COMMAND = process.argv.includes('build') || process.argv.includes('zip') ? 'production' : 'development';
+const ENV_NAME = process.env.PUBFLOW_ENV || process.env.ENV || WXT_COMMAND;
+const LOCAL_CONFIG = deriveLocalConfig({
+  ...readLocalConfig(resolve(WORKSPACE_DIR, `.env.${ENV_NAME}`)),
   ...process.env,
-};
+});
 const DEV_WORKSPACE_PATH = normalizeLocalPath(LOCAL_CONFIG.PUBFLOW_DEV_WORKSPACE_PATH) || '';
 const CHROMIUM_PORT = Number(LOCAL_CONFIG.PUBFLOW_CHROMIUM_PORT?.trim() || '9222') || 9222;
 const CHROMIUM_PROFILE = normalizeLocalPath(LOCAL_CONFIG.PUBFLOW_CHROMIUM_PROFILE);
 const MANUAL_BROWSER = parseBooleanEnv(LOCAL_CONFIG.PUBFLOW_MANUAL_BROWSER);
 const USE_EXISTING_CHROMIUM = parseBooleanEnv(LOCAL_CONFIG.PUBFLOW_USE_EXISTING_CHROMIUM);
 const OBFUSCATE = parseBooleanEnv(LOCAL_CONFIG.OBFUSCATE);
-const DEFAULT_LICENSE_API_BASE_URL = (LOCAL_CONFIG.PUBFLOW_LICENSE_API_BASE_URL || '').trim();
+const OBFUSCATE_LICENSE_UI = parseBooleanEnv(LOCAL_CONFIG.OBFUSCATE_LICENSE_UI);
+const DEFAULT_LICENSE_API_BASE_URL = (LOCAL_CONFIG.PUBFLOW_LICENSE_API_BASE_URL || LOCAL_CONFIG.PUBLIC_API_BASE_URL || '').trim();
 const OFFICIAL_SITE_URL = (LOCAL_CONFIG.PUBFLOW_OFFICIAL_SITE_URL || DEFAULT_LICENSE_API_BASE_URL || '').trim();
+const PROTOCOL_PUBLIC_KEY = normalizeHexKey(LOCAL_CONFIG.PUBFLOW_PROTOCOL_PUBLIC_KEY);
+const PROTOCOL_TRUST_ROOT_P256_SPKI = normalizeBase64UrlKey(LOCAL_CONFIG.PUBFLOW_PROTOCOL_TRUST_ROOT_P256_SPKI);
 const LICENSE_API_HOST_PERMISSION = toHostPermission(DEFAULT_LICENSE_API_BASE_URL);
+
+if (OBFUSCATE && isRemoteUrl(DEFAULT_LICENSE_API_BASE_URL) && !PROTOCOL_PUBLIC_KEY) {
+  throw new Error('Protected remote builds require PUBFLOW_PROTOCOL_PUBLIC_KEY');
+}
 
 if (CHROMIUM_PROFILE) {
   mkdirSync(CHROMIUM_PROFILE, { recursive: true });
@@ -54,6 +64,8 @@ export default defineConfig({
       __PUBFLOW_DEV_WORKSPACE_PATH__: JSON.stringify(DEV_WORKSPACE_PATH),
       __PUBFLOW_DEFAULT_LICENSE_API_BASE_URL__: JSON.stringify(DEFAULT_LICENSE_API_BASE_URL),
       __PUBFLOW_OFFICIAL_SITE_URL__: JSON.stringify(OFFICIAL_SITE_URL),
+      __PUBFLOW_PROTOCOL_PUBLIC_KEY__: JSON.stringify(PROTOCOL_PUBLIC_KEY),
+      __PUBFLOW_PROTOCOL_TRUST_ROOT_P256_SPKI__: JSON.stringify(PROTOCOL_TRUST_ROOT_P256_SPKI),
     },
   }),
   webExt: {
@@ -131,6 +143,17 @@ function readLocalConfig(filePath: string): Record<string, string> {
   return config;
 }
 
+function deriveLocalConfig(config: Record<string, string | undefined>): Record<string, string> {
+  const next: Record<string, string> = {};
+  Object.entries(config).forEach(([key, value]) => {
+    if (typeof value === 'string') next[key] = value;
+  });
+  if (next.PUBLIC_API_BASE_URL && !next.PUBFLOW_LICENSE_API_BASE_URL) {
+    next.PUBFLOW_LICENSE_API_BASE_URL = next.PUBLIC_API_BASE_URL;
+  }
+  return next;
+}
+
 function parseBooleanEnv(rawValue?: string): boolean {
   if (!rawValue) return false;
   return ['1', 'true', 'yes', 'on'].indexOf(rawValue.trim().toLowerCase()) >= 0;
@@ -164,6 +187,34 @@ function toHostPermission(rawUrl: string): string {
   }
 }
 
+function normalizeHexKey(rawValue?: string): string {
+  const value = (rawValue || '').trim().toLowerCase();
+  if (!value) return '';
+  if (!/^[0-9a-f]{64}$/.test(value)) {
+    throw new Error('PUBFLOW_PROTOCOL_PUBLIC_KEY must be a 32-byte hex string');
+  }
+  return value;
+}
+
+function normalizeBase64UrlKey(rawValue?: string): string {
+  const value = (rawValue || '').trim();
+  if (!value) return '';
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+    throw new Error('PUBFLOW_PROTOCOL_TRUST_ROOT_P256_SPKI must be base64url without padding');
+  }
+  return value;
+}
+
+function isRemoteUrl(rawUrl: string): boolean {
+  if (!rawUrl) return false;
+  try {
+    const url = new URL(rawUrl);
+    return url.hostname !== 'localhost' && url.hostname !== '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
 function patchMarkstreamCss() {
   return {
     name: 'patch-markstream-css',
@@ -181,7 +232,7 @@ function patchMarkstreamCss() {
 
 function protectExtensionRuntimeChunks() {
   const protectedRuntimeChunkPattern = /^(background\.js|content-scripts\/content\.js)$/;
-  const options: ObfuscatorOptions = {
+  const runtimeOptions: ObfuscatorOptions = {
     compact: true,
     controlFlowFlattening: false,
     deadCodeInjection: false,
@@ -193,6 +244,17 @@ function protectExtensionRuntimeChunks() {
     transformObjectKeys: false,
     unicodeEscapeSequence: false,
   };
+  const licenseUiOptions: ObfuscatorOptions = {
+    compact: true,
+    controlFlowFlattening: false,
+    deadCodeInjection: false,
+    stringArray: true,
+    stringArrayEncoding: ['base64'],
+    stringArrayThreshold: 0.35,
+    splitStrings: false,
+    transformObjectKeys: false,
+    unicodeEscapeSequence: false,
+  };
 
   return {
     name: 'protect-extension-runtime-chunks',
@@ -200,7 +262,8 @@ function protectExtensionRuntimeChunks() {
       // 只在 Rollup 已经完成模块解析和动态 import 拆包后混淆最终 chunk。
       // 不能在 transform 阶段混淆源码，否则 `import('./views/*.vue')` 会被改写，
       // Rollup 无法再生成 Dashboard/Records/Settings 等异步页面 chunk，发布 ZIP 会只剩页面头部。
-      if (!shouldProtectChunk(chunk)) return null;
+      const options = protectionOptionsForChunk(chunk);
+      if (!options) return null;
 
       const result = obfuscate(code, {
         ...options,
@@ -216,9 +279,25 @@ function protectExtensionRuntimeChunks() {
     },
   };
 
-  function shouldProtectChunk(chunk: { fileName: string; moduleIds?: string[] }): boolean {
-    // 只保护 background/content。dashboard、sidepanel、settings 等 Vue 页面 chunk
-    // 对运行时动态导入和组件选项更敏感，混淆后容易出现页面局部空白。
-    return protectedRuntimeChunkPattern.test(chunk.fileName);
+  function protectionOptionsForChunk(chunk: { fileName: string; moduleIds?: string[] }): ObfuscatorOptions | null {
+    if (protectedRuntimeChunkPattern.test(chunk.fileName)) {
+      return runtimeOptions;
+    }
+    if (OBFUSCATE_LICENSE_UI && isLicenseUiChunk(chunk)) {
+      return licenseUiOptions;
+    }
+    return null;
+  }
+
+  function isLicenseUiChunk(chunk: { fileName: string; moduleIds?: string[] }): boolean {
+    if (/^chunks\/(SettingsView|dashboard)-/.test(chunk.fileName)) {
+      return true;
+    }
+    const moduleIds = chunk.moduleIds || [];
+    return moduleIds.some((id) => {
+      const normalized = id.split('\\').join('/');
+      return normalized.includes('/entrypoints/dashboard/views/SettingsView.vue')
+        || normalized.includes('/src/licensing/');
+    });
   }
 }

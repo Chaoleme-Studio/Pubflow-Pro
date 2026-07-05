@@ -41,8 +41,11 @@ export const defaultLicensingSettings: LicensingSettings = {
 };
 
 const LOCAL_LICENSE_API_BASE_URLS = new Set([
+  'http://124.222.232.50:30009',
   'http://127.0.0.1:3001',
   'http://localhost:3001',
+  'http://127.0.0.1:5189',
+  'http://localhost:5189',
 ]);
 
 export const defaultAISettings: AIProviderSettings = {
@@ -255,14 +258,26 @@ async function resolveLicensingSecrets(source: LicensingSettings, local: unknown
 function resolveLicensingApiBaseUrl(apiBaseUrl: string): string {
   const defaultApiBaseUrl = normalizeApiBaseUrl(defaultLicensingSettings.apiBaseUrl);
   const storedApiBaseUrl = normalizeApiBaseUrl(apiBaseUrl);
-  if (
-    defaultApiBaseUrl &&
-    !LOCAL_LICENSE_API_BASE_URLS.has(defaultApiBaseUrl) &&
-    LOCAL_LICENSE_API_BASE_URLS.has(storedApiBaseUrl)
-  ) {
+  if (shouldUseDefaultLicensingApiBaseUrl(storedApiBaseUrl, defaultApiBaseUrl)) {
     return defaultApiBaseUrl;
   }
   return storedApiBaseUrl || defaultApiBaseUrl;
+}
+
+function shouldUseDefaultLicensingApiBaseUrl(storedApiBaseUrl: string, defaultApiBaseUrl: string): boolean {
+  return Boolean(
+    defaultApiBaseUrl &&
+    !LOCAL_LICENSE_API_BASE_URLS.has(defaultApiBaseUrl) &&
+    LOCAL_LICENSE_API_BASE_URLS.has(storedApiBaseUrl),
+  );
+}
+
+function hasLegacyLicensingApiBaseUrl(settings: unknown): boolean {
+  const licensing = (settings || {}) as Partial<LicensingSettings>;
+  return shouldUseDefaultLicensingApiBaseUrl(
+    normalizeApiBaseUrl(licensing.apiBaseUrl),
+    normalizeApiBaseUrl(defaultLicensingSettings.apiBaseUrl),
+  );
 }
 
 function normalizeApiBaseUrl(value?: string): string {
@@ -335,12 +350,13 @@ async function migratePlaintextSecretsIfNeeded(settings: {
   licensingSettings?: unknown;
   aiSettings?: unknown;
 }>) {
-  const hasPlaintextSecret = sources.some((source) =>
+  const needsMigration = sources.some((source) =>
     hasServerSecret(source.serverConfig) ||
     hasLicensingSecrets(source.licensingSettings) ||
-    hasAISecrets(source.aiSettings),
+    hasAISecrets(source.aiSettings) ||
+    hasLegacyLicensingApiBaseUrl(source.licensingSettings),
   );
-  if (!hasPlaintextSecret) {
+  if (!needsMigration) {
     return;
   }
   await saveSettings(settings);

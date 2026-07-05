@@ -1,4 +1,8 @@
-import { PLATFORM_CONFIGS, supportsContentType } from '../src/platforms';
+import {
+  getPlatformConfig,
+  supportsContentType,
+  type PlatformConfig,
+} from '../src/platforms';
 import { injectDouyinArticleCover, injectDouyinCover } from '../src/platforms/douyin/pageWorld';
 import { injectXiaohongshuImageDescription } from '../src/platforms/xiaohongshu/pageWorld';
 import { runWeixinChannelsPageWorldAction } from '../src/platforms/weixinChannels/pageWorld';
@@ -7,6 +11,7 @@ import { loadLibraryData, saveLibraryData } from '../src/storage/libraryStorage'
 import { loadCurrentTask, saveCurrentTask } from '../src/storage/taskStorage';
 import { hasLicenseCredentials, loadLicensingSettings, saveLicensingSettings } from '../src/licensing/licenseStorage';
 import { verifyLicense } from '../src/licensing/licenseManager';
+import { issueDistributionPermit } from '../src/licensing/permitManager';
 import { checkExtensionUpdate } from '../src/licensing/updateChecker';
 import type {
   DistributionTask,
@@ -284,12 +289,21 @@ async function handleMessage(
       if (!license.ok) {
         return fail(license.error || license.settings.statusMessage || '授权无效，请先在设置中完成激活。');
       }
+      // TODO(remote-selector): 远程 selector 曾用于发布前动态下发平台策略，但当前 selector 已全部内置在
+      // src/platforms。为了降低开始发布的延迟和失败点，暂时废弃云端 selector 刷新；后续如果恢复，
+      // 需要做成后台异步刷新，不能阻塞用户点击发布后的主链路。
+      // await refreshRemotePlatformPolicyForLicense(license.settings);
       const supportedPlatforms = message.payload.platforms.filter((platformId) =>
-        supportsContentType(PLATFORM_CONFIGS[platformId], message.payload.content.contentType || 'video'),
+        supportsContentType(getPlatformConfig(platformId), message.payload.content.contentType || 'video'),
       );
       if (!supportedPlatforms.length) {
         return fail('当前内容类型没有可发布的平台，请检查目标平台选择。');
       }
+      const permit = await issueDistributionPermit(license.settings, {
+        content: message.payload.content,
+        platforms: supportedPlatforms,
+        videoId: message.payload.videoId,
+      });
       currentTask = {
         id: crypto.randomUUID(),
         videoId: message.payload.videoId,
@@ -301,6 +315,9 @@ async function handleMessage(
         currentIndex: 0,
         status: 'running',
         createdAt: Date.now(),
+        permitId: permit.permitId,
+        permitExpiresAt: permit.expiresAt,
+        permitTaskHash: permit.taskHash,
       };
       await persistAndBroadcast();
       const first = currentTask.platforms[0];
@@ -312,14 +329,20 @@ async function handleMessage(
 
     if (message.type === 'OPEN_PLATFORM') {
       ensureTask();
-      await requireActiveLicense();
+      // TODO(auth-ux): 当前产品优先保证一轮发布过程顺滑，授权/permit 只在 START_DISTRIBUTION 入口校验。
+      // 后续如果风险升高，可以恢复这里的过程校验，但应做成低频缓存校验，避免每个平台打开都请求服务器。
+      // const license = await requireActiveLicense();
+      // await refreshRemotePlatformPolicyForLicense(license.settings);
       await openPlatform(message.payload.platformId);
       return ok(currentTask);
     }
 
     if (message.type === 'CONTINUE_FILL') {
       ensureTask();
-      await requireActiveLicense();
+      // TODO(auth-ux): 当前产品优先保证一轮发布过程顺滑，授权/permit 只在 START_DISTRIBUTION 入口校验。
+      // 后续如果风险升高，可以恢复这里的过程校验，但应做成低频缓存校验，避免每个填充步骤都请求服务器。
+      // const license = await requireActiveLicense();
+      // await refreshRemotePlatformPolicyForLicense(license.settings);
       await continueFill(message.payload.platformId);
       return ok(currentTask);
     }
@@ -470,7 +493,7 @@ async function executeWeixinPageWorldAction<T = { ok: boolean; error?: string }>
 
 /** 打开目标平台编辑页，并登记 tab、状态和自动填充兜底计时器。 */
 async function openPlatform(platformId: PlatformId) {
-  const config = PLATFORM_CONFIGS[platformId];
+  const config = getPlatformConfig(platformId);
   const content = currentTask?.content;
   const editorUrl = resolveEditorUrl(config, content);
   const uploadConfig = resolveUploadConfig(config, content);
@@ -529,7 +552,7 @@ async function continueFill(platformId: PlatformId) {
     });
     await persistAndBroadcast();
 
-    const config = PLATFORM_CONFIGS[platformId];
+    const config = getPlatformConfig(platformId);
     const uploadConfig = resolveUploadConfig(config, currentTask.content);
     if (uploadConfig?.requiresActiveTab) {
       await browser.tabs.update(platformTask.tabId, { active: true });
@@ -630,7 +653,7 @@ function getFillCompletionTimeoutMs(platformId: PlatformId) {
   if (contentType !== 'video') {
     return NON_VIDEO_FILL_COMPLETION_TIMEOUT_MS;
   }
-  const config = PLATFORM_CONFIGS[platformId];
+  const config = getPlatformConfig(platformId);
   const uploadConfig = resolveUploadConfig(config, currentTask?.content);
   return Math.max(
     FILL_COMPLETION_MIN_TIMEOUT_MS,
@@ -716,7 +739,7 @@ function waitForFillContentAck(requestId: string) {
 }
 
 /** 按内容类型解析打开地址：视频、图文、文章可能对应同一平台的不同入口。 */
-function resolveEditorUrl(config: (typeof PLATFORM_CONFIGS)[PlatformId], content?: DistributionTask['content']) {
+function resolveEditorUrl(config: PlatformConfig, content?: DistributionTask['content']) {
   const contentType = content?.contentType;
   const isImagePost = contentType === 'image' || (!contentType && Boolean(content?.imageCacheIds?.length));
   if (contentType === 'article') {
@@ -729,7 +752,7 @@ function resolveEditorUrl(config: (typeof PLATFORM_CONFIGS)[PlatformId], content
 }
 
 /** 按内容类型解析上传配置；图文和文章优先 articleUpload，视频走 upload。 */
-function resolveUploadConfig(config: (typeof PLATFORM_CONFIGS)[PlatformId], content?: DistributionTask['content']) {
+function resolveUploadConfig(config: PlatformConfig, content?: DistributionTask['content']) {
   const contentType = content?.contentType;
   const isImagePost = contentType === 'image' || (!contentType && Boolean(content?.imageCacheIds?.length));
   if (contentType === 'article') {
@@ -780,7 +803,7 @@ function normalizeCurrentTaskPlatforms() {
   const before = getTaskNormalizationSignature(currentTask);
   const contentType = currentTask.content.contentType || 'video';
   currentTask.platforms = currentTask.platforms.filter((item) =>
-    supportsContentType(PLATFORM_CONFIGS[item.platformId], contentType),
+    supportsContentType(getPlatformConfig(item.platformId), contentType),
   );
   if (currentTask.currentIndex >= currentTask.platforms.length) {
     currentTask.currentIndex = Math.max(0, currentTask.platforms.length - 1);
@@ -837,6 +860,10 @@ async function verifyLicenseOnStartup() {
     const result = await verifyLicense(licensingSettings);
     licensingSettings = result.settings;
     await saveLicensingSettings(licensingSettings);
+    // TODO(remote-selector): 远程 selector 策略暂时废弃，启动时不再联网刷新平台策略。
+    // if (result.ok) {
+    //   await refreshRemotePlatformPolicyForLicense(result.settings);
+    // }
   } catch (error) {
     console.warn('[PubFlow] 启动授权验证失败', error);
   }
@@ -863,9 +890,23 @@ async function verifyCurrentLicense(input?: LicensingSettings) {
   return result;
 }
 
+/** @deprecated 远程 selector 策略暂时废弃；当前 selector 全部以内置 src/platforms 为准。 */
+async function refreshRemotePlatformPolicyForLicense(settings: LicensingSettings) {
+  void settings;
+  // TODO(remote-selector): 如果后续恢复云端策略，必须后台异步刷新并允许本地 selector 兜底，
+  // 不能在发布开始、打开平台、继续填充这些用户主链路上阻塞。
+  // const applied = await refreshRemotePlatformConfigs(settings);
+  // if (!applied) {
+  //   throw new Error('远程平台策略未包含当前支持平台，请联系支持更新策略配置。');
+  // }
+}
+
 async function requireActiveLicense() {
   const result = await verifyCurrentLicense();
   if (!result.ok) {
+    if (result.settings.status === 'restricted') {
+      throw new Error(result.error || result.settings.statusMessage || '当前处于受限模式，请联网重新验证授权后再发布。');
+    }
     throw new Error(result.error || result.settings.statusMessage || '授权无效，请先在设置中完成激活。');
   }
   return result;

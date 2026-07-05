@@ -36,6 +36,25 @@ pub fn routes(state: Arc<AppState>) -> ApiRouter {
             post_with(handler::revoke_license, handler::revoke_license_docs),
         )
         .api_route(
+            "/licenses/delete",
+            post_with(handler::delete_license, handler::delete_license_docs),
+        )
+        .api_route(
+            "/licenses/freeze",
+            post_with(handler::freeze_license, handler::freeze_license_docs),
+        )
+        .api_route(
+            "/licenses/unfreeze",
+            post_with(handler::unfreeze_license, handler::unfreeze_license_docs),
+        )
+        .api_route(
+            "/licenses/unbind-device",
+            post_with(
+                handler::unbind_license_device,
+                handler::unbind_license_device_docs,
+            ),
+        )
+        .api_route(
             "/licenses/replace",
             post_with(handler::replace_license, handler::replace_license_docs),
         )

@@ -416,7 +416,7 @@ el[reactProps].onClick(syntheticEvent); // ❌
 
 1. **视频号**：wujie Shadow DOM → `chrome.scripting.executeScript({ world: 'MAIN' })`
 2. **知乎**：React 合成事件 → `chrome.debugger` + `Input.dispatchMouseEvent`
-3. **抖音/小红书/快手/知乎/西瓜/视频号**：需要激活标签页（检测 `document.visibilityState` 或后台标签页延迟渲染）
+3. **抖音/小红书/快手/知乎/视频号**：需要激活标签页（检测 `document.visibilityState` 或后台标签页延迟渲染）。西瓜视频当前禁用，仅保留预留配置。
 
 ### 标签页激活策略
 
@@ -428,7 +428,7 @@ el[reactProps].onClick(syntheticEvent); // ❌
 | 小红书 | 是 | 同上 |
 | 快手 | 是 | 同上 |
 | 视频号 | 是 | Shadow DOM 需要活跃上下文 |
-| 西瓜 | 是 | 同上 |
+| 西瓜 | — | 当前禁用，仅预留配置 |
 | 知乎 | 是 | 后台标签页延迟渲染，上传区域不加载 |
 | B站 | 否 | 不受影响 |
 | 微博 | 否 | 不受影响 |

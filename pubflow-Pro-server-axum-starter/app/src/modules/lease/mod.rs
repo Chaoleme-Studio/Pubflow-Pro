@@ -11,14 +11,14 @@ pub mod service;
 pub fn routes(state: Arc<AppState>) -> ApiRouter {
     // 激活限流器（严格）
     let activate_limiter = GovernorConfigBuilder::default()
-        .per_second(2)
-        .burst_size(5)
+        .per_second(10)
+        .burst_size(10)
         .use_headers()
         .finish()
         .unwrap();
     let activate_protocol_limiter = GovernorConfigBuilder::default()
-        .per_second(2)
-        .burst_size(5)
+        .per_second(10)
+        .burst_size(10)
         .use_headers()
         .finish()
         .unwrap();
@@ -30,19 +30,31 @@ pub fn routes(state: Arc<AppState>) -> ApiRouter {
         .use_headers()
         .finish()
         .unwrap();
+    let challenge_limiter = GovernorConfigBuilder::default()
+        .per_second(10)
+        .burst_size(20)
+        .use_headers()
+        .finish()
+        .unwrap();
+    let permit_limiter = GovernorConfigBuilder::default()
+        .per_second(10)
+        .burst_size(10)
+        .use_headers()
+        .finish()
+        .unwrap();
 
     // 续租限流器
     let renew_limiter = GovernorConfigBuilder::default()
-        .per_second(2)
-        .burst_size(5)
+        .per_second(10)
+        .burst_size(10)
         .use_headers()
         .finish()
         .unwrap();
 
     // 解绑限流器
     let deactivate_limiter = GovernorConfigBuilder::default()
-        .per_second(2)
-        .burst_size(5)
+        .per_second(10)
+        .burst_size(10)
         .use_headers()
         .finish()
         .unwrap();
@@ -57,6 +69,16 @@ pub fn routes(state: Arc<AppState>) -> ApiRouter {
             "/activate-protocol",
             post_with(handler::activate_protocol, handler::activate_protocol_docs)
                 .layer(GovernorLayer::new(activate_protocol_limiter)),
+        )
+        .api_route(
+            "/challenge",
+            post_with(handler::challenge, handler::challenge_docs)
+                .layer(GovernorLayer::new(challenge_limiter)),
+        )
+        .api_route(
+            "/permit",
+            post_with(handler::permit, handler::permit_docs)
+                .layer(GovernorLayer::new(permit_limiter)),
         )
         .api_route(
             "/verify",

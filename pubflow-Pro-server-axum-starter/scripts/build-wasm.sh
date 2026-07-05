@@ -97,8 +97,6 @@ if [[ -n "$EXTENSION_OUT_DIR" ]]; then
   mkdir -p "$EXTENSION_OUT_DIR"
   cp "$OUT_DIR"/pubflow_wasm.js \
      "$OUT_DIR"/pubflow_wasm_bg.wasm \
-     "$OUT_DIR"/pubflow_wasm.d.ts \
-     "$OUT_DIR"/pubflow_wasm_bg.wasm.d.ts \
      "$EXTENSION_OUT_DIR"/
   echo "WASM package copied to extension:"
   find "$EXTENSION_OUT_DIR" -maxdepth 1 -type f -print

@@ -62,7 +62,17 @@ export default defineContentScript({
   runAt: 'document_idle',
   allFrames: true,
   main() {
+    void initContentScript();
+  },
+});
+
+async function initContentScript() {
     try {
+      // TODO(remote-selector): 远程 selector 缓存暂时废弃。当前 selector 全部内置在 src/platforms，
+      // content script 启动时不再读取云端策略，避免页面初始化多一个异步失败点。
+      // await loadCachedRemotePlatformConfigs().catch((error) => {
+      //   console.warn('[PubFlow] 远程平台策略缓存加载失败，将使用内置策略', error);
+      // });
       const platform = resolvePlatformContext();
       if (!platform) return;
 
@@ -117,8 +127,7 @@ export default defineContentScript({
     } catch (error) {
       console.error('[PubFlow] content script 初始化失败', error);
     }
-  },
-});
+}
 
 /**
  * 记录本次填充请求已经被哪个 frame 接手。

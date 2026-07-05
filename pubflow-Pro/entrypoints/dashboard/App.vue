@@ -354,6 +354,16 @@ async function verifyLicense() {
   }
 }
 
+async function resetLicenseSettings() {
+  Object.assign(licensingSettings, {
+    ...defaultLicensingSettings,
+    status: 'unconfigured',
+    statusMessage: '',
+  });
+  await saveSettings(false);
+  notice.value = '授权配置已重置。';
+}
+
 function hasLicenseCredentials() {
   return Boolean(
     licensingSettings.apiBaseUrl &&
@@ -668,6 +678,7 @@ onUnmounted(() => {
             @apply-provider-preset="applyProviderPreset"
             @fetch-ai-models="fetchAIModels"
             @verify-license="verifyLicense"
+            @reset-license-settings="resetLicenseSettings"
             @select-workspace="selectWorkspace"
             @initialize-demo-workspace="initializeDemoWorkspace"
             @clear-workspace="clearWorkspace"

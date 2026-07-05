@@ -41,3 +41,16 @@ pub struct SelfRevokeLicenseRequest {
 pub struct SelfRevokeLicenseResponse {
     pub revoked: bool,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SelfResetDevicesRequest {
+    pub activation_code: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SelfResetDevicesResponse {
+    pub revoked_leases: u64,
+    pub device_migration_count: i32,
+    pub device_migration_limit: i32,
+}

@@ -22,7 +22,13 @@ pub struct SelectorVersionResponse {
     pub min_app_version: String,
     pub created_at: DateTime<Utc>,
     pub protocol_version: u8,
+    pub protocol_key_version: i32,
     pub protocol_public_key: String,
+    pub protocol_public_key_expires_at: DateTime<Utc>,
+    pub protocol_signature_algorithm: Option<String>,
+    pub protocol_signing_key_id: Option<String>,
+    pub protocol_signed_payload: Option<String>,
+    pub protocol_signature: Option<String>,
     pub server_time_ms: i64,
 }
 

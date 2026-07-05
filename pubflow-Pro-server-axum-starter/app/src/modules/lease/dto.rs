@@ -2,6 +2,71 @@ use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeviceProof {
+    #[serde(alias = "deviceKeyId")]
+    pub device_key_id: String,
+    #[serde(alias = "publicKeySpkiBase64Url")]
+    pub public_key_spki_base64_url: Option<String>,
+    #[serde(alias = "challengeId")]
+    pub challenge_id: String,
+    pub challenge: String,
+    #[serde(alias = "signatureBase64Url")]
+    pub signature_base64_url: String,
+    pub algorithm: Option<String>,
+    #[serde(alias = "signatureFormat")]
+    pub signature_format: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeviceChallengeRequest {
+    #[serde(alias = "leaseToken")]
+    pub lease_token: Option<String>,
+    #[serde(alias = "clientInstallId")]
+    pub client_install_id: Option<String>,
+    #[serde(alias = "deviceKeyId")]
+    pub device_key_id: Option<String>,
+    pub purpose: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeviceChallengeResponse {
+    #[serde(alias = "challengeId")]
+    pub challenge_id: String,
+    pub challenge: String,
+    #[serde(alias = "expiresAt")]
+    pub expires_at: DateTime<Utc>,
+    #[serde(alias = "serverTime")]
+    pub server_time: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct IssuePermitRequest {
+    #[serde(alias = "leaseToken")]
+    pub lease_token: String,
+    #[serde(alias = "clientInstallId")]
+    pub client_install_id: Option<String>,
+    #[serde(alias = "machineHash")]
+    pub machine_hash: Option<String>,
+    pub operation: String,
+    #[serde(alias = "taskHash")]
+    pub task_hash: String,
+    #[serde(alias = "deviceProof")]
+    pub device_proof: Option<DeviceProof>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct IssuePermitResponse {
+    #[serde(alias = "permitToken")]
+    pub permit_token: String,
+    #[serde(alias = "permitId")]
+    pub permit_id: String,
+    #[serde(alias = "expiresAt")]
+    pub expires_at: DateTime<Utc>,
+    #[serde(alias = "serverTime")]
+    pub server_time: DateTime<Utc>,
+}
+
 /// 激活 lease 请求
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ActivateLeaseRequest {
@@ -15,6 +80,8 @@ pub struct ActivateLeaseRequest {
     pub platform: String,
     /// 插件版本
     pub extension_version: Option<String>,
+    /// 浏览器实例设备签名证明。
+    pub device_proof: Option<DeviceProof>,
 }
 
 /// 激活 lease 响应
@@ -45,6 +112,8 @@ pub struct VerifyLeaseRequest {
     pub client_install_id: Option<String>,
     /// 旧版兼容字段；订阅版不再表示硬件机器码
     pub machine_hash: Option<String>,
+    /// 浏览器实例设备签名证明。
+    pub device_proof: Option<DeviceProof>,
 }
 
 /// 验证 lease 响应
@@ -77,6 +146,8 @@ pub struct RenewLeaseRequest {
     pub client_install_id: Option<String>,
     /// 旧版兼容字段；订阅版不再表示硬件机器码
     pub machine_hash: Option<String>,
+    /// 浏览器实例设备签名证明。
+    pub device_proof: Option<DeviceProof>,
 }
 
 /// 续租响应
@@ -129,6 +200,10 @@ pub struct AdminLeaseItem {
     pub status: String,
     /// 失败或附加原因
     pub reason: Option<String>,
+    /// 后台操作者
+    pub operator: Option<String>,
+    /// 审计目标 ID，例如 license/batch/selector/app_version ID
+    pub target_id: Option<String>,
     /// 授权到期时间
     pub expires_at: Option<String>,
     /// 事件时间

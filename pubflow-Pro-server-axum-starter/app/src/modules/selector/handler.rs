@@ -56,14 +56,43 @@ pub fn version_docs(op: TransformOperation) -> TransformOperation {
 
 pub async fn upload(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<UploadSelectorRequest>,
 ) -> Result<ApiResponse<UploadSelectorResponse>, AppError> {
     let service = SelectorService::from_state(&state);
-    Ok(ApiResponse::success(service.upload(req).await?))
+    Ok(ApiResponse::success(
+        service
+            .upload(
+                req,
+                crate::admin::service::AdminAuditContext {
+                    operator: state.config.admin_username.clone(),
+                    source_ip: admin_source_ip(&headers),
+                },
+            )
+            .await?,
+    ))
 }
 
 pub fn upload_docs(op: TransformOperation) -> TransformOperation {
     op.description("上传新的 Selector 版本")
         .tag("PubFlow Admin")
         .response::<200, ApiResponse<UploadSelectorResponse>>()
+}
+
+fn admin_source_ip(headers: &HeaderMap) -> String {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            headers
+                .get("x-real-ip")
+                .and_then(|value| value.to_str().ok())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or("admin")
+        .to_string()
 }

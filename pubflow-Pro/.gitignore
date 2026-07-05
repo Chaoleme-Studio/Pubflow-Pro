@@ -16,6 +16,7 @@ stats-*.json
 .wxt
 web-ext.config.ts
 .claude
+.manual-security/
 
 
 _doc/design

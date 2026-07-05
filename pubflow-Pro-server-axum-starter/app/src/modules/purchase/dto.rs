@@ -17,6 +17,7 @@ pub struct CreateOrderResponse {
     pub channel: String,
     pub status: String,
     pub pay_url: String,
+    pub qr_code: Option<String>,
     /// 查询令牌，用于安全查询订单状态（防止遍历订单号窃取激活码）
     pub query_token: String,
 }

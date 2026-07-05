@@ -1103,6 +1103,34 @@ h2 {
   line-height: 1.6;
 }
 
+.pay-qr-box {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-2);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.pay-qr-box img {
+  width: 220px;
+  height: 220px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.pay-qr-box span,
+.reseller-button {
+  color: var(--text-secondary);
+}
+
+.fallback-pay-link {
+  width: 100%;
+  text-decoration: none;
+}
+
 .license-service-page {
   padding: calc(68px + 40px) max(24px, calc((100vw - 1120px) / 2)) 72px;
 }
@@ -2239,7 +2267,7 @@ mark {
   gap: 8px;
   flex-wrap: wrap;
   margin-top: 12px;
-  min-width: max-content;
+  min-width: 0;
   white-space: nowrap;
 }
 

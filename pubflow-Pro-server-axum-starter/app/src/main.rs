@@ -30,7 +30,8 @@ mod seed;
 async fn health_check() -> ApiResponse<Value> {
     info!("健康检查请求");
     ApiResponse::success(json!({
-        "status": "healthy"
+        "status": "healthy",
+        "version": env!("CARGO_PKG_VERSION")
     }))
 }
 
@@ -138,13 +139,13 @@ async fn main() -> Result<(), AppError> {
     // 生产环境中，确保配置了正确的 ConnectInfo 中间件
     let general_limiter = Arc::new(
         GovernorConfigBuilder::default()
-            .per_second(10)
-            .burst_size(20)
+            .per_second(20)
+            .burst_size(40)
             .use_headers()
             .finish()
             .unwrap(),
     );
-    info!("⚡ 速率限制已启用: 每秒10个请求，突发20个请求");
+    info!("⚡ 速率限制已启用: 每秒20个请求，突发40个请求");
 
     // 应用所有中间件
     let app = app

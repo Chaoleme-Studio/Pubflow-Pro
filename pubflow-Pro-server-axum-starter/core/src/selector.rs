@@ -76,8 +76,7 @@ pub fn decrypt_selector_json(
     server_secret: &str,
     license_code: &str,
 ) -> Result<String, CryptoError> {
-    let key = crypto::derive_key(server_secret, license_code);
-    let plaintext = crypto::decrypt(encrypted_data, &key)?;
+    let plaintext = decrypt_selector_bytes(encrypted_data, server_secret, license_code)?;
     String::from_utf8(plaintext).map_err(|e| CryptoError::DecryptFailed(e.to_string()))
 }
 
@@ -98,8 +97,23 @@ pub fn encrypt_selector_json_str(
     server_secret: &str,
     license_code: &str,
 ) -> Result<String, CryptoError> {
-    let key = crypto::derive_key(server_secret, license_code);
+    let key = crypto::derive_key(server_secret, license_code)?;
     crypto::encrypt(selector_json.as_bytes(), &key)
+}
+
+fn decrypt_selector_bytes(
+    encrypted_data: &str,
+    server_secret: &str,
+    license_code: &str,
+) -> Result<Vec<u8>, CryptoError> {
+    let key = crypto::derive_key(server_secret, license_code)?;
+    match crypto::decrypt(encrypted_data, &key) {
+        Ok(plaintext) => Ok(plaintext),
+        Err(hkdf_error) => {
+            let legacy_key = crypto::derive_key_legacy(server_secret, license_code);
+            crypto::decrypt(encrypted_data, &legacy_key).map_err(|_| hkdf_error)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -133,5 +147,18 @@ mod tests {
 
         assert_eq!(decrypted.len(), 1);
         assert_eq!(decrypted["douyin"].title_input, "#title-input");
+    }
+
+    #[test]
+    fn test_decrypt_legacy_selector_json() {
+        let secret = "server-secret-key";
+        let code = "ACTIVATE-CODE-123";
+        let json = r##"{"douyin":{"title_input":"#title","publish_btn":"#publish"}}"##;
+        let legacy_key = crypto::derive_key_legacy(secret, code);
+        let encrypted = crypto::encrypt(json.as_bytes(), &legacy_key).unwrap();
+
+        let decrypted = decrypt_selector_json(&encrypted, secret, code).unwrap();
+
+        assert_eq!(decrypted, json);
     }
 }

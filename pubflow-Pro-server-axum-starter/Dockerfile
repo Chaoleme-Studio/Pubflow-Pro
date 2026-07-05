@@ -43,7 +43,7 @@ COPY app/assets/ /app/app/assets/
 
 RUN mkdir -p /app/logs
 
-EXPOSE 3001
+EXPOSE 5189
 
 ENV RUN_ENV=production \
     RUST_LOG=info

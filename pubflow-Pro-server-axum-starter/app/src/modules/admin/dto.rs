@@ -84,6 +84,58 @@ pub struct RevokeLicenseResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteLicenseRequest {
+    pub activation_code: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteLicenseResponse {
+    pub deleted: bool,
+    pub revoked_leases: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct FreezeLicenseRequest {
+    pub activation_code: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct FreezeLicenseResponse {
+    pub frozen: bool,
+    pub revoked_leases: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UnfreezeLicenseRequest {
+    pub activation_code: String,
+    pub reason: Option<String>,
+    pub reset_migration_count: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UnfreezeLicenseResponse {
+    pub unfrozen: bool,
+    pub device_migration_count: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UnbindLicenseDeviceRequest {
+    pub activation_code: String,
+    pub client_install_id: String,
+    pub reason: Option<String>,
+    pub consume_migration: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UnbindLicenseDeviceResponse {
+    pub revoked_leases: u64,
+    pub device_migration_count: i32,
+    pub device_migration_limit: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AdminPlanConfig {
     pub id: String,
     pub name: String,

@@ -90,6 +90,9 @@ export interface DistributionTask {
   currentIndex: number;
   status: 'idle' | 'running' | 'paused' | 'completed' | 'error';
   createdAt: number;
+  permitId?: string;
+  permitExpiresAt?: number;
+  permitTaskHash?: string;
 }
 
 export type PublishedPlatformStatus = Extract<
@@ -185,7 +188,14 @@ export interface ServerConfig {
   connected: boolean;
 }
 
-export type LicenseStatus = 'unconfigured' | 'inactive' | 'active' | 'expired' | 'device_mismatch' | 'invalid';
+export type LicenseStatus =
+  | 'unconfigured'
+  | 'inactive'
+  | 'active'
+  | 'restricted'
+  | 'expired'
+  | 'device_mismatch'
+  | 'invalid';
 
 export interface LicensingSettings {
   apiBaseUrl: string;
@@ -199,6 +209,7 @@ export interface LicensingSettings {
   statusMessage?: string;
   validUntil?: number;
   serverTime?: number;
+  serverTimeCheckedAt?: number;
 }
 
 /** 内置 AI 服务商类型，custom 表示用户手动配置的兼容 OpenAI 协议服务。 */

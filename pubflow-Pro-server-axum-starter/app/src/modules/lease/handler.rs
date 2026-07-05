@@ -12,6 +12,7 @@ use crate::{ApiResponse, AppError, AppState, shared::FromState};
 
 use super::dto::{
     ActivateLeaseRequest, ActivateLeaseResponse, DeactivateLeaseRequest, DeactivateLeaseResponse,
+    DeviceChallengeRequest, DeviceChallengeResponse, IssuePermitRequest, IssuePermitResponse,
     RenewLeaseRequest, RenewLeaseResponse, VerifyLeaseRequest, VerifyLeaseResponse,
 };
 use super::service::LeaseService;
@@ -91,6 +92,40 @@ pub fn activate_docs(op: TransformOperation) -> TransformOperation {
 pub fn activate_protocol_docs(op: TransformOperation) -> TransformOperation {
     op.description("使用 PFAP v1 二进制协议激活订阅 lease")
         .tag("PubFlow Lease")
+}
+
+/// 签发浏览器实例设备校验 challenge
+pub async fn challenge(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<DeviceChallengeRequest>,
+) -> Result<ApiResponse<DeviceChallengeResponse>, AppError> {
+    let ip = extract_client_ip(&headers);
+    let service = LeaseService::from_state(&state);
+    Ok(ApiResponse::success(
+        service.issue_device_challenge(req, &ip).await?,
+    ))
+}
+
+pub fn challenge_docs(op: TransformOperation) -> TransformOperation {
+    op.description("签发浏览器实例设备签名 challenge")
+        .tag("PubFlow Lease")
+        .response::<200, ApiResponse<DeviceChallengeResponse>>()
+}
+
+/// 签发关键操作短期票据
+pub async fn permit(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<IssuePermitRequest>,
+) -> Result<ApiResponse<IssuePermitResponse>, AppError> {
+    let service = LeaseService::from_state(&state);
+    Ok(ApiResponse::success(service.issue_permit(req).await?))
+}
+
+pub fn permit_docs(op: TransformOperation) -> TransformOperation {
+    op.description("签发关键操作短期票据")
+        .tag("PubFlow Lease")
+        .response::<200, ApiResponse<IssuePermitResponse>>()
 }
 
 /// 验证 lease

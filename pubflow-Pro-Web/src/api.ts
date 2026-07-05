@@ -29,6 +29,7 @@ export interface DownloadOption {
 export interface OrderResult {
   orderNo: string;
   payUrl: string;
+  qrCode?: string;
   queryToken: string;
 }
 
@@ -135,6 +136,12 @@ export interface LicenseLookupResult {
   activatedAt?: string;
 }
 
+export interface ResetDevicesResult {
+  revokedLeases: number;
+  deviceMigrationCount: number;
+  deviceMigrationLimit: number;
+}
+
 export interface AdminPlanConfig {
   id: Plan;
   name: string;
@@ -181,7 +188,7 @@ export interface AdminOrderItem {
 }
 
 export interface GenerateLicenseParams {
-  plan: 'monthly' | 'yearly';
+  plan: Plan;
   quantity?: number;
   maxDevices?: number;
   batchName?: string;
@@ -217,6 +224,8 @@ export interface AdminLeaseItem {
   eventType: string;
   status: string;
   reason?: string;
+  operator?: string;
+  targetId?: string;
   expiresAt?: string;
   createdAt: string;
 }
@@ -574,6 +583,125 @@ export async function revokeAdminLicense(
   return Boolean(data.revoked ?? true);
 }
 
+export async function deleteAdminLicense(
+  token: string,
+  activationCode: string,
+  reason?: string,
+): Promise<{ deleted: boolean; revokedLeases: number }> {
+  const response = await fetchWithTimeout('/v1/admin/licenses/delete', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      activation_code: activationCode,
+      reason,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('登录已过期，请重新登录');
+    throw new Error(apiErrorMessage(payload, '删除卡密失败'));
+  }
+  const data = (payload?.data ?? payload) as Record<string, unknown>;
+  return {
+    deleted: Boolean(data.deleted ?? true),
+    revokedLeases: Number(data.revoked_leases ?? data.revokedLeases ?? 0),
+  };
+}
+
+export async function freezeAdminLicense(
+  token: string,
+  activationCode: string,
+  reason?: string,
+): Promise<{ frozen: boolean; revokedLeases: number }> {
+  const response = await fetchWithTimeout('/v1/admin/licenses/freeze', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      activation_code: activationCode,
+      reason,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('登录已过期，请重新登录');
+    throw new Error(apiErrorMessage(payload, '冻结当前设备授权失败'));
+  }
+  const data = (payload?.data ?? payload) as Record<string, unknown>;
+  return {
+    frozen: Boolean(data.frozen ?? true),
+    revokedLeases: Number(data.revoked_leases ?? data.revokedLeases ?? 0),
+  };
+}
+
+export async function unfreezeAdminLicense(
+  token: string,
+  activationCode: string,
+  reason?: string,
+  resetMigrationCount?: boolean,
+): Promise<{ unfrozen: boolean; deviceMigrationCount: number }> {
+  const response = await fetchWithTimeout('/v1/admin/licenses/unfreeze', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      activation_code: activationCode,
+      reason,
+      reset_migration_count: resetMigrationCount,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('登录已过期，请重新登录');
+    throw new Error(apiErrorMessage(payload, '解冻授权失败'));
+  }
+  const data = (payload?.data ?? payload) as Record<string, unknown>;
+  return {
+    unfrozen: Boolean(data.unfrozen ?? true),
+    deviceMigrationCount: Number(data.device_migration_count ?? data.deviceMigrationCount ?? 0),
+  };
+}
+
+export async function unbindAdminLicenseDevice(
+  token: string,
+  activationCode: string,
+  clientInstallId: string,
+  reason?: string,
+  consumeMigration?: boolean,
+): Promise<{ revokedLeases: number; deviceMigrationCount: number; deviceMigrationLimit: number }> {
+  const response = await fetchWithTimeout('/v1/admin/licenses/unbind-device', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      activation_code: activationCode,
+      client_install_id: clientInstallId,
+      reason,
+      consume_migration: consumeMigration,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('登录已过期，请重新登录');
+    throw new Error(apiErrorMessage(payload, '后台解绑设备失败'));
+  }
+  const data = (payload?.data ?? payload) as Record<string, unknown>;
+  return {
+    revokedLeases: Number(data.revoked_leases ?? data.revokedLeases ?? 0),
+    deviceMigrationCount: Number(data.device_migration_count ?? data.deviceMigrationCount ?? 0),
+    deviceMigrationLimit: Number(data.device_migration_limit ?? data.deviceMigrationLimit ?? 0),
+  };
+}
+
 export async function updateLicenseLimits(
   token: string,
   activationCode: string,
@@ -652,6 +780,24 @@ export async function selfRevokeLicense(activationCode: string, reason?: string)
   return true;
 }
 
+export async function selfResetDevices(activationCode: string, reason?: string): Promise<ResetDevicesResult> {
+  const response = await fetchWithTimeout('/v1/license/reset-devices', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ activation_code: activationCode, reason }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(readApiMessage(payload, '解除旧设备占用失败'));
+  }
+  const data = (payload?.data ?? payload) as Record<string, unknown>;
+  return {
+    revokedLeases: Number(data.revoked_leases ?? data.revokedLeases ?? 0),
+    deviceMigrationCount: Number(data.device_migration_count ?? data.deviceMigrationCount ?? 0),
+    deviceMigrationLimit: Number(data.device_migration_limit ?? data.deviceMigrationLimit ?? 0),
+  };
+}
+
 export async function createOrder(plan: Plan, channel: PayChannel): Promise<OrderResult> {
   const response = await fetchWithTimeout('/v1/purchase/orders', {
     method: 'POST',
@@ -664,12 +810,14 @@ export async function createOrder(plan: Plan, channel: PayChannel): Promise<Orde
   }
   const data = payload?.data ?? payload;
   const payUrl = data.pay_url ?? data.payUrl ?? '';
+  const qrCode = data.qr_code ?? data.qrCode ?? '';
   const orderNo = data.order_no ?? data.orderNo;
   const queryToken = data.query_token ?? data.queryToken ?? '';
   if (!orderNo) throw new Error('订单创建失败：未返回订单号');
   return {
     orderNo,
     payUrl: /^https?:\/\//.test(payUrl) ? payUrl : '',
+    qrCode: typeof qrCode === 'string' && qrCode ? qrCode : undefined,
     queryToken,
   };
 }
@@ -856,6 +1004,17 @@ function numberOrUndefined(value: unknown): number | undefined {
   return undefined;
 }
 
+function readApiMessage(payload: unknown, fallback: string) {
+  const body = payload as {
+    message?: string;
+    error?: {
+      message?: string;
+      errors?: Array<{ message?: string; reason?: string }>;
+    };
+  };
+  return body?.error?.errors?.[0]?.message || body?.error?.message || body?.message || fallback;
+}
+
 function arrayOfString(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
 }
@@ -936,6 +1095,8 @@ export async function listAdminLeases(
     eventType: String(item.event_type ?? item.eventType ?? ''),
     status: String(item.status ?? ''),
     reason: stringOrUndefined(item.reason),
+    operator: stringOrUndefined(item.operator),
+    targetId: stringOrUndefined(item.target_id ?? item.targetId),
     expiresAt: stringOrUndefined(item.expires_at ?? item.expiresAt),
     createdAt: String(item.created_at ?? item.createdAt ?? ''),
   }));

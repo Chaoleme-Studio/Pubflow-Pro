@@ -1,6 +1,7 @@
 mod cors;
 mod database;
 mod logging;
+mod payment;
 mod redis;
 mod secrets;
 mod section;
@@ -9,8 +10,9 @@ mod server;
 pub use cors::CorsConfig;
 pub use database::DatabaseConfig;
 pub use logging::LoggingConfig;
+pub use payment::{AlipayConfig, PaymentConfig};
 pub use redis::RedisConfig;
-pub use secrets::SecretsConfig;
+pub use secrets::{SecretsConfig, parse_jwt_previous_secrets};
 pub use section::ConfigSection;
 pub use server::ServerConfig;
 
@@ -18,6 +20,10 @@ use crate::error::ConfigError;
 use config::{Config, Environment, File};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+
+mod embedded_env {
+    include!(concat!(env!("OUT_DIR"), "/pubflow_embedded_env.rs"));
+}
 
 /// 应用程序配置入口
 ///
@@ -44,6 +50,9 @@ pub struct AppConfig {
     /// Redis 连接池配置
     pub redis: RedisConfig,
 
+    /// 支付配置
+    pub payment: PaymentConfig,
+
     /// 扩展下载包本地文件系统路径（用于发布时校验 /downloads/ 下的文件）
     pub downloads_fs_path: String,
 }
@@ -57,6 +66,7 @@ impl Default for AppConfig {
             secrets: SecretsConfig::default(),
             cors: CorsConfig::default(),
             redis: RedisConfig::default(),
+            payment: PaymentConfig::default(),
             downloads_fs_path: "./downloads".to_string(),
         }
     }
@@ -79,7 +89,7 @@ impl AppConfig {
     /// 通过 `APP_ENV` 环境变量指定，默认为 `development`。
     /// 例如：`APP_ENV=production cargo run`
     pub fn load() -> Result<Self, ConfigError> {
-        dotenvy::dotenv().ok();
+        load_workspace_env_files();
 
         // 读取当前环境（默认 development）
         let env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string());
@@ -129,6 +139,7 @@ impl AppConfig {
         self.secrets = app_config.secrets;
         self.cors = app_config.cors;
         self.redis = app_config.redis;
+        self.payment = app_config.payment;
         self.downloads_fs_path = app_config.downloads_fs_path;
 
         Ok(())
@@ -145,6 +156,7 @@ impl AppConfig {
             &mut self.secrets,
             &mut self.cors,
             &mut self.redis,
+            &mut self.payment,
         ];
 
         for section in sections {
@@ -174,7 +186,7 @@ impl AppConfig {
         }
 
         // 本地开发脚本从 server 目录启动，扩展构建产物放在项目根目录 downloads/。
-        // 部署环境从 backend 目录启动，./downloads 会存在，所以不会走到这里。
+        // 部署环境从 server 目录启动，./downloads 会存在，所以不会走到这里。
         if matches!(value, "./downloads" | "downloads") && Path::new("../downloads").exists() {
             self.downloads_fs_path = "../downloads".to_string();
         }
@@ -191,6 +203,7 @@ impl AppConfig {
             &self.secrets,
             &self.cors,
             &self.redis,
+            &self.payment,
         ];
 
         for section in sections {
@@ -218,5 +231,37 @@ impl AppConfig {
     /// 成功返回 `Ok(())`，失败返回应用错误
     pub fn init_tracing(&self) -> Result<(), crate::AppError> {
         crate::core::logging::init_tracing(&self.logging)
+    }
+}
+
+fn load_workspace_env_files() {
+    let env = std::env::var("PUBFLOW_ENV")
+        .or_else(|_| std::env::var("ENV"))
+        .or_else(|_| std::env::var("APP_ENV"))
+        .unwrap_or_else(|_| "development".to_string());
+
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    if let Some(workspace_dir) = manifest_dir
+        .parent()
+        .and_then(|server_dir| server_dir.parent())
+    {
+        dotenvy::from_path(workspace_dir.join(format!(".env.{env}"))).ok();
+    }
+
+    // 部署后的二进制在远端 server/ 目录运行，那里没有源码根目录。
+    // 如果用户手动放了 server/.env，这里仍然允许它覆盖内置构建配置。
+    dotenvy::dotenv().ok();
+    apply_embedded_env_fallbacks();
+}
+
+fn apply_embedded_env_fallbacks() {
+    for &(key, value) in embedded_env::VARS {
+        if std::env::var_os(key).is_some() {
+            continue;
+        }
+        // AppConfig::load 在程序启动早期调用；这里设置的是构建期内置配置的兜底值。
+        unsafe {
+            std::env::set_var(key, value);
+        }
     }
 }

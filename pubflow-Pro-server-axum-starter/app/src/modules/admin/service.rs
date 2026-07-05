@@ -14,16 +14,18 @@ use uuid::Uuid;
 
 use crate::error::PubFlowError;
 use crate::shared::FromState;
-use crate::shared::plan::{new_activation_code, normalize_plan};
+use crate::shared::plan::{device_migration_limit_for_plan, new_activation_code, normalize_plan};
 use crate::{AppState, ValidationError};
 
 use super::dto::{
     AdminAppVersionItem, AdminAppVersionListResponse, AdminAppVersionQuery, AdminDownloadConfig,
     AdminLoginRequest, AdminLoginResponse, AdminPlanConfig, AdminProductCatalogConfig,
-    CreateAppVersionRequest, DeleteAppVersionResponse, GenerateLicenseRequest,
-    GenerateLicenseResponse, LicenseItem, LicenseSummary, ListLicenseQuery, ListOrderQuery,
-    ListUserQuery, OrderOperationItem, ReplaceLicenseRequest, ReplaceLicenseResponse,
-    RevokeLicenseRequest, RevokeLicenseResponse, UpdateAppVersionRequest,
+    CreateAppVersionRequest, DeleteAppVersionResponse, DeleteLicenseRequest, DeleteLicenseResponse,
+    FreezeLicenseRequest, FreezeLicenseResponse, GenerateLicenseRequest, GenerateLicenseResponse,
+    LicenseItem, LicenseSummary, ListLicenseQuery, ListOrderQuery, ListUserQuery,
+    OrderOperationItem, ReplaceLicenseRequest, ReplaceLicenseResponse, RevokeLicenseRequest,
+    RevokeLicenseResponse, UnbindLicenseDeviceRequest, UnbindLicenseDeviceResponse,
+    UnfreezeLicenseRequest, UnfreezeLicenseResponse, UpdateAppVersionRequest,
     UpdateLicenseLimitsRequest, UpdateLicenseLimitsResponse, UserOperationItem,
 };
 
@@ -33,6 +35,12 @@ pub struct AdminService {
     admin_username: String,
     admin_password_hash: String,
     downloads_fs_path: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AdminAuditContext {
+    pub operator: String,
+    pub source_ip: String,
 }
 
 impl FromState for AdminService {
@@ -48,6 +56,13 @@ impl FromState for AdminService {
 }
 
 impl AdminService {
+    pub fn audit_context(&self, source_ip: impl Into<String>) -> AdminAuditContext {
+        AdminAuditContext {
+            operator: self.admin_username.clone(),
+            source_ip: source_ip.into(),
+        }
+    }
+
     pub fn login(&self, req: AdminLoginRequest) -> Result<AdminLoginResponse, crate::AppError> {
         let username = req.username.trim();
 
@@ -79,8 +94,10 @@ impl AdminService {
     pub async fn generate_licenses(
         &self,
         req: GenerateLicenseRequest,
+        audit: AdminAuditContext,
     ) -> Result<GenerateLicenseResponse, crate::AppError> {
         let plan = normalize_plan(&req.plan)?;
+        let device_migration_limit = device_migration_limit_for_plan(plan)?;
         let quantity = req.quantity.unwrap_or(1).clamp(1, 100);
         let max_devices = req.max_devices.unwrap_or(1).clamp(1, 20);
         let now = Utc::now();
@@ -114,12 +131,13 @@ impl AdminService {
                 source_channel: Set(sales_channel.clone()),
                 batch_id: Set(Some(batch.id)),
                 max_devices: Set(max_devices),
-                device_migration_limit: Set(3),
+                device_migration_limit: Set(device_migration_limit),
                 device_migration_count: Set(0),
                 last_migrated_at: Set(None),
                 activated_at: Set(None),
                 expires_at: Set(None),
                 is_revoked: Set(false),
+                deleted_at: Set(None),
                 created_at: Set(now.into()),
                 updated_at: Set(now.into()),
             }
@@ -134,6 +152,21 @@ impl AdminService {
             ));
         }
 
+        insert_admin_audit_event(
+            &txn,
+            None,
+            None,
+            "generate_licenses",
+            "success",
+            Some(format!(
+                "plan:{plan}:quantity:{quantity}:channel:{sales_channel}:max_devices:{max_devices}:migration_limit:{device_migration_limit}"
+            )),
+            None,
+            &audit,
+            Some(batch.id.to_string()),
+        )
+        .await?;
+
         txn.commit().await?;
         Ok(GenerateLicenseResponse { items })
     }
@@ -141,12 +174,14 @@ impl AdminService {
     pub async fn revoke_license(
         &self,
         req: RevokeLicenseRequest,
+        audit: AdminAuditContext,
     ) -> Result<RevokeLicenseResponse, crate::AppError> {
         let now = Utc::now();
         let reason = trim_string(req.reason).unwrap_or_else(|| "后台手动吊销卡密".to_string());
         let txn = self.db.begin().await?;
         let license_model = license::Entity::find()
             .filter(license::Column::ActivationCode.eq(req.activation_code.trim()))
+            .filter(license::Column::DeletedAt.is_null())
             .one(&txn)
             .await?
             .ok_or(PubFlowError::LicenseNotFound)?;
@@ -175,11 +210,234 @@ impl AdminService {
             "success",
             Some(reason),
             license_model.expires_at,
+            &audit,
+            Some(license_model.id.to_string()),
         )
         .await?;
 
         txn.commit().await?;
         Ok(RevokeLicenseResponse { revoked: true })
+    }
+
+    pub async fn delete_license(
+        &self,
+        req: DeleteLicenseRequest,
+        audit: AdminAuditContext,
+    ) -> Result<DeleteLicenseResponse, crate::AppError> {
+        let now = Utc::now();
+        let reason = trim_string(req.reason).unwrap_or_else(|| "后台软删除测试卡密".to_string());
+        let txn = self.db.begin().await?;
+        let license_model = license::Entity::find()
+            .filter(license::Column::ActivationCode.eq(req.activation_code.trim()))
+            .filter(license::Column::DeletedAt.is_null())
+            .one(&txn)
+            .await?
+            .ok_or(PubFlowError::LicenseNotFound)?;
+
+        let mut active: license::ActiveModel = license_model.clone().into();
+        active.is_revoked = Set(true);
+        active.deleted_at = Set(Some(now.into()));
+        active.updated_at = Set(now.into());
+        active.update(&txn).await?;
+
+        let revoked = lease::Entity::update_many()
+            .filter(lease::Column::LicenseId.eq(license_model.id))
+            .filter(lease::Column::IsRevoked.eq(false))
+            .set(lease::ActiveModel {
+                is_revoked: Set(true),
+                updated_at: Set(now.into()),
+                ..Default::default()
+            })
+            .exec(&txn)
+            .await?;
+
+        insert_admin_license_event(
+            &txn,
+            license_model.id,
+            Some(license_model.activation_code),
+            "admin_delete",
+            "success",
+            Some(format!("{reason}:revoked_{}_leases", revoked.rows_affected)),
+            license_model.expires_at,
+            &audit,
+            Some(license_model.id.to_string()),
+        )
+        .await?;
+
+        txn.commit().await?;
+        Ok(DeleteLicenseResponse {
+            deleted: true,
+            revoked_leases: revoked.rows_affected,
+        })
+    }
+
+    pub async fn freeze_license(
+        &self,
+        req: FreezeLicenseRequest,
+        audit: AdminAuditContext,
+    ) -> Result<FreezeLicenseResponse, crate::AppError> {
+        let now = Utc::now();
+        let reason = trim_string(req.reason).unwrap_or_else(|| "后台冻结当前设备授权".to_string());
+        let txn = self.db.begin().await?;
+        let license_model = license::Entity::find()
+            .filter(license::Column::ActivationCode.eq(req.activation_code.trim()))
+            .filter(license::Column::DeletedAt.is_null())
+            .one(&txn)
+            .await?
+            .ok_or(PubFlowError::LicenseNotFound)?;
+        if license_model.is_revoked {
+            return Err(ValidationError::custom("已吊销卡密不能冻结").into());
+        }
+
+        let revoked = lease::Entity::update_many()
+            .filter(lease::Column::LicenseId.eq(license_model.id))
+            .filter(lease::Column::IsRevoked.eq(false))
+            .set(lease::ActiveModel {
+                is_revoked: Set(true),
+                updated_at: Set(now.into()),
+                ..Default::default()
+            })
+            .exec(&txn)
+            .await?;
+
+        insert_admin_license_event(
+            &txn,
+            license_model.id,
+            Some(license_model.activation_code),
+            "admin_freeze",
+            "success",
+            Some(format!("{reason}:revoked_{}_leases", revoked.rows_affected)),
+            license_model.expires_at,
+            &audit,
+            Some(license_model.id.to_string()),
+        )
+        .await?;
+
+        txn.commit().await?;
+        Ok(FreezeLicenseResponse {
+            frozen: true,
+            revoked_leases: revoked.rows_affected,
+        })
+    }
+
+    pub async fn unfreeze_license(
+        &self,
+        req: UnfreezeLicenseRequest,
+        audit: AdminAuditContext,
+    ) -> Result<UnfreezeLicenseResponse, crate::AppError> {
+        let now = Utc::now();
+        let reason = trim_string(req.reason).unwrap_or_else(|| "后台解除冻结".to_string());
+        let reset_migration_count = req.reset_migration_count.unwrap_or(false);
+        let txn = self.db.begin().await?;
+        let row = license::Entity::find()
+            .filter(license::Column::ActivationCode.eq(req.activation_code.trim()))
+            .filter(license::Column::DeletedAt.is_null())
+            .one(&txn)
+            .await?
+            .ok_or(PubFlowError::LicenseNotFound)?;
+        if row.is_revoked {
+            return Err(ValidationError::custom("已吊销卡密不能解冻，请补发新卡密").into());
+        }
+
+        let mut active: license::ActiveModel = row.clone().into();
+        if reset_migration_count {
+            active.device_migration_count = Set(0);
+        }
+        active.updated_at = Set(now.into());
+        let updated = active.update(&txn).await?;
+
+        insert_admin_license_event(
+            &txn,
+            updated.id,
+            Some(updated.activation_code.clone()),
+            "admin_unfreeze",
+            "success",
+            Some(format!(
+                "{reason}:reset_migration_count:{reset_migration_count}"
+            )),
+            updated.expires_at,
+            &audit,
+            Some(updated.id.to_string()),
+        )
+        .await?;
+
+        txn.commit().await?;
+        Ok(UnfreezeLicenseResponse {
+            unfrozen: true,
+            device_migration_count: updated.device_migration_count,
+        })
+    }
+
+    pub async fn unbind_license_device(
+        &self,
+        req: UnbindLicenseDeviceRequest,
+        audit: AdminAuditContext,
+    ) -> Result<UnbindLicenseDeviceResponse, crate::AppError> {
+        let now = Utc::now();
+        let client_install_id = req.client_install_id.trim().to_string();
+        if client_install_id.is_empty() {
+            return Err(ValidationError::custom("client_install_id 不能为空").into());
+        }
+        let reason = trim_string(req.reason).unwrap_or_else(|| "后台解绑单个设备".to_string());
+        let consume_migration = req.consume_migration.unwrap_or(false);
+        let txn = self.db.begin().await?;
+        let row = license::Entity::find()
+            .filter(license::Column::ActivationCode.eq(req.activation_code.trim()))
+            .filter(license::Column::DeletedAt.is_null())
+            .one(&txn)
+            .await?
+            .ok_or(PubFlowError::LicenseNotFound)?;
+        if row.is_revoked {
+            return Err(ValidationError::custom("已吊销卡密不能解绑设备").into());
+        }
+
+        let revoked = lease::Entity::update_many()
+            .filter(lease::Column::LicenseId.eq(row.id))
+            .filter(lease::Column::IsRevoked.eq(false))
+            .filter(
+                Condition::any()
+                    .add(lease::Column::ClientInstallId.eq(&client_install_id))
+                    .add(lease::Column::MachineHash.eq(&client_install_id)),
+            )
+            .set(lease::ActiveModel {
+                is_revoked: Set(true),
+                updated_at: Set(now.into()),
+                ..Default::default()
+            })
+            .exec(&txn)
+            .await?;
+
+        let mut updated = row.clone();
+        if consume_migration && revoked.rows_affected > 0 {
+            let mut active: license::ActiveModel = row.clone().into();
+            active.device_migration_count = Set(row.device_migration_count.saturating_add(1));
+            active.last_migrated_at = Set(Some(now.into()));
+            active.updated_at = Set(now.into());
+            updated = active.update(&txn).await?;
+        }
+
+        insert_admin_license_event(
+            &txn,
+            updated.id,
+            Some(updated.activation_code.clone()),
+            "admin_unbind_device",
+            "success",
+            Some(format!(
+                "{reason}:client_install_id:{client_install_id}:revoked_{}_leases:consume_migration:{consume_migration}",
+                revoked.rows_affected
+            )),
+            updated.expires_at,
+            &audit,
+            Some(format!("{}:{client_install_id}", updated.id)),
+        )
+        .await?;
+
+        txn.commit().await?;
+        Ok(UnbindLicenseDeviceResponse {
+            revoked_leases: revoked.rows_affected,
+            device_migration_count: updated.device_migration_count,
+            device_migration_limit: updated.device_migration_limit,
+        })
     }
 
     pub async fn product_catalog_config(
@@ -195,6 +453,7 @@ impl AdminService {
     pub async fn save_product_catalog_config(
         &self,
         req: AdminProductCatalogConfig,
+        audit: AdminAuditContext,
     ) -> Result<AdminProductCatalogConfig, crate::AppError> {
         let now = Utc::now();
         let txn = self.db.begin().await?;
@@ -301,6 +560,19 @@ impl AdminService {
             .exec(&txn)
             .await?;
 
+        insert_admin_audit_event(
+            &txn,
+            None,
+            None,
+            "product_catalog_save",
+            "success",
+            Some("后台保存商品与下载配置".to_string()),
+            None,
+            &audit,
+            Some("product_catalog".to_string()),
+        )
+        .await?;
+
         txn.commit().await?;
         self.product_catalog_config().await
     }
@@ -325,6 +597,7 @@ impl AdminService {
     pub async fn create_app_version(
         &self,
         req: CreateAppVersionRequest,
+        audit: AdminAuditContext,
     ) -> Result<AdminAppVersionItem, crate::AppError> {
         let now = Utc::now();
         let active = app_version::ActiveModel {
@@ -349,6 +622,22 @@ impl AdminService {
         .insert(&self.db)
         .await?;
 
+        insert_admin_audit_event(
+            &self.db,
+            None,
+            None,
+            "app_version_create",
+            "success",
+            Some(format!(
+                "platform:{}:version:{}",
+                inserted.platform, inserted.version
+            )),
+            None,
+            &audit,
+            Some(inserted.id.to_string()),
+        )
+        .await?;
+
         Ok(to_admin_app_version_item(inserted))
     }
 
@@ -356,6 +645,7 @@ impl AdminService {
         &self,
         id: Uuid,
         req: UpdateAppVersionRequest,
+        audit: AdminAuditContext,
     ) -> Result<AdminAppVersionItem, crate::AppError> {
         let row = app_version::Entity::find_by_id(id)
             .one(&self.db)
@@ -378,14 +668,47 @@ impl AdminService {
         .await?;
         let updated = active.update(&self.db).await?;
 
+        insert_admin_audit_event(
+            &self.db,
+            None,
+            None,
+            "app_version_update",
+            "success",
+            Some(format!(
+                "platform:{}:version:{}",
+                updated.platform, updated.version
+            )),
+            None,
+            &audit,
+            Some(updated.id.to_string()),
+        )
+        .await?;
+
         Ok(to_admin_app_version_item(updated))
     }
 
     pub async fn delete_app_version(
         &self,
         id: Uuid,
+        audit: AdminAuditContext,
     ) -> Result<DeleteAppVersionResponse, crate::AppError> {
         let result = app_version::Entity::delete_by_id(id).exec(&self.db).await?;
+        insert_admin_audit_event(
+            &self.db,
+            None,
+            None,
+            "app_version_delete",
+            if result.rows_affected > 0 {
+                "success"
+            } else {
+                "failed"
+            },
+            Some(format!("deleted:{}", result.rows_affected)),
+            None,
+            &audit,
+            Some(id.to_string()),
+        )
+        .await?;
         Ok(DeleteAppVersionResponse {
             deleted: result.rows_affected > 0,
         })
@@ -402,6 +725,7 @@ impl AdminService {
     pub async fn replace_license(
         &self,
         req: ReplaceLicenseRequest,
+        audit: AdminAuditContext,
     ) -> Result<ReplaceLicenseResponse, crate::AppError> {
         let reason = trim_string(Some(req.reason))
             .ok_or_else(|| ValidationError::custom("补发原因不能为空"))?;
@@ -410,6 +734,7 @@ impl AdminService {
         let txn = self.db.begin().await?;
         let old = license::Entity::find()
             .filter(license::Column::ActivationCode.eq(req.activation_code.trim()))
+            .filter(license::Column::DeletedAt.is_null())
             .one(&txn)
             .await?
             .ok_or(PubFlowError::LicenseNotFound)?;
@@ -431,6 +756,7 @@ impl AdminService {
             activated_at: Set(old.activated_at),
             expires_at: Set(old.expires_at),
             is_revoked: Set(false),
+            deleted_at: Set(None),
             created_at: Set(now.into()),
             updated_at: Set(now.into()),
         }
@@ -475,6 +801,8 @@ impl AdminService {
             "success",
             Some(reason),
             old.expires_at,
+            &audit,
+            Some(format!("{old_id}->{new_id}", old_id = old.id)),
         )
         .await?;
 
@@ -490,6 +818,7 @@ impl AdminService {
     pub async fn update_license_limits(
         &self,
         req: UpdateLicenseLimitsRequest,
+        audit: AdminAuditContext,
     ) -> Result<UpdateLicenseLimitsResponse, crate::AppError> {
         let max_devices = req.max_devices.clamp(1, 20);
         let migration_limit = req.device_migration_limit.clamp(0, 100);
@@ -497,6 +826,7 @@ impl AdminService {
         let txn = self.db.begin().await?;
         let row = license::Entity::find()
             .filter(license::Column::ActivationCode.eq(req.activation_code.trim()))
+            .filter(license::Column::DeletedAt.is_null())
             .one(&txn)
             .await?
             .ok_or(PubFlowError::LicenseNotFound)?;
@@ -516,6 +846,8 @@ impl AdminService {
             "success",
             Some(reason),
             updated.expires_at,
+            &audit,
+            Some(updated.id.to_string()),
         )
         .await?;
 
@@ -531,7 +863,7 @@ impl AdminService {
     ) -> Result<(Vec<LicenseItem>, u64, u64, u64, LicenseSummary), crate::AppError> {
         let page = query.page.unwrap_or(1).max(1);
         let page_size = query.page_size.unwrap_or(20).clamp(1, 100);
-        let mut stmt = license::Entity::find();
+        let mut stmt = license::Entity::find().filter(license::Column::DeletedAt.is_null());
 
         if let Some(keyword) = trim_opt(&query.keyword) {
             stmt = stmt.filter(
@@ -669,7 +1001,7 @@ impl AdminService {
         &self,
         query: &ListLicenseQuery,
     ) -> Result<LicenseSummary, crate::AppError> {
-        let mut stmt = license::Entity::find();
+        let mut stmt = license::Entity::find().filter(license::Column::DeletedAt.is_null());
 
         // 应用相同的过滤条件
         if let Some(keyword) = trim_opt(&query.keyword) {
@@ -778,6 +1110,7 @@ impl AdminService {
         let user_ids: Vec<_> = rows.iter().map(|r| r.id).collect();
         let all_licenses = license::Entity::find()
             .filter(license::Column::UserId.is_in(user_ids.clone()))
+            .filter(license::Column::DeletedAt.is_null())
             .all(&self.db)
             .await?;
         let all_license_ids: Vec<_> = all_licenses.iter().map(|l| l.id).collect();
@@ -976,6 +1309,7 @@ impl AdminService {
         } else {
             license::Entity::find()
                 .filter(license::Column::Id.is_in(license_ids))
+                .filter(license::Column::DeletedAt.is_null())
                 .all(&self.db)
                 .await?
                 .into_iter()
@@ -1197,6 +1531,36 @@ async fn insert_admin_license_event<C>(
     status: &'static str,
     reason: Option<String>,
     expires_at: Option<chrono::DateTime<chrono::FixedOffset>>,
+    audit: &AdminAuditContext,
+    target_id: Option<String>,
+) -> Result<(), sea_orm::DbErr>
+where
+    C: sea_orm::ConnectionTrait,
+{
+    insert_admin_audit_event(
+        db,
+        Some(license_id),
+        activation_code,
+        event_type,
+        status,
+        reason,
+        expires_at,
+        audit,
+        target_id,
+    )
+    .await
+}
+
+async fn insert_admin_audit_event<C>(
+    db: &C,
+    license_id: Option<Uuid>,
+    activation_code: Option<String>,
+    event_type: &'static str,
+    status: &'static str,
+    reason: Option<String>,
+    expires_at: Option<chrono::DateTime<chrono::FixedOffset>>,
+    audit: &AdminAuditContext,
+    target_id: Option<String>,
 ) -> Result<(), sea_orm::DbErr>
 where
     C: sea_orm::ConnectionTrait,
@@ -1204,18 +1568,20 @@ where
     let now = Utc::now();
     license_event::ActiveModel {
         id: Set(Uuid::new_v4()),
-        license_id: Set(Some(license_id)),
+        license_id: Set(license_id),
         lease_id: Set(None),
         activation_code: Set(activation_code),
         event_type: Set(event_type.to_string()),
         status: Set(status.to_string()),
         reason: Set(reason),
-        ip_address: Set("admin".to_string()),
+        ip_address: Set(audit.source_ip.clone()),
         machine_hash: Set(None),
         client_install_id: Set(None),
         platform: Set(Some("admin".to_string())),
         extension_version: Set(None),
         user_agent: Set(None),
+        operator: Set(Some(audit.operator.clone())),
+        target_id: Set(target_id),
         expires_at: Set(expires_at),
         created_at: Set(now.into()),
     }

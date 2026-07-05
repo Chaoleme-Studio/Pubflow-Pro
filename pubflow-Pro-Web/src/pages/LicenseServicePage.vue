@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ClipboardCopy, KeyRound, RefreshCw, Save, ShieldOff, Trash2 } from 'lucide-vue-next';
 import { computed, onMounted, ref } from 'vue';
-import { lookupLicense, selfReplaceLicense, selfRevokeLicense, type LicenseLookupResult } from '../api';
+import { lookupLicense, selfReplaceLicense, selfResetDevices, selfRevokeLicense, type LicenseLookupResult } from '../api';
 import { formatDateTime, planLabel, statusLabel } from '../utils/format';
 
 interface StoredLicenseEntry {
@@ -81,6 +81,29 @@ async function revokeCode() {
     saveLicenseToBrowser(code, 'revoke', lookupResult.value, '已注销卡密');
   } catch (error) {
     setError(error instanceof Error ? error.message : '注销失败');
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function resetDevices() {
+  const code = normalizedCode();
+  if (!code) return setError('请输入激活码');
+  if (!window.confirm('确认解除旧设备占用？当前已登录的插件会失效，新设备需要重新激活。')) return;
+  loading.value = true;
+  clearMessages();
+  try {
+    const result = await selfResetDevices(code, reason.value.trim() || undefined);
+    lookupResult.value = await lookupLicense(code).catch(() => undefined);
+    message.value = result.revokedLeases > 0
+      ? `已解除 ${result.revokedLeases} 条旧设备授权，占用一次迁移额度。`
+      : '当前没有旧设备占用。';
+    if (lookupResult.value) {
+      lookupResult.value.deviceMigrationCount = result.deviceMigrationCount;
+      lookupResult.value.deviceMigrationLimit = result.deviceMigrationLimit;
+    }
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '解除旧设备占用失败');
   } finally {
     loading.value = false;
   }
@@ -215,7 +238,7 @@ function savedTime(value: string) {
     <section class="purchase-hero">
       <p class="eyebrow">License Center</p>
       <h1>卡密自助服务</h1>
-      <p>查询授权状态，或在卡密泄露、换机失败时补发新卡密并注销旧卡密。</p>
+      <p>查询授权状态，或在重装、换机、清理浏览器数据后解除旧设备占用。</p>
     </section>
 
     <section class="license-service-layout">
@@ -236,6 +259,10 @@ function savedTime(value: string) {
           <button class="primary-button compact" type="button" :disabled="loading" @click="replaceCode">
             <KeyRound :size="16" />
             补发新卡密
+          </button>
+          <button class="secondary-button compact" type="button" :disabled="loading" @click="resetDevices">
+            <RefreshCw :size="16" />
+            解绑旧设备
           </button>
           <button class="secondary-button compact danger-action" type="button" :disabled="loading" @click="revokeCode">
             <ShieldOff :size="16" />

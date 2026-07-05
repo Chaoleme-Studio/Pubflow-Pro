@@ -17,6 +17,12 @@
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "verify:platform-routing": "node scripts/verify-platform-routing.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
+    "verify:manual-security": "node scripts/verify-manual-security-evidence.mjs",
+    "prepare:manual-security": "node scripts/prepare-manual-security-smoke.mjs",
+    "smoke:lease-api": "node scripts/run-local-lease-api-smoke.mjs",
+    "smoke:extension-security": "node scripts/run-extension-security-smoke.mjs",
+    "test:licensing": "vitest run src/licensing",
     "typecheck": "vue-tsc --noEmit",
     "compile": "vue-tsc --noEmit",
     "postinstall": "wxt prepare"
@@ -33,10 +39,12 @@
     "@tailwindcss/vite": "^4.2.4",
     "@types/markdown-it": "^14.1.2",
     "@wxt-dev/module-vue": "^1.0.3",
+    "fake-indexeddb": "^6.2.5",
     "javascript-obfuscator": "^5.4.3",
     "rollup-plugin-obfuscator": "^1.1.0",
     "tailwindcss": "^4.2.4",
     "typescript": "^5.9.3",
+    "vitest": "^4.1.9",
     "vue-tsc": "^3.2.5",
     "wxt": "^0.20.25"
   }

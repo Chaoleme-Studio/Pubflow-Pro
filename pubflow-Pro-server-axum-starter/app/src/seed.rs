@@ -7,6 +7,7 @@ use sea_orm::{
 use uuid::Uuid;
 
 use crate::shared::password::hash_password;
+use crate::shared::plan::device_migration_limit_for_plan;
 use crate::{AppError, error::AuthError};
 
 struct DemoAccount {
@@ -253,12 +254,13 @@ async fn seed_account(db: &DatabaseConnection, account: &DemoAccount) -> Result<
         source_channel: Set("official".to_string()),
         batch_id: Set(None),
         max_devices: Set(1),
-        device_migration_limit: Set(3),
+        device_migration_limit: Set(device_migration_limit_for_plan(account.plan)?.max(3)),
         device_migration_count: Set(0),
         last_migrated_at: Set(None),
         activated_at: Set(Some(paid_at.into())),
         expires_at: Set(Some(expires_at.into())),
         is_revoked: Set(false),
+        deleted_at: Set(None),
         created_at: Set(paid_at.into()),
         updated_at: Set(now.into()),
     }
@@ -302,6 +304,9 @@ async fn seed_account(db: &DatabaseConnection, account: &DemoAccount) -> Result<
             ip_address: Set(lease_ips[i as usize].to_string()),
             machine_hash: Set(account.machine_hash.to_string()),
             client_install_id: Set(Some(account.machine_hash.to_string())),
+            device_key_id: Set(None),
+            device_public_key_spki: Set(None),
+            device_key_algorithm: Set(None),
             platform: Set(account.platform.to_string()),
             created_at: Set(created.into()),
             updated_at: Set(created.into()),
@@ -374,6 +379,9 @@ async fn seed_lease_if_missing(db: &DatabaseConnection, user_id: i32) -> Result<
             ip_address: Set(ips[i as usize].to_string()),
             machine_hash: Set(machine_hash.clone()),
             client_install_id: Set(Some(machine_hash.clone())),
+            device_key_id: Set(None),
+            device_public_key_spki: Set(None),
+            device_key_algorithm: Set(None),
             platform: Set("unknown".to_string()),
             created_at: Set(created.into()),
             updated_at: Set(created.into()),

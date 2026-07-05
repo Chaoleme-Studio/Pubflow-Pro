@@ -26,6 +26,13 @@ pub fn routes(state: Arc<AppState>) -> ApiRouter {
             "/revoke",
             post_with(handler::self_revoke, handler::self_revoke_docs),
         )
+        .api_route(
+            "/reset-devices",
+            post_with(
+                handler::self_reset_devices,
+                handler::self_reset_devices_docs,
+            ),
+        )
         .layer(GovernorLayer::new(limiter))
         .with_state(state)
 }

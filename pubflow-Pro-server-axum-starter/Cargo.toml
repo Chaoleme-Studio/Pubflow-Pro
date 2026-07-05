@@ -43,6 +43,7 @@ aes-gcm = "0.10.3"
 rand = "0.8.5"
 getrandom = { version = "0.2.16", features = ["js"] }
 sha2 = "0.10.9"
+hkdf = "0.12.4"
 hex = "0.4.3"
 base64 = "0.22.1"
 wasm-bindgen = "0.2.105"
@@ -51,3 +52,4 @@ js-sys = "0.3.82"
 web-sys = "0.3.82"
 curve25519-dalek = "4.1.3"
 subtle = "2.6.1"
+p256 = { version = "0.13.2", features = ["ecdsa", "pkcs8"] }

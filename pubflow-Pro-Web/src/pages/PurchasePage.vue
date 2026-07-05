@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { BadgeCheck, ClipboardCopy, CreditCard, RefreshCw, WalletCards } from 'lucide-vue-next';
+import { BadgeCheck, ClipboardCopy, CreditCard, ExternalLink, RefreshCw, WalletCards } from 'lucide-vue-next';
+import QRCode from 'qrcode';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { createOrder, FALLBACK_PRODUCT_CATALOG, getOrderStatus, getProductCatalog, type PayChannel, type Plan, type PlanOption } from '../api';
 
@@ -7,12 +8,16 @@ defineProps<{
   navigate: (href: string) => void;
 }>();
 
-const selectedPlan = ref<Plan>('yearly');
-const selectedPay = ref<PayChannel>('wechat');
+const RESELLER_URL = 'https://www.aidoumi.com//links/6C406BEA';
+
+const selectedPlan = ref<Plan>('monthly');
+const selectedPay = ref<PayChannel>('alipay');
 const orderNo = ref('');
 const queryToken = ref('');
 const payOpened = ref(false);
 const paymentMessage = ref('');
+const qrDataUrl = ref('');
+const fallbackPayUrl = ref('');
 const plans = ref<PlanOption[]>([]);
 const catalogLoading = ref(true);
 const catalogError = ref('');
@@ -39,10 +44,7 @@ const discountCountdown = computed(() => {
   return `${hours}小时${minutes}分钟后结束`;
 });
 
-// 支付相关
 const payLoading = ref(false);
-
-// 激活码相关
 const activationCode = ref('');
 const queryLoading = ref(false);
 const queryError = ref('');
@@ -56,10 +58,13 @@ onMounted(async () => {
   try {
     const catalog = await getProductCatalog();
     plans.value = catalog.plans;
-    selectedPlan.value = catalog.plans.find((item) => item.id === 'yearly')?.id || catalog.plans[0]?.id || 'yearly';
+    selectedPlan.value = catalog.plans.find((item) => item.id === selectedPlan.value)?.id
+      || catalog.plans.find((item) => item.id === 'monthly')?.id
+      || catalog.plans[0]?.id
+      || 'monthly';
   } catch (error) {
     plans.value = FALLBACK_PRODUCT_CATALOG.plans;
-    selectedPlan.value = 'yearly';
+    selectedPlan.value = 'monthly';
     catalogError.value = `${error instanceof Error ? error.message : '产品配置加载失败'}，当前使用本地套餐配置。`;
   } finally {
     catalogLoading.value = false;
@@ -76,6 +81,8 @@ async function startPayment(channel: PayChannel) {
   paymentMessage.value = '';
   activationCode.value = '';
   queryError.value = '';
+  qrDataUrl.value = '';
+  fallbackPayUrl.value = '';
   payLoading.value = true;
 
   try {
@@ -84,12 +91,16 @@ async function startPayment(channel: PayChannel) {
     queryToken.value = order.queryToken;
     payOpened.value = true;
 
-    if (/^https?:\/\//.test(order.payUrl)) {
-      window.open(order.payUrl, '_blank', 'noopener,noreferrer');
-      paymentMessage.value = '已打开官方支付页面。支付完成后点击下方按钮查询激活码。';
+    const qrText = order.qrCode || order.payUrl;
+    if (order.qrCode) {
+      qrDataUrl.value = await QRCode.toDataURL(qrText, { width: 240, margin: 1 });
+      paymentMessage.value = '请使用支付宝扫码付款。付款完成后点击下方按钮查询激活码。';
       return;
     }
-    paymentMessage.value = '当前是开发环境，订单已创建。点击下方按钮查询激活码。';
+
+    fallbackPayUrl.value = order.payUrl || RESELLER_URL;
+    window.open(fallbackPayUrl.value, '_blank', 'noopener,noreferrer');
+    paymentMessage.value = '当前未启用支付宝官方扫码，已打开卡密代售平台。';
   } catch (error) {
     paymentMessage.value = error instanceof Error ? error.message : '订单创建失败，请稍后重试';
   } finally {
@@ -114,7 +125,7 @@ async function queryActivationCode() {
     } else {
       queryError.value = '暂未获取到激活码，请稍后再试';
     }
-  } catch (error) {
+  } catch {
     queryError.value = '查询失败，请稍后重试';
   } finally {
     queryLoading.value = false;
@@ -126,7 +137,6 @@ async function copyActivationCode() {
   try {
     await navigator.clipboard.writeText(activationCode.value);
   } catch {
-    // 降级方案：使用 textarea + execCommand（兼容 HTTP 环境）
     const textarea = document.createElement('textarea');
     textarea.value = activationCode.value;
     textarea.style.cssText = 'position:fixed;left:-9999px';
@@ -158,8 +168,8 @@ function formatAmount(amountCents: number) {
     <section class="purchase-hero">
       <div>
         <p class="eyebrow">购买 PubFlow License</p>
-        <h1>选择套餐，付款后查询激活码</h1>
-        <p>微信和支付宝会跳转到官方支付页面，支付完成后回到此页查询并领取激活码。</p>
+        <h1>选择套餐，支付宝扫码开通</h1>
+        <p>官方支付宝通道生成订单和二维码，付款成功后自动发放激活码；代售平台保留为备用入口。</p>
       </div>
     </section>
 
@@ -180,27 +190,31 @@ function formatAmount(amountCents: number) {
         </div>
 
         <div class="pay-methods">
-          <button type="button" :class="{ active: selectedPay === 'wechat' }" :disabled="payLoading" aria-label="使用微信支付" @click="selectedPay = 'wechat'">
-            <WalletCards :size="20" />
-            微信
-          </button>
           <button type="button" :class="{ active: selectedPay === 'alipay' }" :disabled="payLoading" aria-label="使用支付宝支付" @click="selectedPay = 'alipay'">
             <CreditCard :size="20" />
             支付宝
+          </button>
+          <button type="button" :class="{ active: selectedPay === 'wechat' }" :disabled="payLoading" aria-label="微信支付预留" @click="selectedPay = 'wechat'">
+            <WalletCards :size="20" />
+            微信预留
           </button>
         </div>
 
         <button class="primary-button pay-now-btn" type="button" :disabled="!activePlan || payLoading" @click="startPayment(selectedPay)">
           {{ payLoading ? '创建订单中...' : '立即购买' }}
         </button>
+        <a class="secondary-button compact reseller-button" :href="RESELLER_URL" target="_blank" rel="noopener noreferrer">
+          <ExternalLink :size="14" />
+          代售平台备用
+        </a>
       </div>
 
       <aside class="order-summary">
         <template v-if="!payOpened">
           <div class="order-placeholder">
-            <span class="order-placeholder-icon">🧾</span>
+            <BadgeCheck :size="24" />
             <strong>订单摘要</strong>
-            <p>选择套餐并点击「立即购买」后，订单详情将显示在这里。</p>
+            <p>选择套餐并点击「立即购买」后，这里会显示支付二维码和激活码查询入口。</p>
           </div>
         </template>
 
@@ -210,11 +224,21 @@ function formatAmount(amountCents: number) {
           <div v-if="activePlanOriginalPrice" class="summary-line"><span>原价</span><b class="line-through">¥{{ activePlanOriginalPrice }}</b></div>
           <div v-if="activePlanSavings" class="summary-line"><span>节省</span><b>¥{{ activePlanSavings }}</b></div>
           <div v-if="discountCountdown" class="summary-line"><span>折扣</span><b>{{ discountCountdown }}</b></div>
-          <div class="summary-line"><span>支付方式</span><b>{{ selectedPay === 'wechat' ? '微信' : '支付宝' }}</b></div>
+          <div class="summary-line"><span>支付方式</span><b>{{ selectedPay === 'alipay' ? '支付宝' : '微信' }}</b></div>
           <div class="summary-line"><span>订单号</span><b>{{ orderNo }}</b></div>
+
+          <div v-if="qrDataUrl" class="pay-qr-box">
+            <img :src="qrDataUrl" alt="支付宝付款二维码" />
+            <span>支付宝扫码付款</span>
+          </div>
+          <a v-else-if="fallbackPayUrl" class="secondary-button fallback-pay-link" :href="fallbackPayUrl" target="_blank" rel="noopener noreferrer">
+            <ExternalLink :size="15" />
+            打开备用付款链接
+          </a>
+
           <div class="paid-state opened">
             <BadgeCheck :size="20" />
-            已打开官方支付页
+            {{ qrDataUrl ? '等待支付完成' : '官方扫码未启用' }}
           </div>
           <p v-if="paymentMessage" class="payment-message">{{ paymentMessage }}</p>
 

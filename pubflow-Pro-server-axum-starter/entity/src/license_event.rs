@@ -18,6 +18,8 @@ pub struct Model {
     pub platform: Option<String>,
     pub extension_version: Option<String>,
     pub user_agent: Option<String>,
+    pub operator: Option<String>,
+    pub target_id: Option<String>,
     pub expires_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
 }

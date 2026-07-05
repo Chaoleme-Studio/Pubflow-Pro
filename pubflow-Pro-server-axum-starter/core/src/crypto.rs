@@ -3,8 +3,8 @@
 //! 用于 Selector 文件的加密传输。
 //! 后端用主密钥加密 selector JSON，WASM 端用派生密钥解密。
 //!
-//! 密钥派生：SHA-256(server_secret + license_code)
-//! license_code 是激活码，作为客户端和服务器的共享秘密。
+//! 密钥派生：HKDF-SHA256(server_secret, salt=license_code, info=selector-v2)
+//! 为兼容旧数据，解密时可显式使用 legacy SHA-256(server_secret + license_code)。
 //!
 //! 加密格式：nonce (12 bytes) || ciphertext || tag (16 bytes)
 //! 输出为 Base64 编码。
@@ -14,7 +14,10 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
 };
 use base64::Engine;
+use hkdf::Hkdf;
 use sha2::{Digest, Sha256};
+
+const SELECTOR_KDF_INFO_V2: &[u8] = b"pubflow-selector-aes-256-gcm-v2";
 
 /// 加密错误
 #[derive(Debug, thiserror::Error)]
@@ -27,10 +30,22 @@ pub enum CryptoError {
     KeyDerivationFailed,
 }
 
-/// 从 server_secret 和 license_code 派生 256 位密钥
+/// 从 server_secret 和 license_code 派生 256 位密钥。
 ///
-/// key = SHA-256(server_secret || license_code)
-pub fn derive_key(server_secret: &str, license_code: &str) -> [u8; 32] {
+/// v2 使用 HKDF-SHA256，server_secret 作为高熵输入密钥材料，license_code 作为 salt，
+/// info 固定为 selector 加密场景，避免和其他协议复用同一派生上下文。
+pub fn derive_key(server_secret: &str, license_code: &str) -> Result<[u8; 32], CryptoError> {
+    let hk = Hkdf::<Sha256>::new(Some(license_code.as_bytes()), server_secret.as_bytes());
+    let mut key = [0u8; 32];
+    hk.expand(SELECTOR_KDF_INFO_V2, &mut key)
+        .map_err(|_| CryptoError::KeyDerivationFailed)?;
+    Ok(key)
+}
+
+/// 旧版 selector KDF，仅用于解密历史数据。
+///
+/// legacy key = SHA-256(server_secret || license_code)
+pub fn derive_key_legacy(server_secret: &str, license_code: &str) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(server_secret.as_bytes());
     hasher.update(license_code.as_bytes());
@@ -88,7 +103,7 @@ mod tests {
 
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
-        let key = derive_key("server-secret-123", "ACTIVATE-CODE-456");
+        let key = derive_key("server-secret-123", "ACTIVATE-CODE-456").unwrap();
         let plaintext = b"{\"douyin\":{\"title\":\"#title\"}}";
 
         let encrypted = encrypt(plaintext, &key).unwrap();
@@ -99,11 +114,19 @@ mod tests {
 
     #[test]
     fn test_wrong_key_fails() {
-        let key1 = derive_key("secret1", "code1");
-        let key2 = derive_key("secret2", "code2");
+        let key1 = derive_key("secret1", "code1").unwrap();
+        let key2 = derive_key("secret2", "code2").unwrap();
         let plaintext = b"hello world";
 
         let encrypted = encrypt(plaintext, &key1).unwrap();
         assert!(decrypt(&encrypted, &key2).is_err());
+    }
+
+    #[test]
+    fn test_hkdf_key_differs_from_legacy_key() {
+        let hkdf_key = derive_key("server-secret-123", "ACTIVATE-CODE-456").unwrap();
+        let legacy_key = derive_key_legacy("server-secret-123", "ACTIVATE-CODE-456");
+
+        assert_ne!(hkdf_key, legacy_key);
     }
 }

@@ -74,7 +74,7 @@ cargo clippy --workspace --all-targets  # 代码检查
 ### Selector 加密
 
 - 算法：AES-256-GCM
-- 密钥：`SHA-256(server_secret + license_code)`
+- 密钥：`HKDF-SHA256(server_secret, salt=license_code, info=pubflow-selector-aes-256-gcm-v2)`
 - 格式：`nonce(12B) || ciphertext || tag(16B)`，Base64 编码
 - 存储：PostgreSQL `selectors` 表
 

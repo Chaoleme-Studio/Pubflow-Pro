@@ -7,7 +7,8 @@ use crate::{ApiResponse, AppError, AppState, shared::FromState};
 
 use super::dto::{
     LicenseLookupRequest, LicenseLookupResponse, SelfReplaceLicenseRequest,
-    SelfReplaceLicenseResponse, SelfRevokeLicenseRequest, SelfRevokeLicenseResponse,
+    SelfReplaceLicenseResponse, SelfResetDevicesRequest, SelfResetDevicesResponse,
+    SelfRevokeLicenseRequest, SelfRevokeLicenseResponse,
 };
 use super::service::LicenseCenterService;
 
@@ -51,4 +52,18 @@ pub fn self_revoke_docs(op: TransformOperation) -> TransformOperation {
     op.description("用户自助注销激活码")
         .tag("PubFlow License Center")
         .response::<200, ApiResponse<SelfRevokeLicenseResponse>>()
+}
+
+pub async fn self_reset_devices(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SelfResetDevicesRequest>,
+) -> Result<ApiResponse<SelfResetDevicesResponse>, AppError> {
+    let service = LicenseCenterService::from_state(&state);
+    Ok(ApiResponse::success(service.self_reset_devices(req).await?))
+}
+
+pub fn self_reset_devices_docs(op: TransformOperation) -> TransformOperation {
+    op.description("用户自助解除旧设备占用")
+        .tag("PubFlow License Center")
+        .response::<200, ApiResponse<SelfResetDevicesResponse>>()
 }

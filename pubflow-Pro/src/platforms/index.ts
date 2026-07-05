@@ -1,4 +1,4 @@
-import type { PlatformId } from '../types';
+import type { LicensingSettings, PlatformId } from '../types';
 import { bilibiliSelectorConfig } from './bilibili/selectors';
 import { douyinSelectorConfig } from './douyin/selectors';
 import { kuaishouSelectorConfig } from './kuaishou/selectors';
@@ -31,6 +31,9 @@ export const PLATFORM_CONFIGS: Record<PlatformId, PlatformConfig> = Object.fromE
   Object.entries(PLATFORM_SELECTOR_CONFIGS_BY_ID).map(([id, config]) => [id, buildPlatformConfig(config)]),
 ) as Record<PlatformId, PlatformConfig>;
 
+let runtimeSelectorConfigsById: Record<PlatformId, PlatformSelectorConfig> = { ...PLATFORM_SELECTOR_CONFIGS_BY_ID };
+let runtimePlatformConfigs: Record<PlatformId, PlatformConfig> = { ...PLATFORM_CONFIGS };
+
 // active=false 的平台不会进入 UI、权限和内容脚本匹配范围。
 const activeSelectorConfigs = Object.values(PLATFORM_SELECTOR_CONFIGS_BY_ID).filter(
   (config) => config.启用 !== false,
@@ -42,6 +45,66 @@ export const PLATFORM_MATCH_PATTERNS = activeSelectorConfigs.flatMap((config) =>
   config.匹配域名.map((host) => `https://${host}/*`),
 );
 
+export function getPlatformConfig(platformId: PlatformId): PlatformConfig {
+  return runtimePlatformConfigs[platformId] || PLATFORM_CONFIGS[platformId];
+}
+
+export function getPlatformConfigs(): Record<PlatformId, PlatformConfig> {
+  return runtimePlatformConfigs;
+}
+
+export function getPlatformOrder(): PlatformId[] {
+  return Object.values(runtimeSelectorConfigsById)
+    .filter((config) => config.启用 !== false)
+    .map((config) => config.平台标识);
+}
+
+/**
+ * @deprecated 远程 selector 策略暂时废弃，后续大概率删除。
+ *
+ * 当前所有平台 selector 都以内置 src/platforms 下各平台 selectors.ts 为准。保留这个函数只是为了给
+ * 旧代码/测试留一个明确的过渡点，避免发布主链路重新引入云端策略造成延迟和失败点。
+ */
+export function applyRemoteSelectorConfigs(selectors: Record<string, PlatformSelectorConfig>): boolean {
+  void selectors;
+  // TODO(remote-selector): 暂时不再应用云端 selector。后续如果恢复，必须确保它只作为后台异步更新，
+  // 并且本地 selector 可以无感兜底，不能影响发布主链路。
+  // const nextSelectorConfigs = { ...PLATFORM_SELECTOR_CONFIGS_BY_ID };
+  // let changed = false;
+  // for (const value of Object.values(selectors)) {
+  //   const platformId = value?.平台标识;
+  //   if (!platformId || !(platformId in PLATFORM_SELECTOR_CONFIGS_BY_ID)) continue;
+  //   nextSelectorConfigs[platformId] = value;
+  //   changed = true;
+  // }
+  // if (!changed) return false;
+  // runtimeSelectorConfigsById = nextSelectorConfigs;
+  // runtimePlatformConfigs = Object.fromEntries(
+  //   Object.entries(runtimeSelectorConfigsById).map(([id, config]) => [id, buildPlatformConfig(config)]),
+  // ) as Record<PlatformId, PlatformConfig>;
+  // return true;
+  return false;
+}
+
+/** @deprecated 远程 selector 缓存暂时废弃；当前固定使用本地内置 selector。 */
+export async function loadCachedRemotePlatformConfigs(): Promise<boolean> {
+  // TODO(remote-selector): 后续确认不再使用后，删除 remoteSelectorManager 及相关协议代码。
+  // const { getCachedRemoteSelectorPolicy } = await import('../licensing/remoteSelectorManager');
+  // const policy = await getCachedRemoteSelectorPolicy();
+  // return policy ? applyRemoteSelectorConfigs(policy.selectors) : false;
+  return false;
+}
+
+/** @deprecated 远程 selector 刷新暂时废弃；当前固定使用本地内置 selector。 */
+export async function refreshRemotePlatformConfigs(settings: LicensingSettings): Promise<boolean> {
+  void settings;
+  // TODO(remote-selector): 后续确认不再使用后，删除 remoteSelectorManager 及相关协议代码。
+  // const { refreshRemoteSelectorPolicy } = await import('../licensing/remoteSelectorManager');
+  // const policy = await refreshRemoteSelectorPolicy(settings);
+  // return applyRemoteSelectorConfigs(policy.selectors);
+  return false;
+}
+
 /** 根据 URL 主机名匹配对应的平台配置。 */
 export function getPlatformByUrl(url: string): PlatformConfig | undefined {
   let host = '';
@@ -51,7 +114,7 @@ export function getPlatformByUrl(url: string): PlatformConfig | undefined {
     return undefined;
   }
 
-  return Object.values(PLATFORM_CONFIGS).find((platform) =>
+  return Object.values(runtimePlatformConfigs).find((platform) =>
     platform.matchHosts.some((matchHost) => host === matchHost || host.endsWith(`.${matchHost}`)),
   );
 }
@@ -60,7 +123,7 @@ export function getPlatformByUrl(url: string): PlatformConfig | undefined {
 function isPlatformPageUrl(url: string, getTargetUrl: (platform: PlatformConfig) => string | undefined): boolean {
   try {
     const current = new URL(url);
-    return Object.values(PLATFORM_CONFIGS).some((platform) => {
+    return Object.values(runtimePlatformConfigs).some((platform) => {
       const targetUrl = getTargetUrl(platform);
       if (!targetUrl) return false;
       if (
