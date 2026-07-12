@@ -14,6 +14,8 @@ interface VerifyLeasePayload {
   status?: string;
   valid_until?: string;
   validUntil?: string;
+  license_expires_at?: string | null;
+  licenseExpiresAt?: string | null;
   server_time?: string;
   serverTime?: string;
 }
@@ -124,7 +126,9 @@ async function verifyLease(settings: LicensingSettings): Promise<LicensingSettin
   const serverTime = parseServerTimestamp(data.server_time || data.serverTime);
   return {
     ...settings,
-    validUntil: parseServerTimestamp(data.valid_until || data.validUntil) || settings.validUntil,
+    validUntil: parseServerTimestamp(
+      data.license_expires_at || data.licenseExpiresAt || data.valid_until || data.validUntil,
+    ) || settings.validUntil,
     serverTime: serverTime || settings.serverTime,
     serverTimeCheckedAt: serverTime ? Math.floor(Date.now() / 1000) : settings.serverTimeCheckedAt,
   };

@@ -223,12 +223,22 @@ async function uploadXiaohongshuCover(config: PlatformConfig, content: ContentDa
   const input = await waitForXiaohongshuCoverInput(8000);
   if (!input) return '没有找到小红书封面弹窗内的图片 input。';
 
+  const beforeDialogSignature = getXiaohongshuDialogPreviewSignature(dialog);
   const dataTransfer = new DataTransfer();
   dataTransfer.items.add(file);
-  input.files = dataTransfer.files;
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  input.dispatchEvent(new Event('change', { bubbles: true }));
-  await waitForIdle(1800);
+  try {
+    input.files = dataTransfer.files;
+  } catch {
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      value: dataTransfer.files,
+    });
+  }
+  input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+
+  const injectedReady = await waitForXiaohongshuInjectedCoverReady(input, beforeDialogSignature, 15000);
+  if (!injectedReady) return '封面已注入，但没有等到小红书封面预览，未点击确定。';
 
   const confirmButton = await waitForXiaohongshuDialogButton(['确定', '完成', '保存'], 15000);
   if (!confirmButton) return '封面已注入，但没有找到小红书封面弹窗确认按钮。';
@@ -330,6 +340,84 @@ function findXiaohongshuImageInput(scope: ParentNode): HTMLInputElement | null {
     if (accept.includes('image') && !accept.includes('video')) return fileInput;
   }
   return null;
+}
+
+/** 等待小红书封面文件被弹窗接收，并出现稳定的预览/裁剪状态。 */
+async function waitForXiaohongshuInjectedCoverReady(
+  input: HTMLInputElement,
+  beforeDialogSignature: string,
+  timeoutMs: number,
+) {
+  const startedAt = Date.now();
+  let readySince = 0;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const dialog = findXiaohongshuCoverDialog();
+    if (!dialog) return true;
+
+    const hasFile = Boolean(input.files?.length);
+    const currentSignature = getXiaohongshuDialogPreviewSignature(dialog);
+    const previewChanged = Boolean(currentSignature && currentSignature !== beforeDialogSignature);
+    const hasUploadedState = hasXiaohongshuUploadedCoverState(dialog);
+    const hasConfirmButton = Boolean(findXiaohongshuButton(dialog, ['确定', '完成', '保存']));
+
+    if (hasFile && hasConfirmButton && (previewChanged || hasUploadedState)) {
+      readySince ||= Date.now();
+      if (Date.now() - readySince >= 800) return true;
+    } else {
+      readySince = 0;
+    }
+
+    await waitForIdle(250);
+  }
+
+  return false;
+}
+
+/** 生成弹窗内封面预览签名，用于判断上传后预览是否变化。 */
+function getXiaohongshuDialogPreviewSignature(scope: ParentNode) {
+  const images = Array.from(scope.querySelectorAll<HTMLImageElement>('img'))
+    .map((img) => {
+      const rect = img.getBoundingClientRect();
+      return `${Math.round(rect.width)}x${Math.round(rect.height)}:${img.currentSrc || img.src}`;
+    })
+    .filter(Boolean);
+  const canvases = Array.from(scope.querySelectorAll<HTMLCanvasElement>('canvas'))
+    .map((canvas) => {
+      const rect = canvas.getBoundingClientRect();
+      const size = `${canvas.width}x${canvas.height}:${Math.round(rect.width)}x${Math.round(rect.height)}`;
+      try {
+        return `${size}:${canvas.toDataURL('image/png').slice(0, 200)}`;
+      } catch {
+        return size;
+      }
+    })
+    .filter(Boolean);
+  const backgrounds = Array.from(scope.querySelectorAll<HTMLElement>('[style*="background"]'))
+    .map((element) => element.style.backgroundImage || element.getAttribute('style') || '')
+    .filter(Boolean);
+  return [...images, ...canvases, ...backgrounds].join('|');
+}
+
+/** 判断弹窗是否已经从上传占位切到上传后的封面编辑状态。 */
+function hasXiaohongshuUploadedCoverState(dialog: HTMLElement) {
+  const text = dialog.textContent?.replace(/\s+/g, '') || '';
+  const hasPostUploadAction =
+    text.includes('重新上传') ||
+    text.includes('更换图片') ||
+    text.includes('裁剪') ||
+    text.includes('缩放') ||
+    text.includes('旋转');
+  const hasPreview = Array.from(
+    dialog.querySelectorAll<HTMLElement>('img, canvas, [class*="crop"], [class*="Crop"], [class*="preview"], [class*="Preview"]'),
+  ).some((element) => {
+    const rect = element.getBoundingClientRect();
+    const className = element.className?.toString() || '';
+    const hasBackground = Boolean(element.style.backgroundImage && element.style.backgroundImage !== 'none');
+    return isVisible(element) && rect.width >= 48 && rect.height >= 48 && (hasBackground || className || element.tagName === 'IMG' || element.tagName === 'CANVAS');
+  });
+
+  return hasPostUploadAction && hasPreview;
 }
 
 /** 等待封面弹窗内出现指定文本的按钮 */

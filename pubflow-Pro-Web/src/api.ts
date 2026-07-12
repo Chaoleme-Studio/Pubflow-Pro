@@ -1114,7 +1114,7 @@ function normalizeLicenseItem(item: Record<string, unknown>): AdminLicenseItem {
     batchName: stringOrUndefined(item.batch_name ?? item.batchName),
     userId: numberOrUndefined(item.user_id ?? item.userId),
     maxDevices: Number(item.max_devices ?? item.maxDevices ?? 1),
-    deviceMigrationLimit: Number(item.device_migration_limit ?? item.deviceMigrationLimit ?? 3),
+    deviceMigrationLimit: Number(item.device_migration_limit ?? item.deviceMigrationLimit ?? 5),
     deviceMigrationCount: Number(item.device_migration_count ?? item.deviceMigrationCount ?? 0),
     lastMigratedAt: stringOrUndefined(item.last_migrated_at ?? item.lastMigratedAt),
     isRevoked: Boolean(item.is_revoked ?? item.isRevoked),

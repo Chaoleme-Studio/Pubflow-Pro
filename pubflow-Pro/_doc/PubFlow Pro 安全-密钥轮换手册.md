@@ -33,7 +33,7 @@ JWT_PREVIOUS_SECRETS=1:old-secret-at-least-32-characters,2:older-secret-at-least
    - `JWT_KEY_VERSION=<new-version>`
    - `JWT_PREVIOUS_SECRETS=<old-version>:<old-secret>`
 2. 部署服务端。
-3. 保持旧 key 至少一个 lease 周期，当前订阅 lease 上限为 30 天。
+3. 保持旧 key 至少一个 lease 周期，当前订阅 lease 上限为 31 天。
 4. 超过 grace period 后，从 `JWT_PREVIOUS_SECRETS` 移除旧 key。
 5. 再次部署，旧 token 将自然失效。
 

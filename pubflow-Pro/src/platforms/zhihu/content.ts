@@ -44,20 +44,37 @@ async function uploadZhihuCover(
   const input = await waitForZhihuCoverInput(8000);
   if (!input) return '没有找到知乎封面弹窗内的图片 input。';
 
+  const beforeDialogSignature = getZhihuDialogCoverSignature(dialog);
   const dataTransfer = new DataTransfer();
   dataTransfer.items.add(file);
-  input.files = dataTransfer.files;
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  input.dispatchEvent(new Event('change', { bubbles: true }));
-  await waitForZhihuInjectedCoverReady(input, 2200);
+  try {
+    input.files = dataTransfer.files;
+  } catch {
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      value: dataTransfer.files,
+    });
+  }
+  input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
 
-  const confirmButton = await waitForZhihuDialogButton(['确认选择', '确认', '完成'], 15000);
-  if (!confirmButton) return '封面已注入，但没有找到知乎封面弹窗的确认按钮。';
+  // 知乎上传封面后会很快清空 input.files，但会在约 0.7s 后出现 ReactCrop + “确认选择”。
+  // 这里先保留老方案的硬等待，再走状态检测；状态检测失败时仍直接找按钮点击。
+  await waitForIdle(3800);
+  let confirmButton =
+    findZhihuCoverConfirmButton() ||
+    (await waitForZhihuCoverConfirmButton(input, beforeDialogSignature, 10000, dataTransfer.files.length > 0));
+  if (!confirmButton) {
+    await waitForIdle(3000);
+    confirmButton = findZhihuCoverConfirmButton();
+  }
+  if (!confirmButton) throw new Error('封面已注入，但没有等到知乎封面确认按钮可点击。');
 
-  await clickZhihuElement(confirmButton);
-  const closed = await waitForZhihuCoverDialogClosed(10000);
+  const confirmed = await confirmZhihuCoverSelection(confirmButton, 15000);
+  if (confirmed === 'button-not-found') throw new Error('封面已注入，但没有找到知乎封面弹窗的确认按钮。');
+  if (confirmed === 'not-closed') throw new Error('封面已注入并多次点击确认选择，但知乎封面弹窗未关闭。');
+
   const changed = await waitForZhihuCoverPreviewChange(beforeSignature, 10000);
-  if (!closed) return '封面已注入并点击确认选择，但知乎封面弹窗未关闭。';
   return changed ? '封面已通过知乎封面弹窗上传并确认。' : '封面已通过知乎封面弹窗上传并确认，请检查封面预览。';
 }
 
@@ -235,27 +252,82 @@ async function waitForZhihuCoverInput(timeoutMs: number) {
   return null;
 }
 
-/** 等待知乎视频封面注入后预览或确认按钮可用。 */
-async function waitForZhihuInjectedCoverReady(input: HTMLInputElement, timeoutMs: number) {
+async function waitForZhihuCoverConfirmButton(
+  input: HTMLInputElement,
+  beforeDialogSignature: string,
+  timeoutMs: number,
+  fileWasInjected = false,
+) {
   const startedAt = Date.now();
-  let readySince = 0;
+  let fileSeen = fileWasInjected;
+  let buttonReadySince = 0;
   while (Date.now() - startedAt < timeoutMs) {
     const dialog = findZhihuCoverDialog();
-    const hasFile = Boolean(input.files?.length);
-    const hasImagePreview = Boolean(dialog?.querySelector('img, canvas, [class*="preview"], [class*="Preview"], [class*="crop"], [class*="Crop"]'));
-    const hasConfirmButton = Boolean(dialog && findZhihuButton(dialog, ['确认选择', '确认', '完成']));
-    if (hasFile && hasImagePreview) {
-      readySince ||= Date.now();
-      if (Date.now() - readySince > 500) return true;
-    } else if (hasFile && hasConfirmButton) {
-      readySince ||= Date.now();
-      if (Date.now() - readySince > 900) return true;
+    fileSeen ||= Boolean(input.files?.length);
+    if (dialog && fileSeen && !isZhihuCoverUploadBusy(dialog)) {
+      const button = findZhihuButton(dialog, ['确认选择', '确认', '完成']);
+      if (button && hasZhihuCoverAcceptedLocalFile(dialog, beforeDialogSignature)) return button;
+      if (button) {
+        buttonReadySince ||= Date.now();
+        if (Date.now() - buttonReadySince >= 1200) return button;
+      } else {
+        buttonReadySince = 0;
+      }
     } else {
-      readySince = 0;
+      buttonReadySince = 0;
     }
-    await waitForIdle(200);
+    await waitForZhihuDialogMutation(Math.min(1000, Math.max(0, timeoutMs - (Date.now() - startedAt))));
   }
-  return Boolean(input.files?.length);
+  return null;
+}
+
+/** 生成知乎封面弹窗内的预览签名，兼容 img/canvas/background。 */
+function getZhihuDialogCoverSignature(scope: ParentNode) {
+  const images = Array.from(scope.querySelectorAll<HTMLImageElement>('img'))
+    .map((img) => {
+      const rect = img.getBoundingClientRect();
+      return `${Math.round(rect.width)}x${Math.round(rect.height)}:${img.currentSrc || img.src}`;
+    })
+    .filter(Boolean);
+  const canvases = Array.from(scope.querySelectorAll<HTMLCanvasElement>('canvas'))
+    .map((canvas) => {
+      const rect = canvas.getBoundingClientRect();
+      return `${canvas.width}x${canvas.height}:${Math.round(rect.width)}x${Math.round(rect.height)}`;
+    })
+    .filter(Boolean);
+  const backgrounds = Array.from(scope.querySelectorAll<HTMLElement>('[style*="background"]'))
+    .map((element) => element.style.backgroundImage || element.getAttribute('style') || '')
+    .filter(Boolean);
+  return [...images, ...canvases, ...backgrounds].join('|');
+}
+
+/** 判断知乎封面弹窗内是否已经出现足够大的预览/裁剪区域。 */
+function hasZhihuDialogCoverPreview(dialog: HTMLElement) {
+  return Array.from(
+    dialog.querySelectorAll<HTMLElement>('img, canvas, [class*="preview"], [class*="Preview"], [class*="crop"], [class*="Crop"]'),
+  ).some((element) => {
+    const rect = element.getBoundingClientRect();
+    return isVisible(element) && rect.width >= 48 && rect.height >= 48;
+  });
+}
+
+function hasZhihuCoverAcceptedLocalFile(dialog: HTMLElement, beforeDialogSignature: string) {
+  const dialogText = normalizeZhihuOptionText(dialog.textContent || '');
+  const currentSignature = getZhihuDialogCoverSignature(dialog);
+  return (
+    dialogText.includes('重新上传') ||
+    Boolean(currentSignature && currentSignature !== beforeDialogSignature) ||
+    hasZhihuDialogCoverPreview(dialog)
+  );
+}
+
+function isZhihuCoverUploadBusy(dialog: HTMLElement) {
+  const text = normalizeZhihuOptionText(dialog.textContent || '');
+  if (['上传中', '处理中', '正在上传', '加载中'].some((item) => text.includes(item))) return true;
+  const busyElement = dialog.querySelector<HTMLElement>(
+    '[aria-busy="true"], progress, [class*="Spin"], [class*="spin"], [class*="Loading"], [class*="loading"]',
+  );
+  return Boolean(busyElement && isVisible(busyElement));
 }
 
 /** 在指定范围内查找非视频的图片 file input。 */
@@ -273,24 +345,84 @@ function findZhihuImageInput(scope: ParentNode): HTMLInputElement | null {
   return null;
 }
 
-/** 等待知乎弹窗中的指定按钮出现。 */
-async function waitForZhihuDialogButton(texts: string[], timeoutMs: number) {
+type ZhihuCoverConfirmResult = 'confirmed' | 'button-not-found' | 'not-closed';
+
+const ZHIHU_COVER_CONFIRM_TEXTS = ['确认选择', '确认', '完成'];
+
+function findZhihuCoverConfirmButton() {
+  const dialog = findZhihuCoverDialog();
+  if (!dialog) return null;
+  return (
+    findZhihuButton(dialog, ZHIHU_COVER_CONFIRM_TEXTS) ||
+    findZhihuButtonLenient(dialog, ZHIHU_COVER_CONFIRM_TEXTS)
+  );
+}
+
+/** 反复点击知乎封面确认按钮，并以弹窗关闭作为唯一成功标准。 */
+async function confirmZhihuCoverSelection(
+  initialButton: HTMLElement,
+  timeoutMs: number,
+): Promise<ZhihuCoverConfirmResult> {
+  const texts = ZHIHU_COVER_CONFIRM_TEXTS;
   const startedAt = Date.now();
+  let sawButton = false;
+  let button: HTMLElement | null = initialButton;
+
   while (Date.now() - startedAt < timeoutMs) {
+    if (!findZhihuCoverDialog()) return 'confirmed';
+
+    const remainingMs = Math.max(0, timeoutMs - (Date.now() - startedAt));
     const dialog = findZhihuCoverDialog();
-    const button = dialog ? findZhihuButton(dialog, texts) : null;
-    if (button) return button;
-    await waitForIdle(250);
+    if (!dialog) return 'confirmed';
+
+    if (!button || !button.isConnected || !isClickableZhihuElement(button)) {
+      button = findZhihuButton(dialog, texts);
+    }
+    if (!button) {
+      await waitForZhihuDialogMutation(Math.min(1000, remainingMs));
+      continue;
+    }
+
+    sawButton = true;
+    await clickZhihuElement(button);
+    if (await waitForZhihuCoverDialogClosed(Math.min(1000, remainingMs))) return 'confirmed';
+
+    const currentDialog = findZhihuCoverDialog();
+    const currentButton = currentDialog ? findZhihuButton(currentDialog, texts) : null;
+    if (currentButton && currentButton !== button) {
+      button = currentButton;
+      await clickZhihuElement(button);
+      if (await waitForZhihuCoverDialogClosed(Math.min(900, remainingMs))) return 'confirmed';
+    } else {
+      button = null;
+    }
+
+    await waitForZhihuDialogMutation(Math.min(700, remainingMs));
   }
-  return null;
+
+  return sawButton ? 'not-closed' : 'button-not-found';
 }
 
 /** 在知乎弹窗范围内按文本查找可点击按钮。 */
 function findZhihuButton(scope: HTMLElement, texts: string[]) {
+  const normalizedTexts = texts.map((text) => normalizeZhihuOptionText(text));
   const buttons = scope.querySelectorAll<HTMLElement>('button, [role="button"], [class*="Button"]');
   for (const button of buttons) {
-    const text = button.textContent?.trim() || '';
-    if (texts.includes(text) && isClickableZhihuElement(button)) return button;
+    const text = normalizeZhihuOptionText(button.textContent || '');
+    if (normalizedTexts.includes(text) && isEnabledVisibleZhihuElement(button)) return button;
+  }
+  return null;
+}
+
+/** 兜底：知乎按钮文案偶尔被子节点或空白拆开，这里允许包含匹配。 */
+function findZhihuButtonLenient(scope: HTMLElement, texts: string[]) {
+  const normalizedTexts = texts.map((text) => normalizeZhihuOptionText(text));
+  const buttons = scope.querySelectorAll<HTMLElement>('button, [role="button"], [class*="Button"]');
+  for (const button of buttons) {
+    const text = normalizeZhihuOptionText(button.textContent || '');
+    if (normalizedTexts.some((target) => text.includes(target)) && isEnabledVisibleZhihuElement(button)) {
+      return button;
+    }
   }
   return null;
 }
@@ -307,23 +439,47 @@ function findZhihuTextElement(scope: HTMLElement, texts: string[]) {
 
 /** 判断知乎元素是否处于可见、非禁用、可点击状态。 */
 function isClickableZhihuElement(element: HTMLElement) {
+  return isEnabledVisibleZhihuElement(element) && isZhihuElementCenterHitTarget(element);
+}
+
+function isEnabledVisibleZhihuElement(element: HTMLElement) {
   const rect = element.getBoundingClientRect();
+  const style = getComputedStyle(element);
   const disabled =
     element.hasAttribute('disabled') ||
     element.getAttribute('aria-disabled') === 'true' ||
     element.className.includes('disabled') ||
     (element instanceof HTMLButtonElement && element.disabled);
-  return !disabled && isVisible(element) && rect.width > 0 && rect.height > 0;
+  return (
+    !disabled &&
+    style.pointerEvents !== 'none' &&
+    isVisible(element) &&
+    rect.width > 0 &&
+    rect.height > 0
+  );
+}
+
+function isZhihuElementCenterHitTarget(element: HTMLElement) {
+  const rect = element.getBoundingClientRect();
+  const hit = element.ownerDocument.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  if (!hit) return true;
+  if (hit === element || element.contains(hit)) return true;
+  const clickable = hit.closest<HTMLElement>('button, [role="button"], [class*="Button"]');
+  return clickable === element || Boolean(clickable && element.contains(clickable));
 }
 
 /** 优先用 CDP 坐标点击知乎元素，失败时退回完整鼠标事件序列。 */
 async function clickZhihuElement(element: HTMLElement) {
-  scrollIntoView(element);
+  element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' });
   await waitForIdle(120);
 
   const clickedByCdp = await cdpClickElement(element);
   if (clickedByCdp) return;
 
+  dispatchZhihuMouseClick(element);
+}
+
+function dispatchZhihuMouseClick(element: HTMLElement) {
   const rect = element.getBoundingClientRect();
   const clientX = rect.left + rect.width / 2;
   const clientY = rect.top + rect.height / 2;
@@ -343,6 +499,7 @@ async function clickZhihuElement(element: HTMLElement) {
   element.dispatchEvent(new PointerEvent('pointerup', { ...eventInit, buttons: 0 }));
   element.dispatchEvent(new MouseEvent('mouseup', { ...eventInit, buttons: 0 }));
   element.dispatchEvent(new MouseEvent('click', { ...eventInit, buttons: 0 }));
+  element.click();
 }
 
 /** 按字段 label 定位知乎视频表单项，用于视频标记、所属领域、定时发布等控件。 */
@@ -365,12 +522,40 @@ function findZhihuFormItem(labelText: string) {
 
 /** 等待知乎视频封面弹窗关闭。 */
 async function waitForZhihuCoverDialogClosed(timeoutMs: number) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    if (!findZhihuCoverDialog()) return true;
-    await waitForIdle(250);
-  }
-  return false;
+  if (!findZhihuCoverDialog()) return true;
+  return new Promise((resolve) => {
+    let done = false;
+    let observer: MutationObserver | undefined;
+    const finish = (value: boolean) => {
+      if (done) return;
+      done = true;
+      observer?.disconnect();
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = window.setTimeout(() => finish(!findZhihuCoverDialog()), timeoutMs);
+    observer = new MutationObserver(() => {
+      if (!findZhihuCoverDialog()) finish(true);
+    });
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
+  });
+}
+
+function waitForZhihuDialogMutation(timeoutMs: number) {
+  return new Promise<void>((resolve) => {
+    let done = false;
+    let observer: MutationObserver | undefined;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      observer?.disconnect();
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, timeoutMs);
+    observer = new MutationObserver(finish);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'disabled', 'aria-disabled'] });
+  });
 }
 
 /** 生成知乎视频封面预览签名，判断封面是否变化。 */

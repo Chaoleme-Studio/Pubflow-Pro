@@ -99,6 +99,9 @@ pub struct ActivateLeaseResponse {
     pub valid_from: DateTime<Utc>,
     /// 失效时间
     pub valid_until: DateTime<Utc>,
+    /// License 固定到期时间；迁移/续租不会改变。
+    #[serde(alias = "licenseExpiresAt")]
+    pub license_expires_at: DateTime<Utc>,
     /// 服务器时间（用于校准本地时间）
     pub server_time: DateTime<Utc>,
 }
@@ -131,6 +134,13 @@ pub struct VerifyLeaseResponse {
     pub features: Vec<String>,
     /// 失效时间
     pub valid_until: DateTime<Utc>,
+    /// License 固定到期时间；迁移/续租不会改变。
+    #[serde(
+        default,
+        alias = "licenseExpiresAt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub license_expires_at: Option<DateTime<Utc>>,
     /// 服务器时间
     pub server_time: DateTime<Utc>,
     /// 距离过期的秒数
@@ -157,6 +167,9 @@ pub struct RenewLeaseResponse {
     pub lease_token: String,
     /// 新的失效时间
     pub valid_until: DateTime<Utc>,
+    /// License 固定到期时间；迁移/续租不会改变。
+    #[serde(alias = "licenseExpiresAt")]
+    pub license_expires_at: DateTime<Utc>,
     /// 服务器时间
     pub server_time: DateTime<Utc>,
 }

@@ -28,6 +28,11 @@ const OFFICIAL_SITE_URL = (LOCAL_CONFIG.PUBFLOW_OFFICIAL_SITE_URL || DEFAULT_LIC
 const PROTOCOL_PUBLIC_KEY = normalizeHexKey(LOCAL_CONFIG.PUBFLOW_PROTOCOL_PUBLIC_KEY);
 const PROTOCOL_TRUST_ROOT_P256_SPKI = normalizeBase64UrlKey(LOCAL_CONFIG.PUBFLOW_PROTOCOL_TRUST_ROOT_P256_SPKI);
 const LICENSE_API_HOST_PERMISSION = toHostPermission(DEFAULT_LICENSE_API_BASE_URL);
+const SERIALIZABLE_PAGE_WORLD_FUNCTIONS = [
+  'injectDouyinCover',
+  'injectDouyinArticleCover',
+  'runWeixinChannelsPageWorldAction',
+];
 
 if (OBFUSCATE && isRemoteUrl(DEFAULT_LICENSE_API_BASE_URL) && !PROTOCOL_PUBLIC_KEY) {
   throw new Error('Protected remote builds require PUBFLOW_PROTOCOL_PUBLIC_KEY');
@@ -265,7 +270,10 @@ function protectExtensionRuntimeChunks() {
       const options = protectionOptionsForChunk(chunk);
       if (!options) return null;
 
-      const result = obfuscate(code, {
+      const sourceCode = protectedRuntimeChunkPattern.test(chunk.fileName)
+        ? preserveSerializablePageWorldFunctions(code)
+        : code;
+      const result = obfuscate(sourceCode, {
         ...options,
         inputFileName: chunk.fileName,
         // 发布包不需要 sourcemap；这里显式关闭，避免产物带出源码映射。
@@ -300,4 +308,93 @@ function protectExtensionRuntimeChunks() {
         || normalized.includes('/src/licensing/');
     });
   }
+}
+
+function preserveSerializablePageWorldFunctions(code: string): string {
+  const ranges = SERIALIZABLE_PAGE_WORLD_FUNCTIONS
+    .map((functionName) => findFunctionDeclarationRange(code, functionName))
+    .filter((range): range is { start: number; end: number } => Boolean(range))
+    .sort((a, b) => b.start - a.start);
+
+  let next = code;
+  for (const range of ranges) {
+    next = `${next.slice(0, range.start)}\n// javascript-obfuscator:disable\n${next.slice(range.start, range.end)}\n// javascript-obfuscator:enable\n${next.slice(range.end)}`;
+  }
+  return next;
+}
+
+function findFunctionDeclarationRange(code: string, functionName: string): { start: number; end: number } | null {
+  const escapedName = functionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`(?:async\\s+)?function\\s+${escapedName}\\s*\\(`).exec(code);
+  if (!match) return null;
+
+  const bodyStart = code.indexOf('{', match.index + match[0].length);
+  if (bodyStart < 0) return null;
+
+  const bodyEnd = findMatchingBrace(code, bodyStart);
+  if (bodyEnd < 0) return null;
+  return { start: match.index, end: bodyEnd + 1 };
+}
+
+function findMatchingBrace(code: string, openBraceIndex: number): number {
+  let depth = 0;
+  let quote: '"' | '\'' | '`' | null = null;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let i = openBraceIndex; i < code.length; i += 1) {
+    const char = code[i];
+    const next = code[i + 1];
+
+    if (lineComment) {
+      if (char === '\n' || char === '\r') lineComment = false;
+      continue;
+    }
+
+    if (blockComment) {
+      if (char === '*' && next === '/') {
+        blockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (char === '/' && next === '/') {
+      lineComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (char === '/' && next === '*') {
+      blockComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (char === '"' || char === '\'' || char === '`') {
+      quote = char;
+      continue;
+    }
+
+    if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+
+  return -1;
 }

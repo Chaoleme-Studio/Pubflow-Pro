@@ -46,7 +46,7 @@ async function uploadKuaishouCover(config: PlatformConfig, content: ContentData)
   if (!uploadTabStillSelected) {
     return '封面已注入，但快手切回了封面截取标签页，未点击确认。';
   }
-  const uploadPreviewReady = await waitForKuaishouUploadedCoverPreview(5000);
+  const uploadPreviewReady = await waitForKuaishouUploadedCoverPreview(10000);
   if (!uploadPreviewReady) {
     return '封面已注入，但没有等到快手上传封面预览，未点击确认。';
   }
@@ -56,6 +56,10 @@ async function uploadKuaishouCover(config: PlatformConfig, content: ContentData)
 
   if (!await ensureKuaishouUploadTabSelected(2000)) {
     return '封面已注入，但确认前快手再次切回封面截取标签页，未点击确认。';
+  }
+  const confirmPreviewReady = await waitForKuaishouUploadedCoverPreview(3000);
+  if (!confirmPreviewReady) {
+    return '封面已注入，但确认前没有等到快手上传封面预览，未点击确认。';
   }
   await clickKuaishouElement(confirmButton);
   const closed = await waitForKuaishouCoverDialogClosed(8000);

@@ -40,7 +40,7 @@
 | --- | --- | --- | --- |
 | 首次激活 | 新浏览器 profile 安装扩展，输入有效激活码 | 激活成功，服务端 lease 绑定 `client_install_id` 和 `device_key_id` | [x] Chrome smoke：Profile A `activationStatus=active`，`clientInstallId=chrome-smoke-...`，IndexedDB 设备私钥 `extractable=false`；见 `.manual-security/automated-extension-smoke/result.json` |
 | verify 绑定 | 激活后点击重新验证/重启扩展触发验证 | `/v1/lease/verify` 带 `device_proof`，验证成功 | [x] API smoke 覆盖 `/challenge -> /activate -> /verify -> /permit`；Chrome smoke 审计事件包含 `verify` |
-| renew 续租 | 使用即将过期 lease 或调短服务端测试数据后续租 | 新 lease 不超过 30 天，且不超过 license 到期时间 | [x] Rust 回归覆盖 30 天 lease 上限；API smoke 覆盖真实授权验证链路 |
+| renew 续租 | 使用即将过期 lease 或调短服务端测试数据后续租 | 新 lease 不超过 31 天，且不超过 license 到期时间 | [x] Rust 回归覆盖 31 天 lease 上限；API smoke 覆盖真实授权验证链路 |
 | permit 发布票据 | 点击「开始发布」 | 打开平台前先拿到 `start_distribution` permit，TTL 约 30 分钟 | [x] Chrome smoke 记录 `/v1/lease/permit -> 200`，permit id 与过期时间写入 `currentTask` |
 | 过期受限 | 构造过期 lease | 发布入口进入受限提示，不应继续打开平台发布 | [x] JS licensing 回归覆盖服务端时间校准后的过期/回拨；permit 无 proof 服务端拒绝防止本地 patch |
 

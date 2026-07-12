@@ -73,7 +73,7 @@ const RENEWAL_GRACE_DAYS: i64 = 7;
 /// 订阅版 lease 最长有效期（天）。
 ///
 /// 订阅商业控制依赖服务端续租点，不能再签发近似离线授权的长期 lease。
-const MAX_SUBSCRIPTION_LEASE_DAYS: i64 = 30;
+const MAX_SUBSCRIPTION_LEASE_DAYS: i64 = 31;
 
 /// 根据 license 剩余天数计算 lease 有效期，并以 license 到期时间为上限
 fn compute_lease_valid_until(
@@ -86,6 +86,13 @@ fn compute_lease_valid_until(
     } else {
         valid_until
     }
+}
+
+fn license_expires_at_utc(license_model: &license::Model) -> Option<chrono::DateTime<Utc>> {
+    license_model
+        .expires_at
+        .as_ref()
+        .map(|value| value.with_timezone(&Utc))
 }
 
 /// 解析日期字符串为当天开始时间（00:00:00）
@@ -635,7 +642,8 @@ impl LeaseService {
             tier: response.tier,
             features: response.features,
             valid_from: response.valid_from.timestamp(),
-            valid_until: response.valid_until.timestamp(),
+            valid_until: response.license_expires_at.timestamp(),
+            license_expires_at: Some(response.license_expires_at.timestamp()),
             server_time: response.server_time.timestamp(),
         };
         encode_activation_response(&payload, &decoded.response_key())
@@ -1101,6 +1109,7 @@ impl LeaseService {
             features,
             valid_from,
             valid_until,
+            license_expires_at,
             server_time: now,
         })
     }
@@ -1156,6 +1165,7 @@ impl LeaseService {
                 tier: lease_model.tier,
                 features: serde_json::from_str(&lease_model.features).unwrap_or_default(),
                 valid_until: lease_model.valid_until.with_timezone(&Utc),
+                license_expires_at: None,
                 server_time: now,
                 expires_in_seconds: 0,
             };
@@ -1180,6 +1190,7 @@ impl LeaseService {
                 tier: lease_model.tier,
                 features: serde_json::from_str(&lease_model.features).unwrap_or_default(),
                 valid_until: lease_model.valid_until.with_timezone(&Utc),
+                license_expires_at: None,
                 server_time: now,
                 expires_in_seconds: 0,
             };
@@ -1205,6 +1216,7 @@ impl LeaseService {
                 tier: lease_model.tier,
                 features: serde_json::from_str(&lease_model.features).unwrap_or_default(),
                 valid_until,
+                license_expires_at: None,
                 server_time: now,
                 expires_in_seconds: 0,
             };
@@ -1233,6 +1245,7 @@ impl LeaseService {
                 tier: lease_model.tier,
                 features: serde_json::from_str(&lease_model.features).unwrap_or_default(),
                 valid_until,
+                license_expires_at: None,
                 server_time: now,
                 expires_in_seconds: 0,
             };
@@ -1255,6 +1268,7 @@ impl LeaseService {
                 tier: lease_model.tier,
                 features: serde_json::from_str(&lease_model.features).unwrap_or_default(),
                 valid_until,
+                license_expires_at: license_expires_at_utc(&license_model),
                 server_time: now,
                 expires_in_seconds: 0,
             };
@@ -1280,6 +1294,7 @@ impl LeaseService {
                 tier: lease_model.tier,
                 features: serde_json::from_str(&lease_model.features).unwrap_or_default(),
                 valid_until,
+                license_expires_at: license_expires_at_utc(&license_model),
                 server_time: now,
                 expires_in_seconds: 0,
             };
@@ -1318,6 +1333,7 @@ impl LeaseService {
             tier,
             features,
             valid_until,
+            license_expires_at: license_expires_at_utc(&license_model),
             server_time: now,
             expires_in_seconds,
         };
@@ -1457,6 +1473,7 @@ impl LeaseService {
         Ok(RenewLeaseResponse {
             lease_token: new_lease_token,
             valid_until: new_valid_until,
+            license_expires_at,
             server_time: now,
         })
     }
@@ -1970,7 +1987,7 @@ mod tests {
     use sea_orm::{ConnectionTrait, Database, DatabaseBackend, Schema};
 
     #[test]
-    fn subscription_lease_is_capped_to_30_days() {
+    fn subscription_lease_is_capped_to_31_days() {
         let now = Utc::now();
         let license_expires_at = now + Duration::days(365);
 
@@ -2184,7 +2201,8 @@ mod tests {
             )
             .await
             .expect("activate lease");
-        assert!(activated.valid_until <= activated.server_time + Duration::days(30));
+        assert!(activated.valid_until <= activated.server_time + Duration::days(31));
+        assert_eq!(activated.license_expires_at, activated.valid_until);
 
         let verify_proof = issue_test_device_proof(
             &service,
@@ -2323,7 +2341,7 @@ mod tests {
             None,
         )
         .await;
-        service
+        let first_activation = service
             .activate(
                 ActivateLeaseRequest {
                     activation_code: activation_code.clone(),
@@ -2337,6 +2355,17 @@ mod tests {
             )
             .await
             .expect("first activate");
+        let first_license_model = license::Entity::find_by_id(license_id)
+            .one(&db)
+            .await
+            .expect("find license after first activation")
+            .expect("license exists after first activation");
+        let first_license_expires_at =
+            license_expires_at_utc(&first_license_model).expect("license expiry set");
+        assert_eq!(
+            first_activation.license_expires_at,
+            first_license_expires_at
+        );
 
         let second_key = SigningKey::from_slice(&[12u8; 32]).expect("valid signing key");
         let second_public_key_spki = second_key
@@ -2355,7 +2384,7 @@ mod tests {
             None,
         )
         .await;
-        service
+        let second_activation = service
             .activate(
                 ActivateLeaseRequest {
                     activation_code,
@@ -2369,6 +2398,10 @@ mod tests {
             )
             .await
             .expect("reactivate after browser private key loss");
+        assert_eq!(
+            second_activation.license_expires_at,
+            first_license_expires_at
+        );
 
         let license_model = license::Entity::find_by_id(license_id)
             .one(&db)
@@ -2376,6 +2409,10 @@ mod tests {
             .expect("find license")
             .expect("license exists");
         assert_eq!(license_model.device_migration_count, 1);
+        assert_eq!(
+            license_expires_at_utc(&license_model),
+            Some(first_license_expires_at)
+        );
 
         let active_leases = lease::Entity::find()
             .filter(lease::Column::LicenseId.eq(license_id))

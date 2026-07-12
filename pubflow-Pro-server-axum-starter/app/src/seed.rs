@@ -254,7 +254,7 @@ async fn seed_account(db: &DatabaseConnection, account: &DemoAccount) -> Result<
         source_channel: Set("official".to_string()),
         batch_id: Set(None),
         max_devices: Set(1),
-        device_migration_limit: Set(device_migration_limit_for_plan(account.plan)?.max(3)),
+        device_migration_limit: Set(device_migration_limit_for_plan(account.plan)?.max(5)),
         device_migration_count: Set(0),
         last_migrated_at: Set(None),
         activated_at: Set(Some(paid_at.into())),
@@ -285,7 +285,7 @@ async fn seed_account(db: &DatabaseConnection, account: &DemoAccount) -> Result<
     .await?;
 
     // 生成 lease 记录（模拟用户激活和多次验证）
-    let valid_until = now + Duration::days(30);
+    let valid_until = now + Duration::days(31);
     let lease_ips = ["112.45.67.89", "223.71.156.42", "183.15.200.101"];
     for i in 0..3u8 {
         let created = now - Duration::hours((i as i64) * 8);
@@ -351,7 +351,7 @@ async fn seed_lease_if_missing(db: &DatabaseConnection, user_id: i32) -> Result<
         .unwrap_or_else(|| "unknown".to_string());
 
     let now = Utc::now();
-    let valid_until = now + Duration::days(30);
+    let valid_until = now + Duration::days(31);
     let ips = ["112.45.67.89", "223.71.156.42", "183.15.200.101"];
 
     for i in 0..3u8 {

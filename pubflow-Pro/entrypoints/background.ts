@@ -711,7 +711,7 @@ function shouldReloadForMissingReceiver(error: Error) {
 
 /** 从平台处理器的中文返回文案中识别失败态，统一转换为侧边栏 error。 */
 function isFillFailureMessage(message: string) {
-  return /没有找到|未找到|没有打开|未打开|未关闭|未点击确认|未确认|未就绪|上传失败|填充失败|没有设置|不是\s*contenteditable|不存在|请检查封面预览/.test(message);
+  return /没有等到|没有找到|未找到|没有打开|未打开|未关闭|未点击确认|未确认|未就绪|上传失败|填充失败|没有设置|不是\s*contenteditable|不存在|请检查封面预览/.test(message);
 }
 
 /** 等待 content script 回执接手填充；广播到多 frame 时用它确认不是发给了空壳 frame。 */

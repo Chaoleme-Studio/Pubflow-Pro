@@ -444,7 +444,16 @@ export async function saveSettings(settings: {
   const licensingSettings = withoutLicensingSecrets(settings.licensingSettings);
   const aiSettings = withoutAISecrets(settings.aiSettings);
 
-  // 工作区根配置文件优先，浏览器本地只做兜底和快速恢复。
+  // 同步写 chrome.storage.local，避免未授权工作区时丢配置；密钥只写入加密 secret store。
+  await browser.storage.local.set({
+    [STORAGE_KEYS.platformSettings]: settings.platformSettings,
+    [STORAGE_KEYS.globalSettings]: settings.globalSettings,
+    [STORAGE_KEYS.serverConfig]: serverConfig,
+    [STORAGE_KEYS.licensingSettings]: licensingSettings,
+    [STORAGE_KEYS.aiSettings]: aiSettings,
+  });
+
+  // 工作区文件只是跨项目同步副本；浏览器不允许写入目录时不能阻断授权凭证保存。
   await mergeDataFile({
     settings: {
       platformSettings: settings.platformSettings,
@@ -453,14 +462,7 @@ export async function saveSettings(settings: {
       licensingSettings: licensingSettings as unknown as Record<string, unknown>,
       aiSettings: aiSettings as unknown as Record<string, unknown>,
     },
-  });
-
-  // 同步写 chrome.storage.local，避免未授权工作区时丢配置；密钥只写入加密 secret store。
-  await browser.storage.local.set({
-    [STORAGE_KEYS.platformSettings]: settings.platformSettings,
-    [STORAGE_KEYS.globalSettings]: settings.globalSettings,
-    [STORAGE_KEYS.serverConfig]: serverConfig,
-    [STORAGE_KEYS.licensingSettings]: licensingSettings,
-    [STORAGE_KEYS.aiSettings]: aiSettings,
+  }).catch((error) => {
+    console.warn('[PubFlow] 工作区设置同步失败，已保留浏览器本地设置。', error);
   });
 }

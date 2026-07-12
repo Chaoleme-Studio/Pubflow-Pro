@@ -260,6 +260,7 @@ pub fn pfap_decode_activation_response(response_base64: &str, response_key_hex: 
             "features": payload.features,
             "valid_from": payload.valid_from,
             "valid_until": payload.valid_until,
+            "license_expires_at": payload.license_expires_at,
             "server_time": payload.server_time,
         })
         .to_string(),

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fetchProtocolInfo } from '../activation';
 import { buildDeviceProof, mapDeviceProofError } from '../deviceProof';
 import { getOrCreateBrowserDeviceKey, signDeviceChallenge } from '../deviceKeyManager';
 import { isLicenseExpired, mapLicenseApiError } from '../licenseManager';
@@ -83,6 +84,31 @@ describe('device proof payload', () => {
     expect(proof.device_key_id).toMatch(/^p256:/);
     expect(proof.public_key_spki_base64_url.length).toBeGreaterThan(80);
     expect(proof.signature_base64_url.length).toBeGreaterThan(80);
+  });
+});
+
+describe('activation protocol trust', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('allows unsigned protocol keys only for loopback development API URLs', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      data: protocolVersionPayload(),
+    }));
+
+    const info = await fetchProtocolInfo('http://127.0.0.1:5189/');
+
+    expect(info.publicKey).toBe('a'.repeat(64));
+    expect(info.protocolKeyVersion).toBe(1);
+  });
+
+  it('rejects unsigned protocol keys from remote API URLs', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      data: protocolVersionPayload(),
+    }));
+
+    await expect(fetchProtocolInfo('https://api.example.test')).rejects.toThrow('授权协议配置未受信任');
   });
 });
 
@@ -290,6 +316,17 @@ function jsonResponse(body: unknown) {
     status: 200,
     headers: { 'content-type': 'application/json' },
   });
+}
+
+function protocolVersionPayload() {
+  return {
+    version: 1,
+    protocol_version: 1,
+    protocol_key_version: 1,
+    protocol_public_key: 'a'.repeat(64),
+    min_app_version: '0.1.0',
+    server_time_ms: 1783233891775,
+  };
 }
 
 function deleteDatabase(name: string) {

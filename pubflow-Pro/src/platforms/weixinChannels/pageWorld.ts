@@ -1386,7 +1386,8 @@ export async function runWeixinChannelsPageWorldAction(
         const previewReady = await waitForUploaderPreview(dialog, 15000);
         if (!previewReady) return false;
       } else if (!directPreviewReady) {
-        await sleep(2000);
+        const fallbackPreviewReady = await waitForUploaderPreview(dialog, 8000);
+        if (!fallbackPreviewReady) return false;
       }
 
       const currentDialog = findActiveCoverDialog(expectedTitle) || dialog;

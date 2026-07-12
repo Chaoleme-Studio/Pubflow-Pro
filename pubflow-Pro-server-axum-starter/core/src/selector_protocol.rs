@@ -46,6 +46,8 @@ pub struct ActivationProtocolResponsePayload {
     pub features: Vec<String>,
     pub valid_from: i64,
     pub valid_until: i64,
+    #[serde(default)]
+    pub license_expires_at: Option<i64>,
     pub server_time: i64,
 }
 
@@ -642,6 +644,7 @@ mod tests {
             features: vec!["publish".to_string()],
             valid_from: 1_700_000_001,
             valid_until: 1_700_000_100,
+            license_expires_at: Some(1_700_086_401),
             server_time: 1_700_000_001,
         };
         let response =

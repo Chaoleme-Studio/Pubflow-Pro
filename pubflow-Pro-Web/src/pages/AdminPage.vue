@@ -157,7 +157,7 @@ const replaceReason = ref('');
 const replaceRevokeOld = ref(true);
 const replaceResult = ref('');
 const limitsMaxDevices = ref(1);
-const limitsMigrationLimit = ref(3);
+const limitsMigrationLimit = ref(5);
 const limitsReason = ref('');
 
 watch(showGenerateDialog, (open) => {

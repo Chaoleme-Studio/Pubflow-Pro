@@ -491,7 +491,7 @@ function resolveFillTargetDocument(config: PlatformConfig, contentType?: Content
 
 /** 根据平台处理器返回的中文结果判断是否应该当作失败回传给侧边栏。 */
 function isFillFailureMessage(message: string) {
-  return /没有找到|未找到|没有打开|未打开|未关闭|未点击确认|未确认|未就绪|上传失败|填充失败|没有设置|不是\s*contenteditable|不存在|请检查封面预览/.test(message);
+  return /没有等到|没有找到|未找到|没有打开|未打开|未关闭|未点击确认|未确认|未就绪|上传失败|填充失败|没有设置|不是\s*contenteditable|不存在|请检查封面预览/.test(message);
 }
 
 /** 点击文章入口按钮，例如抖音“我要发文”，等待导航或编辑器渲染后再继续。 */

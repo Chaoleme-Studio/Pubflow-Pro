@@ -6,6 +6,8 @@ interface ActivateLeasePayload {
   leaseToken?: string;
   valid_until?: number;
   validUntil?: number;
+  license_expires_at?: number | null;
+  licenseExpiresAt?: number | null;
   server_time?: number;
   serverTime?: number;
 }
@@ -139,15 +141,16 @@ export async function activateLease(settings: LicensingSettings): Promise<Licens
     clientInstallId,
     machineHash: '',
     leaseToken,
-    validUntil: data.valid_until || data.validUntil,
+    validUntil: data.license_expires_at || data.licenseExpiresAt || data.valid_until || data.validUntil,
     serverTime: data.server_time || data.serverTime,
     serverTimeCheckedAt: Math.floor(Date.now() / 1000),
   };
 }
 
 export async function fetchProtocolInfo(apiBaseUrl: string): Promise<ProtocolInfo> {
+  const normalizedApiBaseUrl = apiBaseUrl.replace(/\/+$/, '');
   const response = await fetchWithReadableNetworkError(
-    `${apiBaseUrl}/v1/selector/version`,
+    `${normalizedApiBaseUrl}/v1/selector/version`,
     undefined,
     '授权协议版本查询无法连接到服务器',
   );
@@ -162,15 +165,17 @@ export async function fetchProtocolInfo(apiBaseUrl: string): Promise<ProtocolInf
   }
   const hasPinnedKey = !!BUILT_IN_PROTOCOL_PUBLIC_KEY;
   const matchesPinnedKey = hasPinnedKey && (!serverKey || serverKey === BUILT_IN_PROTOCOL_PUBLIC_KEY);
+  const trustedSignedServerKey = !matchesPinnedKey && await verifySignedProtocolKey(data, serverKey);
+  const allowUnsignedLocalServerKey = !hasPinnedKey && isLoopbackLicenseApiBaseUrl(normalizedApiBaseUrl);
   if (
     hasPinnedKey
     && serverKey
     && serverKey !== BUILT_IN_PROTOCOL_PUBLIC_KEY
-    && !await verifySignedProtocolKey(data, serverKey)
+    && !trustedSignedServerKey
   ) {
     throw new Error('授权协议配置不匹配，请安装最新版本或联系支持。');
   }
-  if (!matchesPinnedKey && !hasPinnedKey && !await verifySignedProtocolKey(data, serverKey)) {
+  if (!matchesPinnedKey && !hasPinnedKey && !trustedSignedServerKey && !allowUnsignedLocalServerKey) {
     throw new Error('授权协议配置未受信任，请安装最新版本或联系支持。');
   }
   return {
@@ -185,6 +190,15 @@ export async function fetchProtocolInfo(apiBaseUrl: string): Promise<ProtocolInf
 
 function normalizeProtocolPublicKey(value: string | undefined) {
   return (value || '').trim().toLowerCase();
+}
+
+function isLoopbackLicenseApiBaseUrl(value: string) {
+  try {
+    const { hostname } = new URL(value);
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  } catch {
+    return false;
+  }
 }
 
 async function verifySignedProtocolKey(data: ProtocolVersionPayload, serverKey: string): Promise<boolean> {

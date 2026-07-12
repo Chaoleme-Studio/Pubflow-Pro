@@ -30,7 +30,7 @@
 │                                                                 │
 │  1. 用户在插件中输入激活码                                        │
 │  2. 插件通过 PFAP v1 调用 POST /v1/lease/activate                │
-│  3. 服务端校验激活码 → 签发 JWT lease token（最长 30 天）          │
+│  3. 服务端校验激活码 → 签发 JWT lease token（最长 31 天）          │
 │  4. 插件自动加密存储 lease token 和 client_install_id             │
 │  5. 紧接调用 /v1/lease/verify，首次绑定浏览器 P-256 设备公钥        │
 │                                                                 │
@@ -59,12 +59,12 @@
 
 当前采用**订阅制 + 服务端短 lease + 浏览器实例设备密钥**模型：
 
-- lease token 为 JWT HS256，订阅版最长 **30 天**。
+- lease token 为 JWT HS256，订阅版最长 **31 天**。
 - 浏览器内生成 **ECDSA P-256** 设备密钥对，私钥 `extractable=false` 存储在 IndexedDB。
 - verify/renew/permit 必须携带 device proof（私钥签名服务端 challenge）。
 - **开始发布**时申请一次性 `start_distribution` permit，5 分钟 TTL。
 - 平台 selector 全部内置在插件本地，远程 selector 下发暂时废弃。
-- 迁移额度按订阅时长折算：每 30 天 3 次，月卡 3 次、年卡 36 次。
+- 迁移额度按订阅时长折算：每 30 天 5 次，月卡 5 次、年卡 60 次。
 
 详细方案见 [`README-授权方案.md`](./README-授权方案.md)。
 完整威胁模型与安全架构见 [`pubflow-Pro/_doc/PubFlow Pro 安全-授权保护设计.md`](./pubflow-Pro/_doc/PubFlow%20Pro%20安全-授权保护设计.md)。
@@ -82,7 +82,7 @@
 
 ```
 格式：JWT (HS256)
-有效期：订阅版最长 30 天，以 license 到期时间为上限
+有效期：订阅版最长 31 天，以 license 到期时间为上限
 自定义 Claims：
   - lease_id        租约唯一 ID
   - license_id      关联的 license ID

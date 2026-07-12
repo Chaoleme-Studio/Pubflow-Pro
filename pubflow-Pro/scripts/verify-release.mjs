@@ -17,6 +17,29 @@ const distDir = resolve(rootDir, args.get('--dir') || '.output/chrome-mv3');
 const requireObfuscation = args.get('--allow-unprotected') !== '1';
 const failures = [];
 const warnings = [];
+const serializablePageWorldFunctions = [
+  {
+    label: 'injectDouyinCover',
+    anchor: '.semi-upload',
+    markers: ['.semi-upload', '__reactFiber', 'notifyFileSelect', 'handleChange'],
+  },
+  {
+    label: 'injectDouyinArticleCover',
+    anchor: 'HTMLInputElement.prototype.click',
+    markers: ['HTMLInputElement.prototype.click', '替换封面', '.webp', 'new DataTransfer'],
+  },
+  {
+    label: 'runWeixinChannelsPageWorldAction',
+    anchor: '__pubflowWeixinImageUploadState',
+    markers: [
+      '__pubflowWeixinImageUploadState',
+      '页面主世界未找到 div.input-editor',
+      '页面主世界未找到视频上传 input',
+      '页面主世界未找到图片上传 input',
+      '页面主世界未找到短标题输入框',
+    ],
+  },
+];
 
 function fail(message) {
   failures.push(message);
@@ -115,6 +138,112 @@ function assertObfuscated(filePath, label) {
   }
 }
 
+function findMatchingBrace(code, openBraceIndex) {
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let i = openBraceIndex; i < code.length; i += 1) {
+    const char = code[i];
+    const next = code[i + 1];
+
+    if (lineComment) {
+      if (char === '\n' || char === '\r') lineComment = false;
+      continue;
+    }
+
+    if (blockComment) {
+      if (char === '*' && next === '/') {
+        blockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (char === '/' && next === '/') {
+      lineComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (char === '/' && next === '*') {
+      blockComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (char === '"' || char === '\'' || char === '`') {
+      quote = char;
+      continue;
+    }
+
+    if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+
+  return -1;
+}
+
+function findFunctionSourceContainingMarkers(code, markers) {
+  const markerIndexes = markers.map((marker) => code.indexOf(marker));
+  if (markerIndexes.some((index) => index < 0)) return '';
+
+  let best = '';
+  for (const match of code.matchAll(/(?:async\s+)?function\s+[A-Za-z0-9_$]+\s*\(/g)) {
+    const bodyStart = code.indexOf('{', match.index + match[0].length);
+    if (bodyStart < 0) continue;
+
+    const bodyEnd = findMatchingBrace(code, bodyStart);
+    if (bodyEnd < 0) continue;
+
+    if (markerIndexes.every((index) => index >= match.index && index <= bodyEnd)) {
+      const source = code.slice(match.index, bodyEnd + 1);
+      if (!best || source.length < best.length) {
+        best = source;
+      }
+    }
+  }
+
+  return best;
+}
+
+function assertSerializablePageWorldFunctions(backgroundCode) {
+  for (const { label, markers } of serializablePageWorldFunctions) {
+    const source = findFunctionSourceContainingMarkers(backgroundCode, markers);
+    if (!source) {
+      fail(`background.js 缺少 MAIN world 注入函数体：${label}`);
+      continue;
+    }
+
+    if (/\b_0x[0-9a-fA-F]+\s*\(/.test(source)) {
+      fail(`${label} 被混淆成依赖外部 helper 的函数，chrome.scripting.executeScript({ func }) 注入后会失效`);
+    }
+
+    for (const marker of markers) {
+      if (!source.includes(marker)) {
+        fail(`${label} 缺少自包含标记 ${marker}，可能被混淆或拆到函数外`);
+      }
+    }
+  }
+}
+
 if (!existsSync(distDir)) {
   fail(`发布目录不存在：${distDir}`);
 } else {
@@ -155,6 +284,7 @@ if (!existsSync(distDir)) {
   const backgroundCode = existsSync(resolve(distDir, 'background.js'))
     ? readText(resolve(distDir, 'background.js'))
     : '';
+  assertSerializablePageWorldFunctions(backgroundCode);
   if (backgroundCode.includes('__PUBFLOW_PROTOCOL_PUBLIC_KEY__')) {
     fail('协议公钥 define 占位符仍存在于产物中');
   }
