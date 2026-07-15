@@ -1,4 +1,4 @@
-import { cdpClickElement } from '../../content/cdp';
+import { cdpClickElement, cdpDragElement } from '../../content/cdp';
 import { fillField, humanDelay } from '../../content/fieldFiller';
 import { uploadVideoIfAvailable } from '../../content/videoUploader';
 import { fillArticleBodyAsText, extractBase64ImagesAsFiles } from '../../content/articleBodyFiller';
@@ -69,6 +69,12 @@ async function uploadZhihuCover(
     confirmButton = findZhihuCoverConfirmButton();
   }
   if (!confirmButton) throw new Error('封面已注入，但没有等到知乎封面确认按钮可点击。');
+
+  const currentDialog = findZhihuCoverDialog();
+  if (currentDialog) {
+    await centerZhihuVerticalCoverCrop(currentDialog);
+    confirmButton = findZhihuCoverConfirmButton() || confirmButton;
+  }
 
   const confirmed = await confirmZhihuCoverSelection(confirmButton, 15000);
   if (confirmed === 'button-not-found') throw new Error('封面已注入，但没有找到知乎封面弹窗的确认按钮。');
@@ -348,6 +354,40 @@ function findZhihuImageInput(scope: ParentNode): HTMLInputElement | null {
 type ZhihuCoverConfirmResult = 'confirmed' | 'button-not-found' | 'not-closed';
 
 const ZHIHU_COVER_CONFIRM_TEXTS = ['确认选择', '确认', '完成'];
+
+/**
+ * 竖屏封面会在高画布中显示一个可纵向拖动的 3:4 ReactCrop 选区。
+ * 在确认前将选区移动到画布中部；横屏或没有移动空间时保持平台原行为。
+ */
+async function centerZhihuVerticalCoverCrop(dialog: HTMLElement): Promise<boolean> {
+  const cropRoot = dialog.querySelector<HTMLElement>('.ReactCrop');
+  const selection = cropRoot?.querySelector<HTMLElement>('.ReactCrop__crop-selection');
+  if (!cropRoot || !selection || !isVisible(cropRoot) || !isVisible(selection)) return false;
+
+  const cropRect = cropRoot.getBoundingClientRect();
+  const selectionRect = selection.getBoundingClientRect();
+  const movableHeight = cropRect.height - selectionRect.height;
+  const isVerticalCrop = cropRect.height > cropRect.width * 1.15;
+  if (!isVerticalCrop || movableHeight <= 2) return false;
+
+  const targetTop = cropRect.top + movableHeight / 2;
+  const deltaY = targetTop - selectionRect.top;
+  if (Math.abs(deltaY) <= 2) return true;
+
+  const dragged = await cdpDragElement(selection, 0, deltaY);
+  if (!dragged) return false;
+  await waitForIdle(400);
+
+  const currentDialog = findZhihuCoverDialog();
+  const currentRoot = currentDialog?.querySelector<HTMLElement>('.ReactCrop');
+  const currentSelection = currentRoot?.querySelector<HTMLElement>('.ReactCrop__crop-selection');
+  if (!currentRoot || !currentSelection) return false;
+
+  const currentCropRect = currentRoot.getBoundingClientRect();
+  const currentSelectionRect = currentSelection.getBoundingClientRect();
+  const currentTargetTop = currentCropRect.top + (currentCropRect.height - currentSelectionRect.height) / 2;
+  return Math.abs(currentSelectionRect.top - currentTargetTop) <= 4;
+}
 
 function findZhihuCoverConfirmButton() {
   const dialog = findZhihuCoverDialog();

@@ -221,6 +221,7 @@ describe('license expiry and redacted errors', () => {
     expect(mapDeviceProofError('DEVICE_PROOF_INVALID: signature mismatch')).toBe('授权设备验证失败，请重新验证。');
     expect(mapLicenseApiError('DEVICE_PUBLIC_KEY_REQUIRED')).toBe('授权设备验证失败，请重新验证。');
     expect(mapPermitError('LICENSE_EXPIRED')).toBe('授权已过期，请联网验证后再开始发布。');
+    expect(mapPermitError('PERMIT_REQUEST_INVALID')).toContain('更新插件');
   });
 });
 

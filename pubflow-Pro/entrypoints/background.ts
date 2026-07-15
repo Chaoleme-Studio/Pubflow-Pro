@@ -9,7 +9,12 @@ import { runWeixinChannelsPageWorldAction } from '../src/platforms/weixinChannel
 import type { PageWorldAction, PageWorldPayload } from '../src/platforms/weixinChannels/pageWorld';
 import { loadLibraryData, saveLibraryData } from '../src/storage/libraryStorage';
 import { loadCurrentTask, saveCurrentTask } from '../src/storage/taskStorage';
-import { hasLicenseCredentials, loadLicensingSettings, saveLicensingSettings } from '../src/licensing/licenseStorage';
+import {
+  hasLicenseCredentials,
+  loadLicensingSettings,
+  mergeStoredLicenseWithRuntimeLease,
+  saveLicensingSettings,
+} from '../src/licensing/licenseStorage';
 import { verifyLicense } from '../src/licensing/licenseManager';
 import { issueDistributionPermit } from '../src/licensing/permitManager';
 import { checkExtensionUpdate } from '../src/licensing/updateChecker';
@@ -136,6 +141,19 @@ async function handleMessage(
       }
     }
 
+    if (message.type === 'CDP_DRAG') {
+      const tabId = sender.tab?.id;
+      if (!tabId) {
+        return fail('无法确定目标标签页');
+      }
+      try {
+        await cdpDrag(tabId, message.payload);
+        return ok(undefined);
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : 'CDP 拖拽失败');
+      }
+    }
+
     if (message.type === 'HANDLE_WEIXIN_SCHEDULE') {
       try {
         return ok(await executeWeixinPageWorldAction(sender, 'handleSchedule', { scheduledAt: message.payload.scheduledAt }));
@@ -208,6 +226,16 @@ async function handleMessage(
         return ok(await executeWeixinPageWorldAction(sender, 'fillArticleTitle', { title: message.payload.title }));
       } catch (error) {
         return fail(error instanceof Error ? error.message : '视频号图文标题填充失败');
+      }
+    }
+
+    if (message.type === 'FILL_WEIXIN_VIDEO_MARK') {
+      try {
+        return ok(await executeWeixinPageWorldAction(sender, 'fillVideoMark', {
+          videoMark: message.payload.videoMark,
+        }));
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : '视频号视频标注设置失败');
       }
     }
 
@@ -284,6 +312,13 @@ async function handleMessage(
     }
 
     if (message.type === 'START_DISTRIBUTION') {
+      if (
+        currentTask
+        && (currentTask.status === 'running' || currentTask.status === 'paused')
+        && currentTask.platforms.some((item) => !isTerminalPlatformStatus(item.status))
+      ) {
+        return fail('已有分发任务正在进行，请等待完成或跳过当前任务后再开始下一条。');
+      }
       clearAllFillCompletionTimeouts();
       const license = await requireActiveLicense();
       if (!license.ok) {
@@ -883,7 +918,8 @@ async function ensureLicensingLoaded() {
 }
 
 async function verifyCurrentLicense(input?: LicensingSettings) {
-  licensingSettings = input || await loadLicensingSettings();
+  const stored = input || await loadLicensingSettings();
+  licensingSettings = mergeStoredLicenseWithRuntimeLease(stored, licensingSettings);
   const result = await verifyLicense(licensingSettings);
   licensingSettings = result.settings;
   await saveLicensingSettings(licensingSettings);
@@ -963,7 +999,7 @@ function toLibraryPlatformStatus(status: PlatformTaskStatus): PlatformStatus['st
 function toRecordStatus(status: PlatformStatus['status']): PublishRecord['status'] | null {
   if (status === 'published') return 'published';
   if (status === 'error') return 'error';
-  if (status === 'filled') return 'pending';
+  if (status === 'filled') return 'filled';
   return null;
 }
 
@@ -979,6 +1015,7 @@ function buildPublishRecord(video: VideoRecord, platform: PlatformStatus): Publi
     coverFileName: video.coverFileName,
     publishedUrl: platform.publishedUrl,
     publishedAt: platform.publishedAt,
+    updatedAt: platform.publishedAt || video.updatedAt,
     status,
     error: platform.error,
   };
@@ -1006,6 +1043,7 @@ async function syncCurrentTaskToLibrary() {
         ...platform,
         status,
         error: taskPlatform.error,
+        publishedUrl: taskPlatform.publishedUrl || platform.publishedUrl,
       };
       if (status === 'published') {
         next.publishedAt ||= Date.now();
@@ -1034,6 +1072,11 @@ async function syncCurrentTaskToLibrary() {
 
       const key = `${generated.videoId}:${generated.platformId}`;
       const existing = recordByKey.get(key);
+      const stateChanged = !existing ||
+        existing.status !== generated.status ||
+        existing.error !== generated.error ||
+        existing.publishedUrl !== generated.publishedUrl ||
+        existing.publishedAt !== generated.publishedAt;
       recordByKey.set(key, {
         ...generated,
         ...existing,
@@ -1043,7 +1086,8 @@ async function syncCurrentTaskToLibrary() {
         status: existing?.status === 'published' ? 'published' : generated.status,
         publishedUrl: existing?.publishedUrl || generated.publishedUrl,
         publishedAt: existing?.publishedAt || generated.publishedAt,
-        error: generated.error || existing?.error,
+        updatedAt: stateChanged ? generated.updatedAt : existing?.updatedAt || generated.updatedAt,
+        error: generated.error,
       });
     }
 
@@ -1108,6 +1152,69 @@ async function cdpClick(tabId: number, x: number, y: number): Promise<void> {
       x,
       y,
       button: 'left',
+      clickCount: 1,
+    });
+  } finally {
+    if (attachedHere) {
+      try {
+        await chrome.debugger.detach(debuggee);
+      } catch { /* ignore */ }
+    }
+  }
+}
+
+/** 通过 CDP 发送可信拖拽事件，让 ReactCrop 接收真实的裁剪框移动操作。 */
+async function cdpDrag(
+  tabId: number,
+  points: { startX: number; startY: number; endX: number; endY: number },
+): Promise<void> {
+  const debuggee = { tabId };
+  let attachedHere = false;
+  try {
+    await chrome.debugger.attach(debuggee, '1.3');
+    attachedHere = true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes('Another debugger is already attached')) {
+      throw new Error(`CDP 调试器连接失败：${message}`);
+    }
+  }
+  try {
+    await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: points.startX,
+      y: points.startY,
+      button: 'none',
+    });
+    await new Promise((resolve) => setTimeout(resolve, CDP_CLICK_MOVE_SETTLE_MS));
+    await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: points.startX,
+      y: points.startY,
+      button: 'left',
+      buttons: 1,
+      clickCount: 1,
+    });
+
+    const steps = 10;
+    for (let index = 1; index <= steps; index++) {
+      const progress = index / steps;
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: points.startX + (points.endX - points.startX) * progress,
+        y: points.startY + (points.endY - points.startY) * progress,
+        button: 'left',
+        buttons: 1,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 16));
+    }
+
+    await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: points.endX,
+      y: points.endY,
+      button: 'left',
+      buttons: 0,
       clickCount: 1,
     });
   } finally {

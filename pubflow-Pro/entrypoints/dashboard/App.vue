@@ -78,7 +78,6 @@ const recordPlatform = ref<'all' | PlatformId>('all');
 const recordStatus = ref<'all' | PublishRecord['status']>('all');
 const uploadTab = ref<'video' | 'image' | 'article'>(draft.contentType || 'video');
 const platforms = computed(() => PLATFORM_ORDER.map((id) => PLATFORM_CONFIGS[id]));
-const enabledPlatforms = computed(() => platforms.value.filter((p) => platformSettings[p.id]?.enabled !== false));
 
 const platformSettings = reactive<Record<PlatformId, PlatformSettings>>({
   ...defaultPlatformSettings,
@@ -87,6 +86,7 @@ const globalSettings = reactive<GlobalSettings>({ ...defaultGlobalSettings });
 const serverConfig = reactive<ServerConfig>({ ...defaultServerConfig });
 const licensingSettings = reactive<LicensingSettings>({ ...defaultLicensingSettings });
 const aiSettings = reactive<AIProviderSettings>({ ...defaultAISettings });
+const enabledPlatforms = computed(() => platforms.value.filter((p) => platformSettings[p.id]?.enabled !== false));
 const workspaceSettings = reactive<WorkspaceSettings>({ ...defaultWorkspaceSettings });
 const {
   aiModelOptions,
@@ -246,6 +246,7 @@ const {
   togglePreviewMusic,
   onDraftPartialUpdate,
   resetDraft,
+  prepareDraftForNextPublication,
   revokeAllUrls,
   restoreDraftFromVideo,
   setPersistArticleContent,
@@ -288,7 +289,9 @@ const { startDistribution } = useDistributionLauncher({
   videos,
   task,
   persistDraft,
+  beforeStart: () => toggleSidePanel().catch(() => undefined),
   onStarted: () => {
+    prepareDraftForNextPublication();
     activeView.value = 'dashboard';
   },
 });
@@ -367,18 +370,27 @@ async function resetLicenseSettings() {
 function hasLicenseCredentials() {
   return Boolean(
     licensingSettings.apiBaseUrl &&
-    licensingSettings.activationCode,
+    (licensingSettings.activationCode || (licensingSettings.leaseToken && licensingSettings.clientInstallId)),
   );
 }
 
-async function startFromVideo(video: VideoRecord) {
+async function startFromVideo(video: VideoRecord, targetPlatformId?: PlatformId) {
   uploadTab.value = video.contentType || (video.imageFileNames?.length ? 'image' : 'video');
   activeView.value = 'publish';
   notice.value = '正在恢复项目内容…';
-  const restored = await restoreDraftFromVideo(video);
+  const restored = await restoreDraftFromVideo(video, targetPlatformId);
   if (restored) {
     notice.value = '已恢复到发布页，可继续编辑或重新分发。';
   }
+}
+
+function startFromRecord(record: PublishRecord) {
+  const video = videoById.value.get(record.videoId);
+  if (!video) {
+    notice.value = '未找到这条记录对应的视频项目，请先同步工作区数据。';
+    return;
+  }
+  void startFromVideo(video, record.platformId);
 }
 
 const {
@@ -660,6 +672,7 @@ onUnmounted(() => {
             @update:record-status="recordStatus = $event"
             @export-records="exportRecords"
             @sync-data="syncData('records')"
+            @start-from-record="startFromRecord"
           />
 
           <SettingsView

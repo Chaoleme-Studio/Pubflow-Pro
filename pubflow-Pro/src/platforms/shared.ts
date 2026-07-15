@@ -96,7 +96,7 @@ export function buildPlatformConfig(raw: PlatformSelectorConfig): PlatformConfig
       timeoutMs: raw.上传.超时毫秒,
       requiresActiveTab: raw.上传.需要激活标签页,
     },
-    blockers: commonBlockers,
+    blockers: raw.检测通用弹窗 === false ? [commonBlockers[0]] : commonBlockers,
     fields: buildFieldsFromSelectorConfig(raw.字段),
   };
 

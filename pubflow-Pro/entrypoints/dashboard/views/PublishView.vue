@@ -1,13 +1,25 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { supportsContentType, type CampaignRecommendation, type PlatformConfig } from '../../../src/platforms';
-import type { ContentDraft, DistributionTask, PlatformId, Visibility } from '../../../src/types';
+import type { ContentDraft, PlatformId, Visibility } from '../../../src/types';
 import PhonePreview from '../components/PhonePreview.vue';
 import PublishArticle from '../components/PublishArticle.vue';
 import PublishImage from '../components/PublishImage.vue';
 import PublishVideo from '../components/PublishVideo.vue';
 
 const activePlatformTab = ref<PlatformId | ''>('');
+const coverFileInput = ref<HTMLInputElement | null>(null);
+const coverDragging = ref(false);
+const coverDropError = ref('');
+type CoverAspectRatio = '9:16' | '16:9' | '4:3' | '3:4';
+const coverAspectRatio = ref<CoverAspectRatio>('4:3');
+const coverAspectOptions: CoverAspectRatio[] = ['4:3', '3:4', '9:16', '16:9'];
+const coverAspectClass: Record<CoverAspectRatio, string> = {
+  '9:16': 'h-64 aspect-[9/16]',
+  '16:9': 'w-full aspect-video',
+  '4:3': 'w-full aspect-[4/3]',
+  '3:4': 'h-64 aspect-[3/4]',
+};
 
 const props = defineProps<{
   draft: ContentDraft;
@@ -66,7 +78,7 @@ const visibilityOptions: Array<{ value: Visibility; label: string; icon: string 
 ];
 
 const selectablePlatforms = computed(() =>
-  props.platforms.filter((platform) => supportsContentType(platform, props.uploadTab)),
+  props.platforms.filter((platform) => isPlatformSelectable(platform)),
 );
 
 const allPlatformsSelected = computed(() =>
@@ -81,26 +93,20 @@ const selectedPersonalPlatforms = computed(() =>
   ),
 );
 
-const selectedPersonalPlatformIds = computed(() => new Set(selectedPersonalPlatforms.value.map((platform) => platform.id)));
-
-const hasZhihuPersonalSettings = computed(
-  () => props.draft.selectedPlatforms.includes('zhihu') || Boolean(props.draft.platformSettings?.zhihu),
+const youtubeScheduleOverridesVisibility = computed(() =>
+  (props.draft.scheduledAt ?? 0) > 0 && props.draft.selectedPlatforms.includes('youtube'),
 );
 
 watch(
-  [selectedPersonalPlatforms, hasZhihuPersonalSettings],
-  (platforms) => {
-    const visiblePlatforms = platforms[0];
-    const zhihuVisible = platforms[1];
-    if (!visiblePlatforms.length && !zhihuVisible) {
+  selectedPersonalPlatforms,
+  (visiblePlatforms) => {
+    if (!visiblePlatforms.length) {
       activePlatformTab.value = '';
       return;
     }
-    const activeVisible =
-      (activePlatformTab.value === 'zhihu' && zhihuVisible) ||
-      visiblePlatforms.some((platform) => platform.id === activePlatformTab.value);
+    const activeVisible = visiblePlatforms.some((platform) => platform.id === activePlatformTab.value);
     if (!activePlatformTab.value || !activeVisible) {
-      activePlatformTab.value = visiblePlatforms[0]?.id || 'zhihu';
+      activePlatformTab.value = visiblePlatforms[0]?.id || '';
     }
   },
   { immediate: true },
@@ -120,6 +126,10 @@ function toggleAllPlatforms() {
 
 function isPlatformSelectable(platform: PlatformConfig) {
   return supportsContentType(platform, props.uploadTab);
+}
+
+function platformUnavailableTitle(platform: PlatformConfig) {
+  return `当前内容类型不支持${platform.name}`;
 }
 
 function toLocalDatetimeString(timestamp: number): string {
@@ -151,6 +161,52 @@ function onVisibilityChange(value: Visibility) {
 
 function onOriginalDeclareChange(event: Event) {
   emit('update:draft', { originalDeclare: (event.target as HTMLInputElement).checked });
+}
+
+/** 视频未设置封面时停在首帧，仅用于本地预览，不生成或上传封面文件。 */
+function holdVideoFirstFrame(event: Event) {
+  const video = event.currentTarget as HTMLVideoElement;
+  video.pause();
+  video.currentTime = 0;
+}
+
+/** 打开封面文件选择器；整张封面卡片都复用同一个入口。 */
+function openCoverFilePicker() {
+  coverDropError.value = '';
+  coverFileInput.value?.click();
+}
+
+function isImageFile(file: File) {
+  return file.type.startsWith('image/') || /\.(?:jpe?g|png|webp|gif|avif)$/i.test(file.name);
+}
+
+function onCoverDragOver(event: DragEvent) {
+  if (!event.dataTransfer?.types.includes('Files')) return;
+  coverDragging.value = true;
+  event.dataTransfer.dropEffect = 'copy';
+}
+
+function onCoverDragLeave(event: DragEvent) {
+  const target = event.currentTarget as HTMLElement;
+  const next = event.relatedTarget as Node | null;
+  if (next && target.contains(next)) return;
+  coverDragging.value = false;
+}
+
+function onCoverDrop(event: DragEvent) {
+  coverDragging.value = false;
+  const file = event.dataTransfer?.files?.[0];
+  if (!file || !isImageFile(file)) {
+    coverDropError.value = '请拖入 jpg、png、webp 等图片文件。';
+    return;
+  }
+  coverDropError.value = '';
+  emit('update:cover', file);
+}
+
+function onCoverFileChange(event: Event) {
+  coverDropError.value = '';
+  emit('setCoverFile', event);
 }
 
 // 去掉图片定义行，只保留正文用于手机预览
@@ -336,6 +392,13 @@ function onPlatformSettingChange(platformId: PlatformId, key: string, value: unk
                 {{ option.label }}
               </button>
             </div>
+            <div
+              v-if="youtubeScheduleOverridesVisibility"
+              class="mt-1.5 flex items-center justify-between rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+            >
+              <span>YouTube 定时公开范围</span>
+              <strong>公开（平台固定）</strong>
+            </div>
           </div>
 
           <label class="flex items-center gap-3">
@@ -363,15 +426,6 @@ function onPlatformSettingChange(platformId: PlatformId, key: string, value: unk
             @click="activePlatformTab = platform.id"
           >
             {{ platform.icon }} {{ platform.name }}
-          </button>
-          <button
-            v-if="hasZhihuPersonalSettings && !selectedPersonalPlatformIds.has('zhihu')"
-            class="rounded-md border px-3 py-1.5 text-xs font-bold transition"
-            :class="activePlatformTab === 'zhihu' ? 'border-rose-500 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'"
-            type="button"
-            @click="activePlatformTab = 'zhihu'"
-          >
-            ZH 知乎
           </button>
         </div>
 
@@ -543,9 +597,187 @@ function onPlatformSettingChange(platformId: PlatformId, key: string, value: unk
             </label>
           </template>
 
+          <!-- X 个性化设置 -->
+          <template v-if="activePlatformTab === 'x'">
+            <label class="grid gap-1.5">
+              <span class="pf-label-sm">谁可以回复</span>
+              <select
+                class="pf-input-accent"
+                :value="draft.platformSettings?.x?.replyAudience || 'everyone'"
+                @change="onPlatformSettingChange('x', 'replyAudience', ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="everyone">每个人</option>
+                <option value="following">你关注的账号</option>
+                <option value="mentioned">只有你提及的账号</option>
+                <option value="verified">认证账号</option>
+              </select>
+              <span class="text-[11px] text-slate-400">回复权限与帖子公开范围不同；X 的可见范围仍由账号隐私状态决定。</span>
+            </label>
+          </template>
+
+          <!-- YouTube 个性化设置 -->
+          <template v-if="activePlatformTab === 'youtube'">
+            <div class="grid gap-3 rounded-md border border-amber-200 bg-amber-50/60 p-3">
+              <label class="grid gap-1.5">
+                <span class="pf-label-sm">观众（必填）</span>
+                <select
+                  class="pf-input-accent"
+                  :value="draft.platformSettings?.youtube?.audience || 'notForKids'"
+                  @change="onPlatformSettingChange('youtube', 'audience', ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="notForKids">不，内容不是面向儿童的</option>
+                  <option value="madeForKids">是，内容是面向儿童的</option>
+                </select>
+              </label>
+              <label class="grid gap-1.5">
+                <span class="pf-label-sm">年龄限制</span>
+                <select
+                  class="pf-input-accent"
+                  :value="draft.platformSettings?.youtube?.ageRestriction || 'none'"
+                  @change="onPlatformSettingChange('youtube', 'ageRestriction', ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="none">不限制为 18 岁以上</option>
+                  <option value="over18">仅限年满 18 岁的观看者</option>
+                </select>
+              </label>
+              <label class="grid gap-1.5">
+                <span class="pf-label-sm">AI 使用情况</span>
+                <select
+                  class="pf-input-accent"
+                  :value="draft.platformSettings?.youtube?.alteredContent || ''"
+                  @change="onPlatformSettingChange('youtube', 'alteredContent', ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="">不设置，保留页面状态</option>
+                  <option value="yes">是，披露逼真的 AI 生成或编辑内容</option>
+                  <option value="no">否，不属于需要披露的 AI 内容</option>
+                </select>
+                <span class="text-[11px] text-slate-400">是否需要披露取决于内容是否逼真地篡改人物、事件、地点或生成不实场景。</span>
+              </label>
+            </div>
+
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label class="grid gap-1.5">
+                <span class="pf-label-sm">视频语言</span>
+                <select
+                  class="pf-input-accent"
+                  :value="draft.platformSettings?.youtube?.videoLanguage || ''"
+                  @change="onPlatformSettingChange('youtube', 'videoLanguage', ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="">不设置</option>
+                  <option value="中文（简体）">中文（简体）</option>
+                  <option value="英语">英语</option>
+                </select>
+              </label>
+              <label class="grid gap-1.5">
+                <span class="pf-label-sm">类别</span>
+                <select
+                  class="pf-input-accent"
+                  :value="draft.platformSettings?.youtube?.category || ''"
+                  @change="onPlatformSettingChange('youtube', 'category', ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="">保留平台默认</option>
+                  <option value="科学与技术">科学与技术</option>
+                  <option value="新闻与政治">新闻与政治</option>
+                  <option value="教育">教育</option>
+                  <option value="人物和博客">人物和博客</option>
+                </select>
+              </label>
+              <label class="grid gap-1.5 sm:col-span-2">
+                <span class="pf-label-sm">Shorts 混剪权限</span>
+                <select
+                  class="pf-input-accent"
+                  :value="draft.platformSettings?.youtube?.remixPermission || 'videoAndAudio'"
+                  @change="onPlatformSettingChange('youtube', 'remixPermission', ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="videoAndAudio">允许混剪视频和音频</option>
+                  <option value="audioOnly">仅允许混剪音频</option>
+                  <option value="none">不允许混剪</option>
+                </select>
+              </label>
+            </div>
+
+            <label class="flex items-center gap-3">
+              <input
+                type="checkbox"
+                class="h-4 w-4 rounded border-slate-300 text-rose-500 focus:ring-rose-500"
+                :checked="Boolean(draft.platformSettings?.youtube?.paidPromotion ?? false)"
+                @change="onPlatformSettingChange('youtube', 'paidPromotion', ($event.target as HTMLInputElement).checked)"
+              />
+              <span class="text-sm font-bold text-slate-700">包含付费宣传内容</span>
+            </label>
+            <label class="flex items-center gap-3">
+              <input
+                type="checkbox"
+                class="h-4 w-4 rounded border-slate-300 text-rose-500 focus:ring-rose-500"
+                :checked="Boolean(draft.platformSettings?.youtube?.fillTagsFromTopics ?? true)"
+                @change="onPlatformSettingChange('youtube', 'fillTagsFromTopics', ($event.target as HTMLInputElement).checked)"
+              />
+              <span class="text-sm font-bold text-slate-700">将话题同步到 YouTube 标签</span>
+            </label>
+            <label class="flex items-center gap-3">
+              <input
+                type="checkbox"
+                class="h-4 w-4 rounded border-slate-300 text-rose-500 focus:ring-rose-500"
+                :checked="Boolean(draft.platformSettings?.youtube?.autoChapters ?? true)"
+                @change="onPlatformSettingChange('youtube', 'autoChapters', ($event.target as HTMLInputElement).checked)"
+              />
+              <span class="text-sm font-bold text-slate-700">允许自动章节和重要时刻</span>
+            </label>
+            <label class="flex items-center gap-3">
+              <input
+                type="checkbox"
+                class="h-4 w-4 rounded border-slate-300 text-rose-500 focus:ring-rose-500"
+                :checked="Boolean(draft.platformSettings?.youtube?.autoPlaces ?? true)"
+                @change="onPlatformSettingChange('youtube', 'autoPlaces', ($event.target as HTMLInputElement).checked)"
+              />
+              <span class="text-sm font-bold text-slate-700">允许自动显示地点信息</span>
+            </label>
+            <label class="flex items-center gap-3">
+              <input
+                type="checkbox"
+                class="h-4 w-4 rounded border-slate-300 text-rose-500 focus:ring-rose-500"
+                :checked="Boolean(draft.platformSettings?.youtube?.autoConcepts ?? true)"
+                @change="onPlatformSettingChange('youtube', 'autoConcepts', ($event.target as HTMLInputElement).checked)"
+              />
+              <span class="text-sm font-bold text-slate-700">允许自动展示概念</span>
+            </label>
+            <label class="flex items-center gap-3">
+              <input
+                type="checkbox"
+                class="h-4 w-4 rounded border-slate-300 text-rose-500 focus:ring-rose-500"
+                :checked="Boolean(draft.platformSettings?.youtube?.allowEmbedding ?? true)"
+                @change="onPlatformSettingChange('youtube', 'allowEmbedding', ($event.target as HTMLInputElement).checked)"
+              />
+              <span class="text-sm font-bold text-slate-700">允许嵌入到其他网站</span>
+            </label>
+            <label class="flex items-center gap-3">
+              <input
+                type="checkbox"
+                class="h-4 w-4 rounded border-slate-300 text-rose-500 focus:ring-rose-500"
+                :checked="Boolean(draft.platformSettings?.youtube?.notifySubscribers ?? true)"
+                @change="onPlatformSettingChange('youtube', 'notifySubscribers', ($event.target as HTMLInputElement).checked)"
+              />
+              <span class="text-sm font-bold text-slate-700">发布到订阅动态并通知订阅者</span>
+            </label>
+          </template>
+
           <!-- 视频号个性化设置 -->
           <template v-if="activePlatformTab === 'weixinChannels'">
-            <p class="text-xs text-slate-400">视频号暂无额外个性化设置。</p>
+            <label class="grid gap-1.5">
+              <span class="pf-label-sm">视频标注</span>
+              <select
+                class="pf-input-accent"
+                :value="draft.platformSettings?.weixinChannels?.videoMark || '无需标注'"
+                @change="onPlatformSettingChange('weixinChannels', 'videoMark', ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="无需标注">无需标注</option>
+                <option value="含AI生成内容">含AI生成内容</option>
+                <option value="内容为虚构剧情，仅供娱乐">内容为虚构剧情，仅供娱乐</option>
+                <option value="个人观点，仅供参考">个人观点，仅供参考</option>
+                <option value="内容包含营销广告">内容包含营销广告</option>
+              </select>
+              <span class="text-[11px] text-slate-400">“自行拍摄”和“转载”还需要补充时间地点或来源，暂时保留在平台页面手动处理。</span>
+            </label>
           </template>
 
           <!-- 知乎个性化设置 -->
@@ -730,14 +962,81 @@ function onPlatformSettingChange(platformId: PlatformId, key: string, value: unk
         />
       </section>
 
-      <section class="pf-card-padded-sm">
-        <h2 class="pf-section-title">封面</h2>
-        <div class="relative mt-3 overflow-hidden rounded-md border border-slate-200">
-          <img v-if="coverPreviewUrl" class="h-40 w-full object-cover" :src="coverPreviewUrl" alt="封面预览" />
-          <div v-else class="grid h-40 place-items-center bg-slate-50 text-xs font-bold text-slate-400">暂无封面，点击选择</div>
-          <input class="absolute inset-0 cursor-pointer opacity-0" type="file" accept="image/*" @change="emit('setCoverFile', $event)" />
+      <section
+        class="pf-card-padded-sm relative cursor-pointer"
+        :class="coverDragging ? 'ring-2 ring-rose-400 ring-offset-2' : ''"
+        title="点击选择或更换封面"
+        @click="openCoverFilePicker"
+        @dragenter.prevent="onCoverDragOver"
+        @dragover.prevent="onCoverDragOver"
+        @dragleave="onCoverDragLeave"
+        @drop.prevent.stop="onCoverDrop"
+      >
+        <div
+          v-if="coverDragging"
+          class="pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-lg bg-rose-50/95 text-sm font-black text-rose-700"
+        >
+          松开以上传封面
         </div>
-        <div class="mt-2 text-xs text-slate-400">{{ draft.coverFileName || '支持 jpg/png，推荐 1080x1440' }}</div>
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="pf-section-title">封面</h2>
+          <div class="flex flex-wrap justify-end gap-1" role="group" aria-label="封面预览比例">
+            <button
+              v-for="ratio in coverAspectOptions"
+              :key="ratio"
+              class="rounded border px-2 py-1 text-[10px] font-bold transition-[transform,border-color,background-color,color] duration-150 active:scale-[0.97]"
+              :class="coverAspectRatio === ratio
+                ? 'border-rose-500 bg-rose-50 text-rose-700'
+                : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700'"
+              type="button"
+              :aria-pressed="coverAspectRatio === ratio"
+              @click.stop="coverAspectRatio = ratio"
+            >{{ ratio }}</button>
+          </div>
+        </div>
+        <div class="mt-3 flex min-h-72 items-center justify-center rounded-md border border-slate-200 bg-slate-50 p-3">
+          <div
+            class="relative max-w-full overflow-hidden rounded-md bg-slate-900 shadow-sm"
+            :class="coverAspectClass[coverAspectRatio]"
+          >
+            <img v-if="coverPreviewUrl" class="h-full w-full object-cover" :src="coverPreviewUrl" alt="封面预览" />
+            <video
+              v-else-if="uploadTab === 'video' && videoPreviewUrl"
+              class="h-full w-full object-cover"
+              :src="videoPreviewUrl"
+              aria-label="视频首帧预览"
+              muted
+              playsinline
+              preload="auto"
+              @loadeddata="holdVideoFirstFrame"
+            />
+            <div v-else class="grid h-full min-h-40 w-full place-items-center px-4 text-center text-xs font-bold text-slate-400">
+              暂无封面，点击选择
+            </div>
+          </div>
+        </div>
+        <div class="mt-2 flex items-center justify-between gap-3 text-xs text-slate-400">
+          <span>
+            {{ draft.coverFileName || (uploadTab === 'video' && videoPreviewUrl
+              ? '当前显示视频首帧；未选择封面时不会向平台上传封面'
+              : '支持 jpg/png，推荐 1080x1440') }}
+          </span>
+          <button
+            class="shrink-0 font-bold text-rose-600 transition-transform duration-150 active:scale-[0.97]"
+            type="button"
+            @click.stop="openCoverFilePicker"
+          >{{ coverPreviewUrl ? '更换封面' : '选择封面' }}</button>
+        </div>
+        <div v-if="coverDropError" class="mt-2 text-xs font-semibold text-red-600">{{ coverDropError }}</div>
+        <input
+          ref="coverFileInput"
+          class="sr-only"
+          type="file"
+          accept="image/*"
+          aria-label="选择封面图片"
+          @click.stop
+          @change="onCoverFileChange"
+        />
       </section>
 
       <section class="pf-card-padded-sm">
@@ -761,14 +1060,14 @@ function onPlatformSettingChange(platformId: PlatformId, key: string, value: unk
                 : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'"
             type="button"
             :disabled="!isPlatformSelectable(platform)"
-            :title="isPlatformSelectable(platform) ? '' : `当前内容类型不支持${platform.name}`"
+            :title="isPlatformSelectable(platform) ? '' : platformUnavailableTitle(platform)"
             @click="isPlatformSelectable(platform) && emit('togglePlatform', platform.id)"
           >
             <span
               class="grid h-5 w-7 place-items-center rounded text-[9px] font-black"
               :class="isPlatformSelectable(platform) ? 'bg-slate-100 text-slate-500' : 'bg-slate-100 text-slate-300'"
             >{{ platform.icon }}</span>
-            {{ platform.name }}
+            <span class="min-w-0 flex-1 truncate text-left">{{ platform.name }}</span>
           </button>
         </div>
       </section>

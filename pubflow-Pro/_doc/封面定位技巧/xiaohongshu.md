@@ -16,10 +16,13 @@
 稳定入口：
 
 ```css
+.publish-page-content-cover .default.column
 .publish-page-content-cover .default.row
 .publish-page-content-cover .cover-plugin-preview
 .publish-page-content-cover
 ```
+
+上传完成后以页面实际 class 为准：竖屏页面实测为 `.default.column`，横屏页面可为 `.default.row`。这里判断的是小红书当前封面组件布局，不根据原视频或本地封面文件的宽高比提前推断。
 
 不要使用全局 `.cover-container`。小红书页面里视频上传区也有 `.cover-container`，并且里面有视频 `input[type=file]`：
 
@@ -33,7 +36,7 @@
 
 ### 为什么需要 CDP 而不是普通 click
 
-最开始定位封面入口时，CSS 选择器能匹配到 `.publish-page-content-cover .default.row .operator`（即”修改封面”的触发元素），但发现它的 `getBoundingClientRect().height` 是 **0**。这个节点平时处于折叠/隐藏状态，只有鼠标放上去（hover）之后才会渲染展开，露出”修改封面”可点区域。
+最开始定位封面入口时，CSS 选择器能匹配到 `.publish-page-content-cover .default.row .operator` 或 `.default.column .operator`（即“修改封面”的触发元素），但发现它的 `getBoundingClientRect()` 可能是 **0×0**。这个节点平时处于折叠/隐藏状态，只有鼠标放上去（hover）之后才会渲染展开，露出“修改封面”可点区域。
 
 这就解释了为什么普通 JS `click()` 和手工鼠标事件都不生效——目标区域还没渲染出来，没有可接受点击的像素。
 
@@ -42,6 +45,8 @@
 页面上能看到”设置封面”和”修改封面”，但”修改封面”实际在：
 
 ```css
+.publish-page-content-cover .default.column .operator
+.publish-page-content-cover .default.column .text
 .publish-page-content-cover .default.row .operator
 .publish-page-content-cover .default.row .text
 ```
@@ -50,8 +55,8 @@
 
 当前实现使用公共 `cdpClickElement`：
 
-1. 先用 CSS 找到 `.default.row` 或其内部候选元素。
-2. 如果内部候选元素不可见，回退到可见的 `.default.row`。
+1. 先用 CSS 找到 `.default.column` / `.default.row` 或其内部候选元素。
+2. 如果内部候选元素不可见，从它的父节点开始向上查找第一个真正可见的 `.default.column` / `.default.row` 容器。隐藏的 `.operator` 自身也可能同时带有 `default column`，不能直接用 `element.closest()`，否则会再次选中 0×0 的隐藏节点。
 3. 用元素实时 `getBoundingClientRect()` 计算中心点。
 4. 通过 CDP 先发送 `mouseMoved` 触发 hover，再发送 `mousePressed/mouseReleased`。
 

@@ -2,7 +2,7 @@
   "name": "pubflow-extension",
   "description": "多平台短视频发布助手",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.1.0",
   "type": "module",
   "packageManager": "pnpm@11.0.4",
   "scripts": {
@@ -22,6 +22,7 @@
     "prepare:manual-security": "node scripts/prepare-manual-security-smoke.mjs",
     "smoke:lease-api": "node scripts/run-local-lease-api-smoke.mjs",
     "smoke:extension-security": "node scripts/run-extension-security-smoke.mjs",
+    "test": "vitest run",
     "test:licensing": "vitest run src/licensing",
     "typecheck": "vue-tsc --noEmit",
     "compile": "vue-tsc --noEmit",

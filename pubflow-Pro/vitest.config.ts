@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     setupFiles: ['./src/licensing/__tests__/setup.ts'],
-    include: ['src/licensing/**/*.test.ts'],
+    include: ['src/**/*.test.ts'],
   },
   define: {
     __PUBFLOW_DEV_WORKSPACE_PATH__: JSON.stringify(''),

@@ -87,7 +87,7 @@ const emit = defineEmits<{
               <div class="min-w-0">
                 <div class="truncate text-sm font-bold text-slate-900">{{ video.title }}</div>
                 <div class="mt-1 flex items-center gap-3 text-xs text-slate-500">
-                  <span>{{ formatDate(video.createdAt) }}</span>
+                  <span :title="`创建于 ${formatDate(video.createdAt)}`">更新 {{ formatDate(video.updatedAt) }}</span>
                   <span>{{ video.videoFileName || '未选择文件' }}</span>
                   <span>{{ formatBytes(video.videoSize) }}</span>
                 </div>
@@ -156,8 +156,8 @@ const emit = defineEmits<{
                 <span class="shrink-0 text-[11px] text-slate-400">{{ PLATFORM_CONFIGS[record.platformId].name }}</span>
               </div>
               <div class="mt-1 flex items-center justify-between text-[11px] text-slate-500">
-                <span>{{ formatDate(record.publishedAt) }}</span>
-                <span>{{ formatViews(record.stats?.views) }} 阅读</span>
+                <span>{{ record.publishedAt ? '发布' : '更新' }} {{ formatDate(record.publishedAt || record.updatedAt) }}</span>
+                <span>{{ record.stats?.views == null ? '互动数据未同步' : `${formatViews(record.stats.views)} 阅读` }}</span>
               </div>
             </div>
           </div>

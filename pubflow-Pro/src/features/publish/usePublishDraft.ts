@@ -14,7 +14,20 @@ import {
   writeProjectManifest,
 } from '../../storage/workspaceStorage';
 import { PLATFORM_CONFIGS, supportsContentType } from '../../platforms';
-import type { ContentDraft, VideoRecord, WorkspaceSettings } from '../../types';
+import type { ContentDraft, PlatformId, VideoRecord, WorkspaceSettings } from '../../types';
+
+/** 恢复单条发布记录时只返回其目标平台，避免误重试同一项目的其他平台。 */
+export function getRestorablePlatformIds(
+  video: VideoRecord,
+  contentType: ContentDraft['contentType'],
+  targetPlatformId?: PlatformId,
+) {
+  return video.platforms
+    .filter((item) => !targetPlatformId || item.platformId === targetPlatformId)
+    .filter((item) => item.status !== 'published' && item.status !== 'skipped')
+    .filter((item) => supportsContentType(PLATFORM_CONFIGS[item.platformId], contentType || 'video'))
+    .map((item) => item.platformId);
+}
 
 /** 组合式函数：管理发布页草稿的媒体文件、缓存和从项目恢复。 */
 export function usePublishDraft(params: {
@@ -57,8 +70,11 @@ export function usePublishDraft(params: {
 
   /** 从文件输入事件设置封面文件 */
   function setCoverFile(event: Event) {
-    const file = (event.target as HTMLInputElement).files?.[0] || null;
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0] || null;
     applyCoverFile(file);
+    // 允许用户连续选择同一个文件进行重新上传。
+    input.value = '';
   }
 
   /** 应用封面文件并更新预览和草稿状态 */
@@ -71,8 +87,21 @@ export function usePublishDraft(params: {
     void cacheCoverAndPersist(file);
   }
 
+  /** 清除当前封面选择；封面属于具体视频，更换视频时不能沿用上一条视频的封面。 */
+  function clearCoverSelection() {
+    const previousCacheId = draft.coverCacheId;
+    if (coverPreviewUrl.value) URL.revokeObjectURL(coverPreviewUrl.value);
+    coverFile.value = null;
+    coverPreviewUrl.value = '';
+    draft.coverCacheId = '';
+    draft.coverFileName = '';
+    draft.coverSize = 0;
+    if (previousCacheId) void cleanupFileTransfer(previousCacheId);
+  }
+
   /** 更新视频文件并触发缓存持久化 */
   function onVideoFileUpdate(file: File | null) {
+    clearCoverSelection();
     if (videoPreviewUrl.value) URL.revokeObjectURL(videoPreviewUrl.value);
     videoFile.value = file;
     videoPreviewUrl.value = file ? URL.createObjectURL(file) : '';
@@ -298,8 +327,40 @@ export function usePublishDraft(params: {
     void persistDraft();
   }
 
+  /**
+   * 分发任务启动后准备下一条草稿。
+   * 保留可复用的文案与平台配置，只清除本次项目身份和媒体引用；不删除传输缓存，
+   * 因为后台分发任务仍需通过本次 content 中的 cacheId 读取这些文件。
+   */
+  function prepareDraftForNextPublication() {
+    resetPreviewUrls();
+    videoFile.value = null;
+    coverFile.value = null;
+    imageFiles.value = [];
+    musicFile.value = null;
+    persistArticleContent = '';
+    Object.assign(draft, {
+      sourceVideoId: '',
+      projectId: '',
+      videoCacheId: '',
+      coverCacheId: '',
+      imageCacheIds: [],
+      videoFileName: '',
+      coverFileName: '',
+      musicFileName: '',
+      musicName: '',
+      imageFileNames: [],
+      videoSize: 0,
+      coverSize: 0,
+      musicSize: 0,
+      articleContent: '',
+      scheduledAt: 0,
+    } satisfies Partial<ContentDraft>);
+    void persistDraft();
+  }
+
   /** 从视频记录恢复草稿状态并加载项目素材 */
-  async function restoreDraftFromVideo(video: VideoRecord) {
+  async function restoreDraftFromVideo(video: VideoRecord, targetPlatformId?: PlatformId) {
     draft.sourceVideoId = video.id;
     draft.contentType = video.contentType || (video.imageFileNames?.length ? 'image' : 'video');
     draft.title = video.title;
@@ -333,10 +394,7 @@ export function usePublishDraft(params: {
       draft.articleContent = video.articleContent || '';
       persistArticleContent = draft.articleContent;
     }
-    draft.selectedPlatforms = video.platforms
-      .filter((item) => item.status !== 'published' && item.status !== 'skipped')
-      .filter((item) => supportsContentType(PLATFORM_CONFIGS[item.platformId], draft.contentType || 'video'))
-      .map((item) => item.platformId);
+    draft.selectedPlatforms = getRestorablePlatformIds(video, draft.contentType, targetPlatformId);
 
     resetPreviewUrls();
     videoFile.value = null;
@@ -423,6 +481,7 @@ export function usePublishDraft(params: {
     togglePreviewMusic,
     onDraftPartialUpdate,
     resetDraft,
+    prepareDraftForNextPublication,
     revokeAllUrls,
     restoreDraftFromVideo,
     setPersistArticleContent,

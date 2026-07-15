@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import type { ContentDraft } from '../../../src/types';
 
 const props = defineProps<{
@@ -11,9 +12,27 @@ const emit = defineEmits<{
   'update:video': [file: File | null];
 }>();
 
-function onVideoChange(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0] || null;
+const dragging = ref(false);
+const dropError = ref('');
+
+function isVideoFile(file: File) {
+  return file.type.startsWith('video/') || /\.(?:mp4|webm|mov|m4v)$/i.test(file.name);
+}
+
+function applyVideoFile(file: File | null) {
+  if (file && !isVideoFile(file)) {
+    dropError.value = '请拖入 mp4、webm 或 mov 视频文件。';
+    return;
+  }
+  dropError.value = '';
   emit('update:video', file);
+}
+
+function onVideoChange(e: Event) {
+  const input = e.target as HTMLInputElement;
+  applyVideoFile(input.files?.[0] || null);
+  // 允许连续选择同一个视频文件进行替换。
+  input.value = '';
 }
 
 function formatBytes(size?: number) {
@@ -23,34 +42,48 @@ function formatBytes(size?: number) {
 }
 
 function dragOver(e: DragEvent) {
-  e.preventDefault();
-  (e.currentTarget as HTMLElement).classList.add('border-rose-400', 'bg-rose-50/40');
+  if (!e.dataTransfer?.types.includes('Files')) return;
+  dragging.value = true;
+  e.dataTransfer.dropEffect = 'copy';
 }
 
 function dragLeave(e: DragEvent) {
-  (e.currentTarget as HTMLElement).classList.remove('border-rose-400', 'bg-rose-50/40');
+  const target = e.currentTarget as HTMLElement;
+  const next = e.relatedTarget as Node | null;
+  if (next && target.contains(next)) return;
+  dragging.value = false;
 }
 
 function drop(e: DragEvent) {
-  e.preventDefault();
-  (e.currentTarget as HTMLElement).classList.remove('border-rose-400', 'bg-rose-50/40');
+  dragging.value = false;
   const file = e.dataTransfer?.files?.[0];
-  if (file && file.type.startsWith('video/')) {
-    emit('update:video', file);
+  if (!file) {
+    dropError.value = '没有读取到视频文件，请重新拖入。';
+    return;
   }
+  applyVideoFile(file);
 }
 </script>
 
 <template>
-  <div>
+  <div
+    class="relative"
+    @dragenter.prevent="dragOver"
+    @dragover.prevent="dragOver"
+    @dragleave="dragLeave"
+    @drop.prevent.stop="drop"
+  >
+    <div
+      v-if="dragging"
+      class="pointer-events-none absolute inset-0 z-30 grid place-items-center rounded-lg bg-rose-50/95 text-sm font-black text-rose-700 ring-2 ring-inset ring-rose-400"
+    >
+      松开以加载视频
+    </div>
     <!-- 上传区 -->
     <div class="p-4">
       <label
         v-if="!props.videoUrl"
-        class="flex cursor-pointer justify-center rounded-lg border-2 border-dashed border-slate-300 bg-[#f7f8fa] px-5 py-6 text-center transition hover:border-rose-400 hover:bg-rose-50/20"
-        @dragover="dragOver"
-        @dragleave="dragLeave"
-        @drop="drop"
+        class="flex cursor-pointer justify-center rounded-lg border-2 border-dashed border-slate-300 bg-[#f7f8fa] px-5 py-6 text-center transition-[border-color,background-color] duration-150 hover:border-rose-400 hover:bg-rose-50/20"
       >
         <input class="hidden" type="file" accept="video/mp4,video/webm,video/quicktime" @change="onVideoChange" />
         <div class="w-full max-w-sm">
@@ -80,6 +113,7 @@ function drop(e: DragEvent) {
           />
         </div>
       </div>
+      <div v-if="dropError" class="mt-2 text-xs font-semibold text-red-600">{{ dropError }}</div>
     </div>
 
     <!-- 文件信息 + 替换按钮（在视频框外面） -->

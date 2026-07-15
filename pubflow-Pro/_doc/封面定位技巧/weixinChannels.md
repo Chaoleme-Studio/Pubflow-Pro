@@ -14,6 +14,10 @@
 
 4. **`handleUpload(file)` 不是本地预览入口**: 实测 `handleUpload(file)` 会进入真实上传链路，等待时间很长，并且只更新上传组件自身状态，不稳定同步外层编辑弹窗的 `customCover`。主路径改为直接写外层 `handleCustomCoverChange(canvas)`。
 
+5. **竖屏模式不是两个封面入口**：竖屏页面实测只有 `.vertical-cover-wrap`，文案为“个人主页和分享卡片(3:4)”，弹窗标题为“编辑封面”。修复：按 DOM 识别为单入口，只上传并确认一次。
+
+6. **旧视频首帧被误判为新封面**：弹窗打开时 `previewImageUrl/currentCoverImageUrl` 已经包含视频首帧。修复：上传前记录预览签名，只有本地封面写入后签名发生变化才点击确认。
+
 ## 页面结构
 
 视频号发布页运行在腾讯自研的 wujie 容器里。真实表单不在普通 document 里，而是在：
@@ -26,7 +30,18 @@ wujie-app.shadowRoot
 
 ## 封面入口
 
-视频号有两个封面预览：
+视频号上传完成后有两种实际 DOM 模式，不能根据原视频宽高提前推断。
+
+竖屏合并模式：
+
+```css
+.vertical-cover-wrap
+/* 文案：个人主页和分享卡片(3:4) */
+```
+
+此时页面没有可见的 `.horizon-cover-wrap`，一个封面同时用于个人主页和分享卡片。弹窗标题为“编辑封面”，只上传并确认一次。
+
+横屏双入口模式：
 
 ```css
 .vertical-cover-wrap
@@ -38,7 +53,9 @@ wujie-app.shadowRoot
 - `.vertical-cover-wrap`：个人主页卡片，比例 `3:4`
 - `.horizon-cover-wrap`：分享卡片，比例 `4:3`
 
-两个入口都需要上传同一张封面，并分别确认。
+两个入口分别打开“编辑个人主页卡片”和“编辑分享卡片”，需要逐一处理。
+
+这里的“竖屏 / 横屏”是视频号页面模式。`3:4`、`4:3` 是卡片目标比例，不等于本地素材的方向分类，也不能作为是否处理一个或两个入口的依据。
 
 ## 上传流程
 
@@ -48,10 +65,14 @@ wujie-app.shadowRoot
 .finder-common-dialog.edit-cover-dialog .weui-desktop-dialog__wrp
 ```
 
-弹窗标题：
+横屏双入口弹窗标题：
 
 - `编辑个人主页卡片`
 - `编辑分享卡片`
+
+竖屏合并入口弹窗标题：
+
+- `编辑封面`
 
 弹窗内本地上传 input：
 
@@ -144,7 +165,16 @@ uploader.__vue__.$refs.croppieRef.result({
 
 父组件的 `handleCustomCoverChange` 期望的是 Canvas，因为内部会调用 `e.toDataURL()`。传 base64、Blob 或 `{ url }` 都不对，会导致 `e.toDataURL is not a function` 或预览继续停在 `data:,`。
 
-最终顺序：
+竖屏合并模式顺序：
+
+1. 等待 `.vertical-cover-wrap` 可见、文案包含“个人主页和分享卡片”，并且不再显示“生成中”
+2. 点击 `.vertical-cover-wrap .edit-btn`，或通过素材浮层点 `直接编辑`
+3. 把本地封面文件转成 Canvas
+4. 调用外层 `edit-cover-dialog-container.handleCustomCoverChange(canvas)`
+5. 等待预览签名相对上传前发生变化
+6. 点击“编辑封面”的 `确认`
+
+横屏双入口模式顺序：
 
 1. 等待封面预览区域不再显示 `生成中`
 2. 点击 `.vertical-cover-wrap .edit-btn`，或通过素材浮层点 `直接编辑`
@@ -158,13 +188,16 @@ uploader.__vue__.$refs.croppieRef.result({
 
 ## 自动封面生成等待
 
-视频上传完成后，视频号会自动生成个人主页卡片和分享卡片两个封面。生成期间页面可能显示：
+视频上传完成后，视频号会自动生成封面。生成期间页面可能显示：
 
 ```text
 生成中
 ```
 
-如果这时立即上传自定义封面，容易和平台自动生成流程冲突。当前实现把等待放在 `uploadCover()` 内部：进入封面流程前先确认 `.vertical-cover-wrap` 和 `.horizon-cover-wrap` 可见，并且封面预览区域不再包含 `生成中`。
+如果这时立即上传自定义封面，容易和平台自动生成流程冲突。当前实现把等待放在 `uploadCover()` 内部：
+
+- 竖屏合并模式：等待 `.vertical-cover-wrap` 可见、文案包含“个人主页和分享卡片”，且不再显示“生成中”。
+- 横屏双入口模式：等待 `.vertical-cover-wrap` 和 `.horizon-cover-wrap` 都可见，且不再显示“生成中”。
 
 ## 短标题
 
@@ -194,7 +227,7 @@ input[placeholder*="概括视频主要内容"]
 
 ### 只上传一个封面
 
-只处理第一个图片 input 会漏掉另一个比例。视频号需要同时设置个人主页卡片 `3:4` 和分享卡片 `4:3`。
+横屏双入口模式如果只处理第一个入口，会漏掉另一个比例；需要同时设置个人主页卡片 `3:4` 和分享卡片 `4:3`。竖屏合并模式本来就只有一个“个人主页和分享卡片”入口，此时上传一次才是正确流程。
 
 ### 全局找图片 input
 

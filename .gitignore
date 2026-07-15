@@ -10,6 +10,8 @@ lerna-debug.log*
 # 根目录生产环境配置（含真实服务器凭证）
 .env.production
 .env.local
+# 本地平台开发者凭据；当前 X/YouTube 网页填充方案不会读取此文件。
+X的key
 
 node_modules
 .output

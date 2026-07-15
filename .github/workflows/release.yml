@@ -20,11 +20,13 @@ jobs:
       - name: Install & Build Extension
         working-directory: pubflow-Pro
         run: |
-          pnpm install
+          pnpm install --frozen-lockfile
           pnpm build:protected
+          pnpm verify:release
 
       - name: Pack ZIP
         run: |
+          cp CHANGELOG.md pubflow-Pro/.output/chrome-mv3/CHANGELOG.md
           cd pubflow-Pro/.output/chrome-mv3
           zip -r ../../../pubflow-extension.zip .
 
@@ -98,5 +100,6 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/extension/pubflow-extension.zip
-          generate_release_notes: true
+          body_path: CHANGELOG.md
+          files: |
+            dist/extension/pubflow-extension.zip

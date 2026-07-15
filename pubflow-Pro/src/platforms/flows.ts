@@ -8,6 +8,8 @@ import { fillWeiboContent } from './weibo/content';
 import { fillWeixinChannelsContent } from './weixinChannels/content';
 import { fillXiaohongshuContent } from './xiaohongshu/content';
 import { fillXiguaContent } from './xigua/content';
+import { fillXContent } from './x/content';
+import { fillYouTubeContent } from './youtube/content';
 import { fillZhihuContent } from './zhihu/content';
 
 export type PlatformContentHandler = (
@@ -25,6 +27,8 @@ export const PLATFORM_CONTENT_HANDLERS: Record<PlatformId, PlatformContentHandle
   weibo: fillWeiboContent,
   zhihu: fillZhihuContent,
   xigua: fillXiguaContent,
+  x: fillXContent,
+  youtube: fillYouTubeContent,
 };
 
 /** 根据平台 ID 获取对应的内容填充处理函数。 */

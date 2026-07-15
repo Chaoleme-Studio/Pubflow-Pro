@@ -62,9 +62,13 @@ export function resolveEditableElement(element: HTMLElement): HTMLElement {
     return element;
   }
 
-  const nested = Array.from(
-    element.querySelectorAll('input:not([type="hidden"]), textarea, [contenteditable="true"]'),
-  ).find((candidate) => candidate instanceof HTMLElement && isVisible(candidate));
+  const nested = findInDeepRoots<HTMLElement>(
+    element,
+    new Set(),
+    (root) => Array.from(
+      root.querySelectorAll<HTMLElement>('input:not([type="hidden"]), textarea, [contenteditable="true"]'),
+    ).find((candidate) => isVisible(candidate)) || null,
+  );
 
   if (nested instanceof HTMLElement) {
     return nested;

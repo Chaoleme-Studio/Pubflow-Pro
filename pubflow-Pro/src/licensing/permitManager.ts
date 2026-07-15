@@ -126,6 +126,9 @@ async function readApiError(response: Response, fallbackMessage: string): Promis
 }
 
 export function mapPermitError(message: string) {
+  if (/PERMIT_REQUEST_INVALID|发布授权请求无效/i.test(message)) {
+    return '发布授权请求参数无效，请更新插件后重新发布。';
+  }
   if (/DEVICE_AUTH_FAILED|DEVICE_|device|设备|signature|public key/i.test(message)) {
     return '授权设备验证失败，请重新验证后再开始发布。';
   }

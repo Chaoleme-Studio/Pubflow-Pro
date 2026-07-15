@@ -9,7 +9,9 @@ export type PlatformSelectorKey =
   | '快手'
   | '微博'
   | '知乎'
-  | '西瓜视频';
+  | '西瓜视频'
+  | 'X'
+  | 'YouTube';
 
 /**
  * 平台上传区选择器配置。
@@ -125,6 +127,8 @@ export interface PlatformSelectorConfig {
   匹配域名: string[];
   /** 页面整体可操作时应命中的元素。 */
   就绪选择器: string;
+  /** X/YouTube 的编辑器本身是 dialog，关闭通用弹窗阻断后由平台流程自行判断。 */
+  检测通用弹窗?: boolean;
   上传: PlatformUploadSelectorConfig;
   字段: PlatformFieldSelectorConfig;
   /** 图文上传配置（可选）。 */

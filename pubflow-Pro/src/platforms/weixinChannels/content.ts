@@ -174,6 +174,22 @@ async function fillWeixinChannelsShortTitle(content: ContentData) {
   }
 }
 
+/** 通过页面主世界选择视频号的视频标注。 */
+async function fillWeixinChannelsVideoMark(videoMark: string) {
+  const response = await browser.runtime.sendMessage({
+    type: 'FILL_WEIXIN_VIDEO_MARK',
+    payload: { videoMark },
+  } satisfies RuntimeMessage).catch((err: unknown) => ({ ok: false, error: String(err) })) as {
+    ok: boolean;
+    data?: { ok?: boolean; error?: string };
+    error?: string;
+  };
+
+  if (!response?.ok || response.data?.ok === false) {
+    throw new Error(response.data?.error || response?.error || '视频号视频标注设置失败');
+  }
+}
+
 /** 通过页面主世界处理定时发布设置 */
 async function fillWeixinChannelsScheduled(scheduledAt: number) {
   const response = await browser.runtime.sendMessage({
@@ -269,6 +285,9 @@ export async function fillWeixinChannelsContent(config: PlatformConfig, content:
     // 视频模式：标题和描述都在 div.input-editor，短标题是独立 input
     await fillWeixinChannelsEditor(content);
     await fillWeixinChannelsShortTitle(content);
+    const configuredVideoMark = content.platformSettings?.weixinChannels?.videoMark;
+    const videoMark = typeof configuredVideoMark === 'string' ? configuredVideoMark : '无需标注';
+    await fillWeixinChannelsVideoMark(videoMark);
   }
 
   // 图文不需要上传封面（从已上传图片中选择）

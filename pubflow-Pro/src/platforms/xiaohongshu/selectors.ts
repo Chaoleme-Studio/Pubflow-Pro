@@ -40,7 +40,7 @@ export const xiaohongshuSelectorConfig = {
     简介: '.editor-content',
     文章正文: '.tiptap.ProseMirror, [contenteditable="true"]',
     封面:
-      '.publish-page-content-cover .default.row, .publish-page-content-cover .cover-plugin-preview, .publish-page-content-cover',
+      '.publish-page-content-cover .default.column, .publish-page-content-cover .default.row, .publish-page-content-cover .cover-plugin-preview, .publish-page-content-cover',
     声明: {
       触发器: '.d-switch-box',
       类型: 'toggle',
@@ -63,7 +63,7 @@ export const xiaohongshuSelectorConfig = {
     标题: 'input[placeholder*="标题"], .d-input-wrapper.c-input_inner',
     简介: '.tiptap.ProseMirror, [contenteditable="true"]',
     封面:
-      '.publish-page-content-cover .default.row, .publish-page-content-cover .cover-plugin-preview, .publish-page-content-cover',
+      '.publish-page-content-cover .default.column, .publish-page-content-cover .default.row, .publish-page-content-cover .cover-plugin-preview, .publish-page-content-cover',
     声明: {
       触发器: '.d-switch-box',
       类型: 'toggle',

@@ -9,7 +9,7 @@ import { readDataFile, mergeDataFile } from './workspaceStorage';
 export const defaultPlatformSettings = PLATFORM_ORDER.reduce(
   (settings, platformId) => {
     settings[platformId] = {
-      enabled: true,
+      enabled: platformId !== 'x' && platformId !== 'youtube',
       autoSubmit: false,
       defaultTopics: [],
     };

@@ -7,7 +7,9 @@ export type PlatformId =
   | 'kuaishou'
   | 'weibo'
   | 'zhihu'
-  | 'xigua';
+  | 'xigua'
+  | 'x'
+  | 'youtube';
 
 /** 单个平台在一次分发任务中的状态。 */
 export type PlatformTaskStatus =
@@ -79,6 +81,7 @@ export interface PlatformTask {
   status: PlatformTaskStatus;
   message?: string;
   error?: string;
+  publishedUrl?: string;
 }
 
 /** 一次多平台分发任务，background 按 platforms 顺序打开页面并推进状态。 */
@@ -142,7 +145,7 @@ export interface VideoRecord {
   updatedAt: number;
 }
 
-/** 平台发布记录，用于统计和历史列表；只有 pending/error/published 三类归档状态。 */
+/** 平台发布记录，用于统计和历史列表；filled 表示平台已填充、等待用户确认发布。 */
 export interface PublishRecord {
   id: string;
   videoId: string;
@@ -151,7 +154,9 @@ export interface PublishRecord {
   coverFileName?: string;
   publishedUrl?: string;
   publishedAt?: number;
-  status: 'published' | 'error' | 'pending';
+  /** 最近一次填充、失败或发布状态发生变化的时间。 */
+  updatedAt?: number;
+  status: 'published' | 'error' | 'pending' | 'filled';
   error?: string;
   stats?: {
     views?: number;
@@ -399,6 +404,12 @@ export type RuntimeMessage =
     };
   }
   | {
+    type: 'FILL_WEIXIN_VIDEO_MARK';
+    payload: {
+      videoMark: string;
+    };
+  }
+  | {
     type: 'UPLOAD_FILE_IN_PAGE_WORLD';
     payload: {
       fileName: string;
@@ -452,6 +463,15 @@ export type RuntimeMessage =
     payload: {
       x: number;
       y: number;
+    };
+  }
+  | {
+    type: 'CDP_DRAG';
+    payload: {
+      startX: number;
+      startY: number;
+      endX: number;
+      endY: number;
     };
   }
   | {

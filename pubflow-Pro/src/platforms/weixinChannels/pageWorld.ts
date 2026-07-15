@@ -2,6 +2,7 @@ export type PageWorldAction =
   | 'fillEditor'
   | 'fillShortTitle'
   | 'fillArticleTitle'
+  | 'fillVideoMark'
   | 'uploadFile'
   | 'uploadImages'
   | 'uploadCover'
@@ -308,6 +309,58 @@ export async function runWeixinChannelsPageWorldAction(
     input.dispatchEvent(new Event('blur', { bubbles: true }));
 
     return { ok: true };
+  }
+
+  /** 选择视频发布表单中的“视频标注”项。 */
+  async function fillVideoMark() {
+    const target = String(payload.videoMark || '无需标注').trim();
+    const supportedMarks = new Set([
+      '无需标注',
+      '含AI生成内容',
+      '内容为虚构剧情，仅供娱乐',
+      '个人观点，仅供参考',
+      '内容包含营销广告',
+    ]);
+    if (!supportedMarks.has(target)) {
+      return { ok: false, error: `暂不支持自动填写该视频标注：${target}` };
+    }
+
+    const container = queryDeep('.post-with-mark-tag') as HTMLElement | null;
+    if (!container) {
+      return { ok: false, error: '页面主世界未找到视频标注区域' };
+    }
+
+    const display = container.querySelector<HTMLElement>('.select-display');
+    if (!display) {
+      return { ok: false, error: '页面主世界未找到视频标注下拉入口' };
+    }
+    if ((display.textContent || '').replace(/\s+/g, '').includes(target.replace(/\s+/g, ''))) {
+      return { ok: true };
+    }
+
+    clickElement(display);
+    const startedAt = Date.now();
+    let option: HTMLElement | undefined;
+    while (Date.now() - startedAt < 3_000) {
+      option = (queryDeepAll('.mark-tag-option') as HTMLElement[]).find((item) =>
+        (item.querySelector('.option-main')?.textContent || '').trim() === target && isVisible(item),
+      );
+      if (option) break;
+      await sleep(150);
+    }
+    if (!option) {
+      return { ok: false, error: `没有找到视频标注选项：${target}` };
+    }
+
+    clickElement(option);
+    const appliedAt = Date.now();
+    while (Date.now() - appliedAt < 2_000) {
+      if ((display.textContent || '').replace(/\s+/g, '').includes(target.replace(/\s+/g, ''))) {
+        return { ok: true };
+      }
+      await sleep(150);
+    }
+    return { ok: false, error: `视频标注未生效：${target}` };
   }
 
   /** 上传视频文件到页面 */
@@ -1125,6 +1178,8 @@ export async function runWeixinChannelsPageWorldAction(
       customCoverPreviewUrl?: string;
       previewImageUrl?: string;
       currentCoverImageUrl?: string;
+      customCover?: unknown;
+      useCustomCover?: boolean;
       $el?: HTMLElement;
       $parent?: unknown;
     };
@@ -1163,7 +1218,7 @@ export async function runWeixinChannelsPageWorldAction(
       const coverHandler = findAncestorWithCustomCoverHandler(vueUploader);
       if (!coverHandler?.handleCustomCoverChange) return false;
 
-      coverHandler.handleCustomCoverChange(canvas);
+      await Promise.resolve(coverHandler.handleCustomCoverChange(canvas));
 
       try {
         const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
@@ -1200,7 +1255,7 @@ export async function runWeixinChannelsPageWorldAction(
       if (!coverHandler?.handleCustomCoverChange) return false;
 
       const canvas = await fileToCanvas(targetFile);
-      coverHandler.handleCustomCoverChange(canvas);
+      await Promise.resolve(coverHandler.handleCustomCoverChange(canvas));
 
       try {
         const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
@@ -1215,8 +1270,40 @@ export async function runWeixinChannelsPageWorldAction(
       return true;
     }
 
-    /** 等待上传组件预览图片就绪 */
-    async function waitForUploaderPreview(dialog: HTMLElement, timeoutMs: number): Promise<boolean> {
+    /** 生成封面编辑弹窗的预览状态签名，避免把视频首帧误判为新上传封面。 */
+    function getUploaderPreviewSignature(dialog: HTMLElement): string {
+      const uploader = findCoverUploader(dialog);
+      const vueUploader = uploader?.__vue__;
+      const coverHandler = vueUploader ? findAncestorWithCustomCoverHandler(vueUploader) : null;
+      const image = uploader?.querySelector('.finish-wrap img, img.img-wrap') as HTMLImageElement | null;
+      const previewImage = dialog.querySelector(
+        '.preview-image img, .horizontal-preview-image img, .preview-image-center img, img[src^="data:image/"]',
+      ) as HTMLImageElement | null;
+      const imageValues = [
+        String(vueUploader?.imgSrc || ''),
+        String(vueUploader?.customCoverPreviewUrl || ''),
+        image?.src || '',
+        String(coverHandler?.previewImageUrl || ''),
+        String(coverHandler?.currentCoverImageUrl || ''),
+        String(coverHandler?.customCoverPreviewUrl || ''),
+        previewImage?.src || '',
+      ];
+      const fingerprint = (value: string) => value
+        ? `${value.length}:${value.slice(0, 64)}:${value.slice(-64)}`
+        : '';
+
+      return [
+        coverHandler?.useCustomCover ? 'custom' : 'default',
+        ...imageValues.map(fingerprint),
+      ].join('|');
+    }
+
+    /** 等待本地封面真正替换弹窗预览，而不是只检测页面原有的视频首帧。 */
+    async function waitForUploaderPreview(
+      dialog: HTMLElement,
+      beforeSignature: string,
+      timeoutMs: number,
+    ): Promise<boolean> {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() <= deadline) {
         // 裁剪确定后 Vue 组件可能替换了 .single-cover-uploader-wrap，每次循环重新查找
@@ -1235,7 +1322,7 @@ export async function runWeixinChannelsPageWorldAction(
         const dialogCustomCoverPreviewUrl = String(coverHandler?.customCoverPreviewUrl || '');
         const previewDomSrc = previewImage?.src || '';
 
-        if ([
+        const hasPreviewImage = [
           imgSrc,
           customCoverPreviewUrl,
           domSrc,
@@ -1243,7 +1330,10 @@ export async function runWeixinChannelsPageWorldAction(
           currentCoverImageUrl,
           dialogCustomCoverPreviewUrl,
           previewDomSrc,
-        ].some(isValidDataImage)) {
+        ].some(isValidDataImage);
+        const currentSignature = getUploaderPreviewSignature(dialog);
+
+        if (hasPreviewImage && currentSignature !== beforeSignature) {
           return true;
         }
         await sleep(300);
@@ -1258,13 +1348,33 @@ export async function runWeixinChannelsPageWorldAction(
       return scopes.some((scope) => isVisible(scope) && (scope.textContent || '').includes('生成中'));
     }
 
-    /** 等待封面生成完成 */
+    /** 判断竖屏模式是否使用“个人主页和分享卡片”共用的单个封面入口。 */
+    function isCombinedPortraitCoverEntry(element: HTMLElement | null): boolean {
+      const text = element?.textContent?.replace(/\s+/g, '') || '';
+      return text.includes('个人主页和分享卡片');
+    }
+
+    /** 等待封面生成完成；竖屏只有一个共用入口，横屏仍等待两个入口。 */
     async function waitForCoverGenerationReady(timeoutMs: number): Promise<boolean> {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() <= deadline) {
         const vertical = queryDeep('.vertical-cover-wrap') as HTMLElement | null;
         const horizon = queryDeep('.horizon-cover-wrap') as HTMLElement | null;
-        if (vertical && horizon && isVisible(vertical) && isVisible(horizon) && !hasGeneratingCoverText()) {
+        const selected = coverSelector ? queryDeep(coverSelector) as HTMLElement | null : null;
+        const customTargetReady = Boolean(selected && isVisible(selected));
+        const portraitTargetReady = Boolean(
+          vertical &&
+          isVisible(vertical) &&
+          !horizon &&
+          isCombinedPortraitCoverEntry(vertical),
+        );
+        const landscapeTargetsReady = Boolean(
+          vertical && horizon && isVisible(vertical) && isVisible(horizon),
+        );
+        if (
+          (customTargetReady || portraitTargetReady || landscapeTargetsReady) &&
+          !hasGeneratingCoverText()
+        ) {
           return true;
         }
         await sleep(500);
@@ -1321,6 +1431,9 @@ export async function runWeixinChannelsPageWorldAction(
 
     /** 打开封面编辑对话框 */
     async function openCoverDialog(entrySelector: string, expectedTitle: string): Promise<HTMLElement | null> {
+      const existingDialog = findActiveCoverDialog(expectedTitle);
+      if (existingDialog) return existingDialog;
+
       const entry = findCoverEntry(entrySelector);
       if (!entry) return null;
 
@@ -1364,8 +1477,9 @@ export async function runWeixinChannelsPageWorldAction(
       const input = findCoverInput(dialog);
       if (!input) return false;
 
+      const beforeDirectSignature = getUploaderPreviewSignature(dialog);
       const directApplied = await applyCoverFileToDialog(dialog, file);
-      const directPreviewReady = directApplied && await waitForUploaderPreview(dialog, 5000);
+      const directPreviewReady = directApplied && await waitForUploaderPreview(dialog, beforeDirectSignature, 5000);
 
       let cropDialog: HTMLElement | null = null;
       if (!directPreviewReady) {
@@ -1381,12 +1495,13 @@ export async function runWeixinChannelsPageWorldAction(
       if (cropConfirm) {
         const cropResult = await waitForCroppieResult(dialog, 10000);
         if (!cropResult) return false;
+        const beforeCropSignature = getUploaderPreviewSignature(dialog);
         const applied = await applyCroppieResultToCover(dialog, cropResult);
         if (!applied) return false;
-        const previewReady = await waitForUploaderPreview(dialog, 15000);
+        const previewReady = await waitForUploaderPreview(dialog, beforeCropSignature, 15000);
         if (!previewReady) return false;
       } else if (!directPreviewReady) {
-        const fallbackPreviewReady = await waitForUploaderPreview(dialog, 8000);
+        const fallbackPreviewReady = await waitForUploaderPreview(dialog, beforeDirectSignature, 8000);
         if (!fallbackPreviewReady) return false;
       }
 
@@ -1398,14 +1513,25 @@ export async function runWeixinChannelsPageWorldAction(
       return waitForDialogClosed(expectedTitle, 10000);
     }
 
+    await waitForCoverGenerationReady(60000);
+
+    const verticalCover = queryDeep('.vertical-cover-wrap') as HTMLElement | null;
+    const horizonCover = queryDeep('.horizon-cover-wrap') as HTMLElement | null;
+    const isPortraitMode = Boolean(
+      verticalCover && !horizonCover && isCombinedPortraitCoverEntry(verticalCover),
+    );
     const coverTargets = coverSelector
       ? [{ selector: coverSelector, title: '' }]
-      : [
-        { selector: '.vertical-cover-wrap', title: '编辑个人主页卡片' },
-        { selector: '.horizon-cover-wrap', title: '编辑分享卡片' },
-      ];
+      : isPortraitMode
+        ? [{ selector: '.vertical-cover-wrap', title: '编辑封面' }]
+        : [
+          ...(verticalCover ? [{ selector: '.vertical-cover-wrap', title: '编辑个人主页卡片' }] : []),
+          ...(horizonCover ? [{ selector: '.horizon-cover-wrap', title: '编辑分享卡片' }] : []),
+        ];
 
-    await waitForCoverGenerationReady(60000);
+    if (coverTargets.length === 0) {
+      return { ok: false, error: '视频号页面没有找到可编辑的封面入口' };
+    }
 
     const results: string[] = [];
     for (const target of coverTargets) {
@@ -1425,6 +1551,7 @@ export async function runWeixinChannelsPageWorldAction(
   if (action === 'fillEditor') return fillEditor();
   if (action === 'fillShortTitle') return fillShortTitle();
   if (action === 'fillArticleTitle') return fillArticleTitle();
+  if (action === 'fillVideoMark') return fillVideoMark();
   if (action === 'uploadFile') return uploadFile();
   if (action === 'uploadImages') return uploadImages();
   if (action === 'uploadCover') return uploadCover();

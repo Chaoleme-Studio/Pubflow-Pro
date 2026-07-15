@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import type { PlatformConfig } from '../../../src/platforms';
 import type { AIProviderConfig, AIProviderSettings, GlobalSettings, LicensingSettings, PlatformId, PlatformSettings, ServerConfig, WorkspaceSettings } from '../../../src/types';
 
@@ -54,6 +54,7 @@ const emit = defineEmits<{
 const showServerKey = ref(false);
 const showActivationCode = ref(false);
 const editingActivationCode = ref(false);
+const activationCodeInput = ref<HTMLInputElement | null>(null);
 const devWorkspacePath = import.meta.env.DEV ? __PUBFLOW_DEV_WORKSPACE_PATH__ : '';
 const expandedProviderId = ref('');
 const visibleAIProviderIds = ref<string[]>([]);
@@ -65,6 +66,11 @@ const selectClass = 'pf-select';
 const builtinModelOptions: Partial<Record<AIProviderConfig['builtinId'], string[]>> = {
   deepseek: ['Deepseek-V4-Flash', 'Deepseek-V4-Pro'],
 };
+
+function togglePlatformChannel(platform: PlatformConfig) {
+  const settings = props.platformSettings[platform.id];
+  settings.enabled = !settings.enabled;
+}
 
 const activeProvider = computed(() =>
   props.aiSettings.providers.find((provider) => provider.id === props.aiSettings.activeProviderId)
@@ -117,13 +123,6 @@ const licenseBadgeClass = computed(() => {
   return 'border-slate-200 bg-slate-50 text-slate-600';
 });
 
-const activationCodeDisplayValue = computed(() => {
-  if (editingActivationCode.value || showActivationCode.value) {
-    return props.licensingSettings.activationCode;
-  }
-  return maskSecret(props.licensingSettings.activationCode);
-});
-
 const licenseValidUntilText = computed(() => {
   const value = props.licensingSettings.validUntil;
   if (typeof value !== 'number' || value <= 0) return '';
@@ -170,14 +169,15 @@ function getModelOptions(provider?: AIProviderConfig) {
   return Array.from(new Set([...fetched, ...builtin, provider.textModel, provider.imageModel].filter(Boolean)));
 }
 
-function toggleProviderPanel(providerId: string) {
-  expandedProviderId.value = expandedProviderId.value === providerId ? '' : providerId;
-}
-
+/** 仅用于只读脱敏展示；激活码的星号文本不会进入真实编辑 input。 */
 function maskSecret(value: string) {
   if (!value) return '';
   if (value.length <= 8) return value;
   return `${value.slice(0, 4)}${'*'.repeat(Math.max(4, value.length - 8))}${value.slice(-4)}`;
+}
+
+function toggleProviderPanel(providerId: string) {
+  expandedProviderId.value = expandedProviderId.value === providerId ? '' : providerId;
 }
 
 function isAIKeyVisible(providerId: string) {
@@ -208,14 +208,23 @@ function updateActivationCode(event: Event) {
 
 function beginEditActivationCode() {
   editingActivationCode.value = true;
+  void nextTick(() => {
+    const input = activationCodeInput.value;
+    input?.focus();
+    const end = input?.value.length || 0;
+    input?.setSelectionRange(end, end);
+  });
 }
 
 function finishEditActivationCode() {
-  editingActivationCode.value = false;
+  if (!showActivationCode.value) editingActivationCode.value = false;
 }
 
 function toggleActivationCodeVisibility() {
   showActivationCode.value = !showActivationCode.value;
+  if (!showActivationCode.value) {
+    editingActivationCode.value = false;
+  }
 }
 
 function updateProviderApiKey(provider: AIProviderConfig, event: Event) {
@@ -264,7 +273,7 @@ watch(
             ? 'border-rose-200 bg-rose-50/60 hover:bg-rose-50'
             : 'border-slate-200 bg-white opacity-55 hover:opacity-75'"
           type="button"
-          @click="platformSettings[platform.id].enabled = !platformSettings[platform.id].enabled"
+          @click="togglePlatformChannel(platform)"
         >
           <span
             class="grid h-8 w-10 shrink-0 place-items-center rounded text-[10px] font-black"
@@ -582,12 +591,23 @@ watch(
         <label class="grid gap-2">
           <span :class="fieldLabelClass">激活码</span>
           <div class="flex rounded-md border border-slate-300 bg-white focus-within:border-rose-500 focus-within:ring-2 focus-within:ring-rose-100">
+            <button
+              v-if="!editingActivationCode && !showActivationCode"
+              class="min-w-0 flex-1 rounded-md px-3 py-2.5 text-left text-sm outline-none"
+              :class="licensingSettings.activationCode ? 'text-slate-900' : 'text-slate-400'"
+              type="button"
+              @click="beginEditActivationCode"
+            >{{ licensingSettings.activationCode ? maskSecret(licensingSettings.activationCode) : '请输入激活码' }}</button>
             <input
-              :value="activationCodeDisplayValue"
+              v-else
+              ref="activationCodeInput"
+              :value="licensingSettings.activationCode"
+              type="text"
               class="min-w-0 flex-1 rounded-md px-3 py-2.5 text-sm outline-none"
               autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
               placeholder="请输入激活码"
-              @focus="beginEditActivationCode"
               @blur="finishEditActivationCode"
               @input="updateActivationCode"
             />

@@ -20,7 +20,8 @@ const apiBaseUrl = String(args.get('--api') || process.env.PUBFLOW_LICENSE_API_B
 let activationCode = String(args.get('--code') || process.env.PUBFLOW_ACTIVATION_CODE || demoActivationCode('creator@northlab.cn')).trim().toUpperCase();
 const clientInstallId = String(args.get('--install') || `api-smoke-${Date.now()}`);
 const platform = String(args.get('--platform') || process.platform);
-const extensionVersion = String(args.get('--extension-version') || '0.1.0');
+const packageVersion = JSON.parse(readFileSync(resolve(rootDir, 'package.json'), 'utf8')).version;
+const extensionVersion = String(args.get('--extension-version') || packageVersion);
 const shouldGenerateLicense = args.get('--generate-license') === '1';
 const serverEnvPath = resolve(rootDir, args.get('--server-env') || '../.env.development');
 

@@ -115,7 +115,7 @@ assertIncludes(
 
 assertMatches(
   'entrypoints/background.ts',
-  /const supportedPlatforms = message\.payload\.platforms\.filter\(\(platformId\) =>[\s\S]*?supportsContentType\(PLATFORM_CONFIGS\[platformId\], message\.payload\.content\.contentType \|\| 'video'\)/,
+  /const supportedPlatforms = message\.payload\.platforms\.filter\(\(platformId\) =>[\s\S]*?supportsContentType\((?:PLATFORM_CONFIGS\[platformId\]|getPlatformConfig\(platformId\)), message\.payload\.content\.contentType \|\| 'video'\)/,
   '后台 START_DISTRIBUTION 必须二次过滤当前内容类型支持的平台。',
 );
 
@@ -305,10 +305,16 @@ assertMatches(
   '保存草稿时必须剔除不支持当前内容类型的平台。',
 );
 
+assertNotIncludes(
+  'entrypoints/dashboard/views/PublishView.vue',
+  'hasZhihuPersonalSettings',
+  '未选择知乎时不能因为旧草稿中残留个性化设置而显示知乎标签。',
+);
+
 assertIncludes(
   'entrypoints/dashboard/views/PublishView.vue',
-  'const hasZhihuPersonalSettings = computed(',
-  '知乎平台个性化设置必须有显示兜底，避免内容类型过滤后只看不到配置。',
+  'props.draft.selectedPlatforms.includes(platform.id)',
+  '平台个性化标签必须只依据用户当前选择的平台生成。',
 );
 
 assertIncludes(
@@ -325,14 +331,14 @@ assertIncludes(
 
 assertIncludes(
   'src/platforms/zhihu/content.ts',
-  'await waitForZhihuInjectedCoverReady(input, 2200);',
-  '知乎封面注入后不能长时间等待预览稳定，确认按钮可用后应快速继续。',
+  'await waitForIdle(3800);',
+  '知乎封面注入后必须等待 ReactCrop 和确认按钮完成渲染。',
 );
 
 assertIncludes(
   'src/platforms/zhihu/content.ts',
-  "const hasConfirmButton = Boolean(dialog && findZhihuButton(dialog, ['确认选择', '确认', '完成']));",
-  '知乎封面等待必须把确认按钮可用作为就绪条件，避免上传完成后继续空等。',
+  'if (button && hasZhihuCoverAcceptedLocalFile(dialog, beforeDialogSignature)) return button;',
+  '知乎封面等待必须同时校验确认按钮和本地封面预览，避免提前确认。',
 );
 
 assertIncludes(
@@ -396,6 +402,18 @@ assertIncludes(
 );
 
 assertIncludes(
+  'src/platforms/weixinChannels/pageWorld.ts',
+  "queryDeep('.post-with-mark-tag')",
+  '视频号视频标注必须使用页面实际标注区域定位。',
+);
+
+assertIncludes(
+  'src/platforms/weixinChannels/content.ts',
+  'content.platformSettings?.weixinChannels?.videoMark',
+  '视频号必须读取发布页的平台个性化视频标注设置。',
+);
+
+assertIncludes(
   'src/platforms/xiaohongshu/content.ts',
   'async function fillXiaohongshuImageDescription(value: string)',
   '小红书图文描述必须使用专用填充兜底，确保 Tiptap 描述编辑器状态同步。',
@@ -411,6 +429,222 @@ assertIncludes(
   'src/features/publish/usePublishDraft.ts',
   'draft.scheduledAt = video.scheduledAt || 0;',
   '从我的视频重发/继续必须恢复定时发布时间。',
+);
+
+assertIncludes(
+  'src/platforms/x/selectors.ts',
+  "发布页地址: 'https://x.com/compose/post'",
+  'X 必须打开原生发帖编辑页。',
+);
+
+assertIncludes(
+  'src/platforms/x/selectors.ts',
+  "匹配域名: ['x.com']",
+  'X 已统一使用 x.com，不应继续申请旧 twitter.com 页面权限。',
+);
+
+assertMatches(
+  'src/platforms/x/selectors.ts',
+  /上传:\s*\{[\s\S]*?需要激活标签页:\s*true/,
+  'X 上传视频时必须激活当前标签页。',
+);
+
+assertIncludes(
+  'src/platforms/x/content.ts',
+  "attachments.querySelectorAll<HTMLElement>('[role=\"status\"]')",
+  'X 不能以视频预览出现作为上传完成，必须等待附件状态显示就绪。',
+);
+
+assertIncludes(
+  'src/platforms/x/content.ts',
+  'content.platformSettings?.x?.replyAudience',
+  'X 必须读取平台个性化回复权限。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/selectors.ts',
+  "发布页地址: 'https://studio.youtube.com/'",
+  'YouTube 必须打开 Studio 后台。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/selectors.ts',
+  "'ytcp-uploads-file-picker input[type=\"file\"]'",
+  'YouTube 当前上传 input 的 accept 为空，必须使用上传组件范围定位。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/content.ts',
+  'let uploadAction = findYouTubeUploadAction();',
+  'YouTube 必须优先直接点击 Studio 首页上传按钮。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/content.ts',
+  'uploadAction = await waitForYouTubeUploadAction();',
+  'Studio 首页没有上传按钮时，YouTube 必须回退创建菜单并轮询等待上传入口。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/content.ts',
+  "'VIDEO_MADE_FOR_KIDS_MFK' : 'VIDEO_MADE_FOR_KIDS_NOT_MFK'",
+  'YouTube 必须填写面向儿童必填项。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/content.ts',
+  'button[aria-controls="age-restriction"]',
+  'YouTube 选择年龄限制前必须展开“年龄限制（高级）”。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/content.ts',
+  "name.startsWith('VIDEO_AGE_RESTRICTION_')",
+  'YouTube 年龄限制选择必须在同一次目标 radio 查找中完成展开，避免 Polymer 重渲染丢失节点。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/content.ts',
+  "section?.hasAttribute('hidden')",
+  'YouTube 年龄限制展开必须以实际折叠容器 hidden 状态作为重试依据。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/content.ts',
+  'button[aria-label="显示高级设置"]',
+  'YouTube 必须点击实测的高级设置原生按钮，不能点击内部触摸反馈层。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/content.ts',
+  'await expandYouTubeAdvancedSettings(remixRadioName);',
+  'YouTube 展开高级设置后必须等待目标 Shorts 混剪权限节点实际渲染。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/content.ts',
+  "name.startsWith('REMIX_SOURCE_OPTION_')",
+  'YouTube 选择 Shorts 混剪权限时必须再次确保目标节点可见。',
+);
+
+assertMatches(
+  'src/platforms/youtube/content.ts',
+  /const coverMessage = await uploadYouTubeCover\(content\);[\s\S]*?await fillYouTubePlatformSettings\(content\);/,
+  'YouTube 缩略图上传必须先于可选平台设置，避免个性化设置失败阻断封面。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/content.ts',
+  'YouTube 部分高级设置未自动填写',
+  'YouTube 可选高级设置失败必须降级为人工检查提示，不能让整个平台任务失败。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/content.ts',
+  'for (let clickCount = 0; clickCount < 3; clickCount++)',
+  'YouTube 填写详情后必须依次经过视频元素、检查和公开范围三个步骤。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/content.ts',
+  "friends: 'UNLISTED'",
+  'YouTube 必须将通用好友可见映射为不公开列出。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/content.ts',
+  "'#time-of-day-container input'",
+  'YouTube 定时发布必须填写实测的时间输入框。',
+);
+
+assertMatches(
+  'src/platforms/youtube/content.ts',
+  /selectYouTubeVisibilityContainer\(visibilityRoot, 'first'\);[\s\S]*?selectYouTubeRadio\('PUBLIC', '公开范围'\);[\s\S]*?waitForYouTubeVisibilitySelectionStable\(visibilityRoot, 'PUBLIC'\);[\s\S]*?selectYouTubeVisibilityContainer\(visibilityRoot, 'second'\);[\s\S]*?fillYouTubeSchedule\(visibilityRoot, content\.scheduledAt\);/,
+  'YouTube 定时流程必须先稳定保存 PUBLIC，再切换互斥的安排时间容器。',
+);
+
+assertIncludes(
+  'entrypoints/dashboard/views/PublishView.vue',
+  'YouTube 定时公开范围',
+  '发布页必须明确展示 YouTube 定时发布固定为公开，避免误认为通用可见性未关联。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/content.ts',
+  'YouTube 定时发布仅支持公开，已按平台规则覆盖通用可见性',
+  'YouTube 定时发布覆盖非公开可见性时必须在任务结果中说明。',
+);
+
+assertNotIncludes(
+  'src/platforms/youtube/content.ts',
+  "querySelector('#done-button')?.click()",
+  'YouTube 自动填充不能点击最终发布、保存或预定按钮。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/content.ts',
+  "'ytcp-thumbnail-uploader input#file-loader[type=\"file\"]'",
+  'YouTube 自定义封面必须优先使用实测缩略图 input。',
+);
+
+assertIncludes(
+  'src/platforms/youtube/content.ts',
+  'YouTube 已接收封面文件，但没有出现自定义缩略图预览',
+  'YouTube 封面未出现预览时不能提前报告上传成功。',
+);
+
+assertIncludes(
+  'entrypoints/dashboard/views/PublishView.vue',
+  '谁可以回复',
+  '发布页必须提供 X 回复权限个性化设置。',
+);
+
+assertIncludes(
+  'entrypoints/dashboard/views/PublishView.vue',
+  '观众（必填）',
+  '发布页必须提供 YouTube 观众必填设置。',
+);
+
+assertMatches(
+  'src/platforms/youtube/selectors.ts',
+  /上传:\s*\{[\s\S]*?需要激活标签页:\s*true/,
+  'YouTube Studio 上传时必须激活当前标签页。',
+);
+
+assertIncludes(
+  'src/platforms/flows.ts',
+  'x: fillXContent,',
+  'X 必须进入统一网页内容填充路由。',
+);
+
+assertIncludes(
+  'src/platforms/flows.ts',
+  'youtube: fillYouTubeContent,',
+  'YouTube 必须进入统一网页内容填充路由。',
+);
+
+assertIncludes(
+  'src/content/dom.ts',
+  'element.shadowRoot',
+  'YouTube Studio 字段查询必须支持穿透开放的 Shadow DOM。',
+);
+
+assertNotIncludes(
+  'wxt.config.ts',
+  "'identity'",
+  '网页自动填充方案不应申请 Chrome Identity 权限。',
+);
+
+assertNotIncludes(
+  'wxt.config.ts',
+  'oauth2:',
+  '网页自动填充方案不应写入 OAuth 客户端配置。',
+);
+
+assertNotIncludes(
+  'entrypoints/dashboard/views/SettingsView.vue',
+  'API 直发账号',
+  '设置页不应再展示 X/YouTube API 账号连接卡片。',
 );
 
 assertIncludes(

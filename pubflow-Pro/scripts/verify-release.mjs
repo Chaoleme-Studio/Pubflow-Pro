@@ -15,6 +15,7 @@ for (let i = 2; i < process.argv.length; i += 1) {
 
 const distDir = resolve(rootDir, args.get('--dir') || '.output/chrome-mv3');
 const requireObfuscation = args.get('--allow-unprotected') !== '1';
+const packageJson = readJson('package.json');
 const failures = [];
 const warnings = [];
 const serializablePageWorldFunctions = [
@@ -244,10 +245,33 @@ function assertSerializablePageWorldFunctions(backgroundCode) {
   }
 }
 
+function assertReleaseVersion() {
+  const version = String(packageJson.version || '').trim();
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+    fail(`package version 不是有效的 SemVer：${version || 'empty'}`);
+    return;
+  }
+
+  const changelogPath = resolve(rootDir, '../CHANGELOG.md');
+  if (assertExists(changelogPath, '根目录 CHANGELOG.md')) {
+    const changelog = readText(changelogPath);
+    const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (!new RegExp(`^## \\[${escapedVersion}\\] - \\d{4}-\\d{2}-\\d{2}$`, 'm').test(changelog)) {
+      fail(`CHANGELOG.md 缺少当前版本标题：## [${version}] - YYYY-MM-DD`);
+    }
+  }
+
+  const releaseTag = String(args.get('--tag') || process.env.GITHUB_REF_NAME || '').trim();
+  if (releaseTag && releaseTag !== `v${version}`) {
+    fail(`Git tag ${releaseTag} 与 package version ${version} 不一致（期望 v${version}）`);
+  }
+}
+
+assertReleaseVersion();
+
 if (!existsSync(distDir)) {
   fail(`发布目录不存在：${distDir}`);
 } else {
-  const packageJson = readJson('package.json');
   const manifestPath = resolve(distDir, 'manifest.json');
   if (assertExists(manifestPath, 'manifest.json')) {
     const manifest = JSON.parse(readText(manifestPath));

@@ -7,7 +7,35 @@ const { task, refreshTask } = useRuntimeTask();
 const notice = ref('');
 let sidePanelPort: Browser.runtime.Port | null = null;
 
+type CloseCapableSidePanel = typeof browser.sidePanel & {
+  close?: (options?: { tabId?: number; windowId?: number }) => Promise<void>;
+};
+
+async function closeCurrentSidePanel(sourceTab?: Browser.tabs.Tab) {
+  const close = (browser.sidePanel as CloseCapableSidePanel).close;
+  if (close) {
+    if (sourceTab?.id) {
+      try {
+        await close.call(browser.sidePanel, { tabId: sourceTab.id });
+        return;
+      } catch {
+        // Tab 级面板关闭失败时继续尝试关闭当前窗口的面板。
+      }
+    }
+    if (sourceTab?.windowId) {
+      try {
+        await close.call(browser.sidePanel, { windowId: sourceTab.windowId });
+        return;
+      } catch {
+        // 旧版或不完整实现交给 window.close() 兜底。
+      }
+    }
+  }
+  window.close();
+}
+
 async function openDashboard() {
+  const [sourceTab] = await browser.tabs.query({ active: true, currentWindow: true });
   const url = browser.runtime.getURL('dashboard.html' as never);
   const tabs = await browser.tabs.query({ url });
   if (tabs[0]?.id) {
@@ -15,9 +43,10 @@ async function openDashboard() {
     if (tabs[0].windowId) {
       await browser.windows.update(tabs[0].windowId, { focused: true });
     }
-    return;
+  } else {
+    await browser.tabs.create({ url, active: true });
   }
-  await browser.tabs.create({ url, active: true });
+  await closeCurrentSidePanel(sourceTab);
 }
 
 onMounted(async () => {

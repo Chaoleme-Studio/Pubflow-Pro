@@ -15,6 +15,29 @@ export async function cdpClickElement(el: HTMLElement): Promise<boolean> {
   }
 }
 
+/** 通过 CDP 拖动元素中心，用于 ReactCrop 等需要可信指针事件的控件。 */
+export async function cdpDragElement(
+  el: HTMLElement,
+  deltaX: number,
+  deltaY: number,
+): Promise<boolean> {
+  const start = getTopFrameCenterPoint(el);
+  try {
+    const response = (await browser.runtime.sendMessage({
+      type: 'CDP_DRAG',
+      payload: {
+        startX: start.x,
+        startY: start.y,
+        endX: start.x + deltaX,
+        endY: start.y + deltaY,
+      },
+    } satisfies RuntimeMessage)) as RuntimeResponse | undefined;
+    return response?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 /** 将 iframe 内元素坐标换算成顶层 tab 坐标，供 CDP Input.dispatchMouseEvent 使用。 */
 function getTopFrameCenterPoint(el: HTMLElement) {
   const rect = el.getBoundingClientRect();

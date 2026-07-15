@@ -55,6 +55,8 @@ PUBFLOW_LICENSE_API_BASE_URL=http://124.222.232.50:30009
 
 这个值是构建期写入插件包的。打完包以后再改 `.env` 不会影响已经生成的 ZIP/CRX，必须重新打包。
 
+X 与 YouTube 使用和其他平台相同的浏览器页面自动填充方案，复用用户在 `x.com` 和 YouTube Studio 的现有登录状态。构建时不需要 OAuth Client ID、开发者 API Key 或平台 Client Secret，PubFlow 后端也不接收平台凭据和视频文件。
+
 ### 服务端
 
 服务端当前仍使用项目已有的配置系统。部署脚本会把本地构建好的 Linux 后端程序和 `config/` 一起推到 NucBox。

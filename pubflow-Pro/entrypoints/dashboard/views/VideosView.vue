@@ -88,7 +88,9 @@ const pagedVideos = computed(() => {
                   <div v-else class="cover-placeholder">NO</div>
                 </div>
                 <div class="video-meta">
-                  <div class="video-date">{{ formatDate(video.createdAt) }}</div>
+                  <div class="video-date" :title="`创建于 ${formatDate(video.createdAt)}`">
+                    更新 {{ formatDate(video.updatedAt) }}
+                  </div>
                   <div class="video-filename">{{ video.videoFileName || '未选择文件' }}</div>
                 </div>
               </div>

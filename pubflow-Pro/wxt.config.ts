@@ -9,6 +9,7 @@ import { PLATFORM_MATCH_PATTERNS } from './src/platforms';
 import { obfuscate, type ObfuscatorOptions } from 'javascript-obfuscator';
 
 const ROOT_DIR = dirname(fileURLToPath(import.meta.url));
+const PACKAGE_VERSION = JSON.parse(readFileSync(resolve(ROOT_DIR, 'package.json'), 'utf8')).version;
 const WORKSPACE_DIR = resolve(ROOT_DIR, '..');
 const WXT_COMMAND = process.argv.includes('build') || process.argv.includes('zip') ? 'production' : 'development';
 const ENV_NAME = process.env.PUBFLOW_ENV || process.env.ENV || WXT_COMMAND;
@@ -95,7 +96,7 @@ export default defineConfig({
     name: 'PubFlow 多平台短视频发布助手',
     short_name: 'PubFlow',
     description: '打开平台发布页后先检测阻挡，由用户确认后按拟真人节奏填充标题、描述和话题。',
-    version: '0.1.0',
+    version: PACKAGE_VERSION,
     permissions: ['storage', 'unlimitedStorage', 'tabs', 'activeTab', 'sidePanel', 'scripting', 'debugger', 'notifications'],
     // 平台页面注入 + AI 接口访问都依赖这里的 host 权限。
     host_permissions: [

@@ -14,6 +14,7 @@ const runtimeDir = resolve(tmpdir(), 'pubflow-extension-security-smoke');
 const evidencePath = resolve(rootDir, args.get('--evidence-file') || '.manual-security/evidence.json');
 const chromeBin = args.get('--chrome-bin') || process.env.CHROME_BIN || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const serverEnvPath = resolve(rootDir, args.get('--server-env') || '../.env.development');
+const extensionVersion = JSON.parse(readFileSync(resolve(rootDir, 'package.json'), 'utf8')).version;
 const headed = args.get('--headed') === '1';
 const shouldGenerateLicense = args.get('--generate-license') === '1';
 let activationCode = String(args.get('--code') || process.env.PUBFLOW_ACTIVATION_CODE || demoActivationCode('creator@northlab.cn')).trim().toUpperCase();
@@ -606,7 +607,7 @@ async function runUnboundNoProofCheck(adminToken) {
     activation_code: code,
     client_install_id: clientInstallId,
     platform: 'chrome-smoke',
-    extension_version: '0.1.0',
+    extension_version: extensionVersion,
   });
   const leaseToken = activation.lease_token || activation.leaseToken;
   const forcedPostRollout = forceLeaseCreatedAfterRollout(leaseToken);
@@ -712,7 +713,7 @@ async function performAdminAuditActions(adminToken, activationSettings) {
   }, adminToken);
   actions.selectorPublish = await postJson('/v1/admin/selector/upload', {
     version: selectorVersion,
-    min_app_version: '0.1.0',
+    min_app_version: extensionVersion,
     selectors: {
       douyin: {
         '平台标识': 'douyin',
@@ -746,7 +747,7 @@ function updateEvidence(resultPath) {
   const evidence = existsSync(evidencePath)
     ? JSON.parse(readFileSync(evidencePath, 'utf8'))
     : {
-        extension_version: '0.1.0',
+        extension_version: extensionVersion,
         server_version: '',
         browser_version: '',
         activation_code: '',

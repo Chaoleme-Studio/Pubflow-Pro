@@ -24,6 +24,7 @@ const emit = defineEmits<{
   'update:recordStatus': [value: 'all' | PublishRecord['status']];
   exportRecords: [];
   syncData: [];
+  startFromRecord: [record: PublishRecord];
 }>();
 
 const currentPage = ref(1);
@@ -35,6 +36,10 @@ const pagedRecords = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value;
   return props.filteredRecords.slice(start, start + pageSize.value);
 });
+
+function recordStat(value: number | undefined) {
+  return value == null ? '暂无' : props.formatViews(value);
+}
 </script>
 
 <template>
@@ -70,6 +75,7 @@ const pagedRecords = computed(() => {
           <option value="all">全部状态</option>
           <option value="published">已发布</option>
           <option value="pending">待发布</option>
+          <option value="filled">待确认</option>
           <option value="error">失败</option>
         </select>
         <span class="pointer-events-none absolute inset-y-0 right-3 flex items-center text-slate-400">
@@ -82,9 +88,13 @@ const pagedRecords = computed(() => {
         导出
       </button>
       <button class="pf-btn-secondary" type="button" @click="emit('syncData')">
-        同步数据
+        刷新记录
       </button>
     </div>
+
+    <p class="-mt-2 text-xs leading-5 text-slate-500">
+      状态和时间来自本地分发任务；播放、赞、评需要平台数据接口或后续采集，尚未同步时显示“暂无”。
+    </p>
 
     <div class="pf-card overflow-x-auto">
       <table class="records-table w-full border-collapse text-left text-sm">
@@ -106,7 +116,7 @@ const pagedRecords = computed(() => {
             <th class="px-4 py-3">平台</th>
             <th class="px-4 py-3">文章标题</th>
             <th class="px-4 py-3">文章链接</th>
-            <th class="px-4 py-3">发布时间</th>
+            <th class="px-4 py-3">状态时间</th>
             <th class="px-4 py-3">播放</th>
             <th class="px-4 py-3">赞</th>
             <th class="px-4 py-3">评</th>
@@ -128,18 +138,21 @@ const pagedRecords = computed(() => {
               <a v-if="record.publishedUrl" class="font-bold text-blue-700 hover:underline" :href="record.publishedUrl" target="_blank">链接</a>
               <span v-else class="text-slate-400">-</span>
             </td>
-            <td class="px-4 py-3 text-slate-500 whitespace-nowrap">{{ formatDate(record.publishedAt) }}</td>
-            <td class="px-4 py-3 font-bold text-slate-700 text-right whitespace-nowrap">{{ formatViews(record.stats?.views) }}</td>
-            <td class="px-4 py-3 font-bold text-slate-700 text-right whitespace-nowrap">{{ formatViews(record.stats?.likes) }}</td>
-            <td class="px-4 py-3 font-bold text-slate-700 text-right whitespace-nowrap">{{ formatViews(record.stats?.comments) }}</td>
+            <td class="px-4 py-3 text-slate-500 whitespace-nowrap">
+              <div>{{ formatDate(record.publishedAt || record.updatedAt) }}</div>
+              <div class="mt-0.5 text-[10px] text-slate-400">{{ record.publishedAt ? '已发布时间' : '最近状态更新' }}</div>
+            </td>
+            <td class="px-4 py-3 font-bold text-slate-700 text-right whitespace-nowrap" title="平台互动数据需要后续同步">{{ recordStat(record.stats?.views) }}</td>
+            <td class="px-4 py-3 font-bold text-slate-700 text-right whitespace-nowrap" title="平台互动数据需要后续同步">{{ recordStat(record.stats?.likes) }}</td>
+            <td class="px-4 py-3 font-bold text-slate-700 text-right whitespace-nowrap" title="平台互动数据需要后续同步">{{ recordStat(record.stats?.comments) }}</td>
             <td class="px-4 py-3 whitespace-nowrap">
               <span class="inline-block rounded px-2.5 py-1 text-xs font-bold ring-1 whitespace-nowrap" :class="statusClass(record.status)">
                 {{ statusText(record.status) }}
               </span>
             </td>
             <td class="px-4 py-3 whitespace-nowrap">
-              <button class="pf-btn-secondary-sm" type="button">
-                {{ record.status === 'error' ? '重试' : record.status === 'pending' ? '填充' : '查看' }}
+              <button class="pf-btn-secondary-sm" type="button" @click="emit('startFromRecord', record)">
+                {{ record.status === 'error' ? '重试' : record.status === 'published' ? '查看' : '继续' }}
               </button>
             </td>
           </tr>

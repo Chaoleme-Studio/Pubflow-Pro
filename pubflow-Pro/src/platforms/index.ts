@@ -7,6 +7,8 @@ import { weiboSelectorConfig } from './weibo/selectors';
 import { weixinChannelsSelectorConfig } from './weixinChannels/selectors';
 import { xiaohongshuSelectorConfig } from './xiaohongshu/selectors';
 import { xiguaSelectorConfig } from './xigua/selectors';
+import { xSelectorConfig } from './x/selectors';
+import { youtubeSelectorConfig } from './youtube/selectors';
 import { zhihuSelectorConfig } from './zhihu/selectors';
 import type { CategorySelectorConfig, DeclarationSelectorConfig, PlatformConfig, PlatformSelectorConfig } from './types';
 
@@ -20,18 +22,26 @@ export const PLATFORM_SELECTOR_CONFIGS = {
   微博: weiboSelectorConfig,
   知乎: zhihuSelectorConfig,
   西瓜视频: xiguaSelectorConfig,
+  X: xSelectorConfig,
+  YouTube: youtubeSelectorConfig,
 } satisfies Record<string, PlatformSelectorConfig>;
 
-export const PLATFORM_SELECTOR_CONFIGS_BY_ID: Record<PlatformId, PlatformSelectorConfig> =
+type BrowserPlatformId = PlatformId;
+
+export const PLATFORM_SELECTOR_CONFIGS_BY_ID: Record<BrowserPlatformId, PlatformSelectorConfig> =
   Object.fromEntries(
     Object.values(PLATFORM_SELECTOR_CONFIGS).map((config) => [config.平台标识, config]),
-  ) as Record<PlatformId, PlatformSelectorConfig>;
+  ) as Record<BrowserPlatformId, PlatformSelectorConfig>;
 
-export const PLATFORM_CONFIGS: Record<PlatformId, PlatformConfig> = Object.fromEntries(
+const browserPlatformConfigs = Object.fromEntries(
   Object.entries(PLATFORM_SELECTOR_CONFIGS_BY_ID).map(([id, config]) => [id, buildPlatformConfig(config)]),
-) as Record<PlatformId, PlatformConfig>;
+) as Record<BrowserPlatformId, PlatformConfig>;
 
-let runtimeSelectorConfigsById: Record<PlatformId, PlatformSelectorConfig> = { ...PLATFORM_SELECTOR_CONFIGS_BY_ID };
+export const PLATFORM_CONFIGS: Record<PlatformId, PlatformConfig> = {
+  ...browserPlatformConfigs,
+};
+
+let runtimeSelectorConfigsById: Record<BrowserPlatformId, PlatformSelectorConfig> = { ...PLATFORM_SELECTOR_CONFIGS_BY_ID };
 let runtimePlatformConfigs: Record<PlatformId, PlatformConfig> = { ...PLATFORM_CONFIGS };
 
 // active=false 的平台不会进入 UI、权限和内容脚本匹配范围。

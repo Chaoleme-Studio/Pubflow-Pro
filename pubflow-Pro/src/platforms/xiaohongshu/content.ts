@@ -255,6 +255,7 @@ function findXiaohongshuCoverEntry(config: PlatformConfig) {
   return (
     findVisibleElement(config.fields.cover?.selectors || []) ||
     findVisibleElement([
+      '.publish-page-content-cover .default.column',
       '.publish-page-content-cover .default.row',
       '.publish-page-content-cover .cover-plugin-preview',
       '.publish-page-content-cover',
@@ -273,7 +274,7 @@ async function openXiaohongshuCoverDialog(coverElement?: HTMLElement) {
 
   const clickTarget =
     coverElement.querySelector<HTMLElement>('.operator.default, .operator, .text') ||
-    coverElement.querySelector<HTMLElement>('.default.row') ||
+    coverElement.querySelector<HTMLElement>('.default.column, .default.row') ||
     coverElement;
   await clickXiaohongshuElement(clickTarget);
 
@@ -560,9 +561,17 @@ function findXiaohongshuOptionHandlerForContent(contentOption: HTMLElement) {
 
 /** 点击小红书页面元素，优先使用 CDP 点击，回退到模拟鼠标事件 */
 async function clickXiaohongshuElement(element: HTMLElement) {
+  const fallbackSelector = '.d-select, .d-select-wrapper, .d-option, .default.column, .default.row, .publish-page-content-cover, .cover-plugin-preview';
+  let clickableAncestor = element.parentElement;
+  while (
+    clickableAncestor &&
+    (!clickableAncestor.matches(fallbackSelector) || !isClickableXiaohongshuElement(clickableAncestor))
+  ) {
+    clickableAncestor = clickableAncestor.parentElement;
+  }
   const visibleTarget = isClickableXiaohongshuElement(element)
     ? element
-    : element.closest<HTMLElement>('.d-select, .d-select-wrapper, .d-option, .default.row, .publish-page-content-cover, .cover-plugin-preview') || element;
+    : clickableAncestor || element;
 
   scrollIntoView(visibleTarget);
   await waitForIdle(120);

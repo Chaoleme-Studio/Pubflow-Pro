@@ -44,7 +44,8 @@ export async function verifyLicense(input: LicensingSettings): Promise<LicenseVe
     ...input,
   };
 
-  if (!settings.apiBaseUrl || !settings.activationCode) {
+  const hasExistingLease = Boolean(settings.leaseToken && settings.clientInstallId);
+  if (!settings.apiBaseUrl || (!settings.activationCode && !hasExistingLease)) {
     return {
       ok: false,
       settings: {
@@ -65,8 +66,13 @@ export async function verifyLicense(input: LicensingSettings): Promise<LicenseVe
       try {
         verifiedSettings = await verifyLease(activeSettings);
       } catch (error) {
-        if (!isDeviceProofRecoveryError(error)) throw error;
-        verifiedSettings = await recoverBrowserDeviceKeyLoss(activeSettings);
+        if (isDeviceProofRecoveryError(error)) {
+          verifiedSettings = await recoverBrowserDeviceKeyLoss(activeSettings);
+        } else if (settings.activationCode && isInvalidLeaseTokenError(error)) {
+          verifiedSettings = await reactivateInvalidLease(activeSettings);
+        } else {
+          throw error;
+        }
       }
     }
 
@@ -143,12 +149,28 @@ async function recoverBrowserDeviceKeyLoss(settings: LicensingSettings): Promise
   return verifyLease(reactivated);
 }
 
+/** 本地 lease token 失效但激活码仍可用时，自动重新激活并验证，避免要求用户重复输入。 */
+async function reactivateInvalidLease(settings: LicensingSettings): Promise<LicensingSettings> {
+  const reactivated = await activateLease({
+    ...settings,
+    leaseToken: '',
+    statusMessage: '',
+  });
+  return verifyLease(reactivated);
+}
+
 function isDeviceProofRecoveryError(error: unknown) {
   if (error instanceof LicenseApiError) {
     return /DEVICE_AUTH_FAILED|DEVICE_PROOF_INVALID|DEVICE_CHALLENGE_REQUIRED|DEVICE_CHALLENGE_EXPIRED|DEVICE_PUBLIC_KEY_REQUIRED/i.test(error.code);
   }
   const message = error instanceof Error ? error.message : String(error || '');
   return /DEVICE_AUTH_FAILED|DEVICE_PROOF_INVALID|DEVICE_CHALLENGE_REQUIRED|DEVICE_CHALLENGE_EXPIRED|DEVICE_PUBLIC_KEY_REQUIRED/i.test(message);
+}
+
+export function isInvalidLeaseTokenError(error: unknown) {
+  const code = error instanceof LicenseApiError ? error.code : '';
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /INVALID_TOKEN|TOKEN_INVALID|LEASE_NOT_FOUND|LEASE_TOKEN_INVALID|Invalid token/i.test(`${code} ${message}`);
 }
 
 async function readApiError(response: Response, fallbackMessage: string): Promise<LicenseApiError> {

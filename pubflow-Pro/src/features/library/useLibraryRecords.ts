@@ -55,7 +55,7 @@ export function useLibraryRecords(params: {
   /** 最近发布的 8 条记录 */
   const recentRecords = computed(() =>
     [...records.value]
-      .sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0))
+      .sort((a, b) => (b.publishedAt || b.updatedAt || 0) - (a.publishedAt || a.updatedAt || 0))
       .slice(0, 8),
   );
 
@@ -66,7 +66,7 @@ export function useLibraryRecords(params: {
       return {
         platformId,
         published: platformRecords.filter((record) => record.status === 'published').length,
-        pending: platformRecords.filter((record) => record.status === 'pending').length,
+        pending: platformRecords.filter((record) => record.status === 'pending' || record.status === 'filled').length,
         error: platformRecords.filter((record) => record.status === 'error').length,
         views: platformRecords.reduce((sum, record) => sum + (record.stats?.views || 0), 0),
       };

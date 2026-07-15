@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,6 +13,8 @@ if (!existsSync(distDir)) {
   console.error('Run a protected build first, for example: OBFUSCATE=1 pnpm -s build');
   process.exit(1);
 }
+
+const extensionVersion = JSON.parse(readFileSync(resolve(distDir, 'manifest.json'), 'utf8')).version;
 
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
@@ -149,7 +151,7 @@ limit 100;
 
 function evidenceTemplate() {
   return JSON.stringify({
-    extension_version: '0.1.0',
+    extension_version: extensionVersion,
     server_version: '',
     browser_version: '',
     activation_code: '',

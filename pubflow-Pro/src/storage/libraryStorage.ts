@@ -37,19 +37,15 @@ function normalizeVideoRecord(record: VideoRecord): VideoRecord {
 }
 
 /**
- * 去重：同一视频文件的多条记录合并为一条，保留最新记录，合并平台发布状态。
+ * 仅按记录 ID 合并重复数据。
+ * 同一个文件可以被用户多次发布，每次发布都应保留为独立记录，不能再按文件名或标题合并。
  */
-function deduplicateVideos(videos: VideoRecord[]): VideoRecord[] {
-  // videoFileName 优先（同文件名即同视频），其次 projectId，最后 title+size 兜底
-  const getKey = (v: VideoRecord) =>
-    v.videoFileName || v.projectId || `${v.title}|${v.videoSize || 0}`;
-
+export function deduplicateVideos(videos: VideoRecord[]): VideoRecord[] {
   const groups = new Map<string, VideoRecord[]>();
   for (const v of videos) {
-    const key = getKey(v);
-    const arr = groups.get(key);
+    const arr = groups.get(v.id);
     if (arr) arr.push(v);
-    else groups.set(key, [v]);
+    else groups.set(v.id, [v]);
   }
 
   const result: VideoRecord[] = [];
@@ -89,7 +85,7 @@ function shouldHavePublishRecord(platform: PlatformStatus): boolean {
 function recordStatusFromPlatform(platform: PlatformStatus): PublishRecord['status'] {
   if (platform.status === 'published') return 'published';
   if (platform.status === 'error') return 'error';
-  return 'pending';
+  return 'filled';
 }
 
 /** 根据视频和平台状态构造一条发布记录。 */
@@ -102,13 +98,14 @@ function buildRecordFromVideoPlatform(video: VideoRecord, platform: PlatformStat
     coverFileName: video.coverFileName,
     publishedUrl: platform.publishedUrl,
     publishedAt: platform.publishedAt,
+    updatedAt: platform.publishedAt || video.updatedAt,
     status: recordStatusFromPlatform(platform),
     error: platform.error,
   };
 }
 
 /** 合并已有记录和视频生成的记录，保留最完整的发布状态。 */
-function mergeRecordsFromVideos(videos: VideoRecord[], records: PublishRecord[]): PublishRecord[] {
+export function mergeRecordsFromVideos(videos: VideoRecord[], records: PublishRecord[]): PublishRecord[] {
   const byKey = new Map<string, PublishRecord>();
   for (const record of records) {
     byKey.set(`${record.videoId}:${record.platformId}`, record);
@@ -121,6 +118,11 @@ function mergeRecordsFromVideos(videos: VideoRecord[], records: PublishRecord[])
       const key = `${video.id}:${platform.platformId}`;
       const existing = byKey.get(key);
       const generated = buildRecordFromVideoPlatform(video, platform);
+      const stateChanged = !existing ||
+        existing.status !== generated.status ||
+        existing.error !== generated.error ||
+        existing.publishedUrl !== generated.publishedUrl ||
+        existing.publishedAt !== generated.publishedAt;
       byKey.set(key, {
         ...generated,
         ...existing,
@@ -130,12 +132,15 @@ function mergeRecordsFromVideos(videos: VideoRecord[], records: PublishRecord[])
         status: existing?.status === 'published' ? 'published' : generated.status,
         publishedUrl: existing?.publishedUrl || generated.publishedUrl,
         publishedAt: existing?.publishedAt || generated.publishedAt,
-        error: generated.error || existing?.error,
+        updatedAt: stateChanged ? generated.updatedAt : existing?.updatedAt || generated.updatedAt,
+        error: generated.error,
       });
     }
   }
 
-  return [...byKey.values()].sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0));
+  return [...byKey.values()].sort(
+    (a, b) => (b.publishedAt || b.updatedAt || 0) - (a.publishedAt || a.updatedAt || 0),
+  );
 }
 
 /** 生成发布记录的稳定签名，用于判断记录集合是否发生变化。 */
@@ -148,6 +153,7 @@ function publishRecordSignature(record: PublishRecord) {
     record.coverFileName || '',
     record.publishedUrl || '',
     record.publishedAt || 0,
+    record.updatedAt || 0,
     record.status,
     record.error || '',
   ].join('\u001f');

@@ -21,6 +21,8 @@ export function useDistributionLauncher(params: {
   videos: Ref<VideoRecord[]>;
   task: Ref<DistributionTask | null>;
   persistDraft: () => Promise<void>;
+  beforeStart?: () => void | Promise<void>;
+  validateBeforeStart?: () => void | Promise<void>;
   onStarted: () => void;
 }) {
   const {
@@ -32,6 +34,8 @@ export function useDistributionLauncher(params: {
     videos,
     task,
     persistDraft,
+    beforeStart,
+    validateBeforeStart,
     onStarted,
   } = params;
 
@@ -128,6 +132,8 @@ export function useDistributionLauncher(params: {
     busy.value = true;
     notice.value = '';
     try {
+      await beforeStart?.();
+      await validateBeforeStart?.();
       await persistDraft();
       const video = await upsertVideoFromDraft();
       const content = buildContent(draft);
