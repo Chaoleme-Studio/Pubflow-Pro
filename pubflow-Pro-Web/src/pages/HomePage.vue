@@ -1,11 +1,8 @@
 <script setup lang="ts">
 import { CloudUpload, Play, Sparkles } from 'lucide-vue-next';
-import { computed } from 'vue';
+import { onMounted, ref } from 'vue';
+import { RouterLink } from 'vue-router';
 import { capabilityCards, platforms, showcaseRows } from '../config/marketing';
-
-defineProps<{
-  navigate: (href: string) => void;
-}>();
 
 interface DanmakuItem {
   id: string;
@@ -38,8 +35,10 @@ const danmakuActions = [
   () => `完成今日第 ${randomInt(2, 9)} 轮分发`,
 ];
 
-const danmakuItems = computed<DanmakuItem[]>(() => {
-  return Array.from({ length: 8 }, (_, index) => {
+const danmakuItems = ref<DanmakuItem[]>([]);
+
+onMounted(() => {
+  danmakuItems.value = Array.from({ length: 8 }, (_, index) => {
     const name = pick(danmakuNames);
     const action = pick(danmakuActions)();
     const minutes = randomInt(1, 18);
@@ -112,14 +111,14 @@ function pick<T>(items: T[]): T {
         <h1>PubFlow</h1>
         <p class="hero-subtitle">为短视频团队和内容运营打造的发布中枢。把多平台、多账号、多素材的重复动作压缩成一次清晰的发布确认。</p>
         <div class="hero-actions">
-          <button class="primary-button" type="button" @click="navigate('/buy')">
+          <RouterLink class="primary-button" to="/buy">
             <Play :size="18" />
             开始使用
-          </button>
-          <button class="secondary-button" type="button" @click="navigate('/buy')">
+          </RouterLink>
+          <RouterLink class="secondary-button" to="/buy">
             <Sparkles :size="18" />
             查看套餐
-          </button>
+          </RouterLink>
         </div>
       </div>
     </section>
@@ -173,7 +172,7 @@ function pick<T>(items: T[]): T {
         <span>品牌内容组</span>
         <strong>稳定交付</strong>
       </div>
-      <button class="primary-button" type="button" @click="navigate('/buy')">查看开通方式</button>
+      <RouterLink class="primary-button" to="/buy">查看开通方式</RouterLink>
     </section>
   </main>
 </template>

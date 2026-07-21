@@ -1,45 +1,26 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
+import { RouterView, useRoute } from 'vue-router';
 import SiteHeader from './components/SiteHeader.vue';
-import AdminPage from './pages/AdminPage.vue';
-import DownloadPage from './pages/DownloadPage.vue';
-import HomePage from './pages/HomePage.vue';
-import LicenseServicePage from './pages/LicenseServicePage.vue';
-import NotFoundPage from './pages/NotFoundPage.vue';
-import PurchasePage from './pages/PurchasePage.vue';
+import { useSiteSeo } from './seo';
 
-const path = ref(window.location.pathname);
-
+const route = useRoute();
+const isAdmin = computed(() => route.name === 'admin');
 const currentView = computed(() => {
-  if (path.value.startsWith('/admin')) return 'admin';
-  if (path.value.startsWith('/buy')) return 'buy';
-  if (path.value.startsWith('/downloads')) return 'downloads';
-  if (path.value.startsWith('/license')) return 'license';
-  if (path.value === '/') return 'home';
-  return 'notFound';
+  const routeName = typeof route.name === 'string' ? route.name : 'not-found';
+  return routeName.startsWith('not-found') ? 'not-found' : routeName;
 });
 
-function navigate(href: string) {
-  window.history.pushState({}, '', href);
-  path.value = window.location.pathname;
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-window.addEventListener('popstate', () => {
-  path.value = window.location.pathname;
-});
+useSiteSeo();
 </script>
 
 <template>
   <div class="app-shell" :class="`view-${currentView}`">
-    <SiteHeader v-if="currentView !== 'admin'" :navigate="navigate" :current-path="path" />
-    <KeepAlive :max="4">
-      <HomePage v-if="currentView === 'home'" :navigate="navigate" />
-      <PurchasePage v-else-if="currentView === 'buy'" :navigate="navigate" />
-      <DownloadPage v-else-if="currentView === 'downloads'" />
-      <LicenseServicePage v-else-if="currentView === 'license'" />
-      <AdminPage v-else-if="currentView === 'admin'" />
-      <NotFoundPage v-else :navigate="navigate" />
-    </KeepAlive>
+    <SiteHeader v-if="!isAdmin" />
+    <RouterView v-slot="{ Component }">
+      <KeepAlive :max="4">
+        <component :is="Component" />
+      </KeepAlive>
+    </RouterView>
   </div>
 </template>

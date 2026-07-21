@@ -1,13 +1,10 @@
 <script setup lang="ts">
 import { Sparkles } from 'lucide-vue-next';
 import { onMounted, onUnmounted, ref } from 'vue';
+import { RouterLink, useRoute } from 'vue-router';
 import { navItems } from '../config/catalog';
 
-const props = defineProps<{
-  navigate: (href: string) => void;
-  currentPath: string;
-}>();
-
+const route = useRoute();
 const headerRef = ref<HTMLElement | null>(null);
 
 function onScroll() {
@@ -22,20 +19,20 @@ onUnmounted(() => window.removeEventListener('scroll', onScroll));
 
 <template>
   <header ref="headerRef" class="site-header">
-    <button class="brand" type="button" @click="navigate('/')">
+    <RouterLink class="brand" to="/">
       <span class="brand-mark">
         <img src="/icon.svg" alt="" aria-hidden="true" />
       </span>
       <span>PubFlow</span>
-    </button>
+    </RouterLink>
     <nav class="top-nav" aria-label="主导航">
-      <button v-for="item in navItems" :key="item.href" type="button" :class="{ active: props.currentPath === item.href }" :aria-current="props.currentPath === item.href ? 'page' : undefined" @click="navigate(item.href)">
+      <RouterLink v-for="item in navItems" :key="item.href" :to="item.href" :class="{ active: route.path === item.href }" :aria-current="route.path === item.href ? 'page' : undefined">
         {{ item.label }}
-      </button>
+      </RouterLink>
     </nav>
-    <button class="header-cta" type="button" @click="navigate('/buy')">
+    <RouterLink class="header-cta" to="/buy">
       <Sparkles :size="16" />
       立即开通
-    </button>
+    </RouterLink>
   </header>
 </template>

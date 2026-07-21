@@ -4,10 +4,6 @@ import QRCode from 'qrcode';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { createOrder, FALLBACK_PRODUCT_CATALOG, getOrderStatus, getProductCatalog, type PayChannel, type Plan, type PlanOption } from '../api';
 
-defineProps<{
-  navigate: (href: string) => void;
-}>();
-
 const RESELLER_URL = 'https://www.aidoumi.com//links/6C406BEA';
 
 const selectedPlan = ref<Plan>('monthly');

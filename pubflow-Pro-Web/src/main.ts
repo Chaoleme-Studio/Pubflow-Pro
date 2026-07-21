@@ -1,6 +1,14 @@
-import { createApp } from 'vue';
-import HighchartsVue from 'highcharts-vue';
+import { ViteSSG } from 'vite-ssg';
 import App from './App.vue';
+import { routes } from './router';
 import './styles.css';
 
-createApp(App).use(HighchartsVue).mount('#app');
+export const createApp = ViteSSG(
+  App,
+  {
+    routes,
+    scrollBehavior(_to, _from, savedPosition) {
+      return savedPosition || { top: 0 };
+    },
+  },
+);

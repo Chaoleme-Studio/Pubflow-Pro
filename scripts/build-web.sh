@@ -12,13 +12,10 @@ ENV_NAME="${ENV:-development}"
 source "$ROOT_DIR/scripts/build-common.sh"
 load_root_env "$ENV_NAME"
 
-# Vite 生产构建需要 VITE_ 前缀的环境变量在进程环境中显式导出
-export VITE_PUBFLOW_API_BASE_URL
-
 echo "=== Building Web Frontend ==="
 cd "$WEB_DIR"
 pnpm install
-ENV="$ENV_NAME" pnpm build
+ENV="$ENV_NAME" pnpm build --mode "$ENV_NAME"
 
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"

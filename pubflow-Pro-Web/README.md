@@ -1,6 +1,6 @@
-# PubFlow Admin Dashboard
+# PubFlow Web
 
-管理后台前端，基于 Vue 3 + Vite + TypeScript 构建。仅供管理员使用，非用户端。
+官网、购买页、下载中心、卡密服务和管理后台，基于 Vue 3 + Vite + TypeScript 构建。
 
 ## 功能
 
@@ -13,7 +13,8 @@
 ## 技术栈
 
 - Vue 3 + TypeScript + Vite
-- 无 UI 框架、无路由、无状态管理（轻量单页应用）
+- Vue Router + Vite SSG（首页收录，业务页 `noindex`）
+- 无 UI 框架、无全局状态管理
 - Lucide Vue 图标
 - 复用 pubflow-Pro-server 的 API 接口
 
@@ -42,6 +43,9 @@ pnpm build      # 类型检查 + 生产构建
 ## 页面说明
 
 - `/` - 首页（产品介绍）
-- `/purchase` - 购买页（选择套餐、支付、查询激活码）
+- `/buy` - 购买页（选择套餐、支付、查询激活码）
 - `/downloads` - 下载页（客户端下载）
+- `/license` - 卡密自助服务
 - `/admin` - 管理后台（需登录）
+
+`pnpm build` 会生成各路由的静态 HTML、`robots.txt` 和 `sitemap.xml`。只有 `/` 会写入 sitemap，并设置为可收录。

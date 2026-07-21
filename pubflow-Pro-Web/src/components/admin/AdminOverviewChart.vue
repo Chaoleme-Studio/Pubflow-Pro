@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Chart } from 'highcharts-vue';
 import { computed } from 'vue';
 import type { AdminLicenseItem, AdminOrderItem } from '../../api';
 import { toDateOnly } from '../../utils/format';
@@ -102,6 +103,6 @@ function buildBuckets(orders: AdminOrderItem[], licenses: AdminLicenseItem[]) {
 
 <template>
   <div class="ops-chart highcharts-panel">
-    <highcharts :options="chartOptions" />
+    <Chart :options="chartOptions" />
   </div>
 </template>

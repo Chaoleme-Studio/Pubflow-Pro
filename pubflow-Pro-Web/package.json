@@ -5,16 +5,20 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "vue-tsc --noEmit && vite build",
+    "prebuild": "vue-tsc --noEmit",
+    "build": "vite-ssg build",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
+    "@unhead/vue": "^2.1.16",
     "@vitejs/plugin-vue": "^6.0.3",
     "highcharts": "^12.6.0",
     "highcharts-vue": "^2.0.1",
     "lucide-vue-next": "^0.544.0",
     "qrcode": "^1.5.4",
-    "vue": "^3.5.29"
+    "vite-ssg": "^28.3.0",
+    "vue": "^3.5.29",
+    "vue-router": "^5.2.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.1",

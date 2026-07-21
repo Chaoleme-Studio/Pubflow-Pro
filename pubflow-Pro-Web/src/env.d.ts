@@ -6,6 +6,7 @@ declare module '*.vue' {
 
 interface ImportMetaEnv {
   readonly VITE_PUBFLOW_API_BASE_URL?: string;
+  readonly VITE_PUBFLOW_SITE_URL?: string;
 }
 
 interface ImportMeta {

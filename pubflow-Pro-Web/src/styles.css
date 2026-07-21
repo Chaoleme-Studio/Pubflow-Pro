@@ -152,7 +152,7 @@ button {
 }
 
 .brand,
-.top-nav button,
+.top-nav a,
 .header-cta,
 .primary-button,
 .secondary-button,
@@ -161,6 +161,7 @@ button {
 .download-inline {
   border: 0;
   color: inherit;
+  text-decoration: none;
 }
 
 .brand {
@@ -194,7 +195,7 @@ button {
   gap: 6px;
 }
 
-.top-nav button {
+.top-nav a {
   padding: 10px 14px;
   border-radius: 8px;
   background: transparent;
@@ -205,11 +206,11 @@ button {
   position: relative;
 }
 
-.top-nav button:hover {
+.top-nav a:hover {
   color: var(--text-1);
 }
 
-.top-nav button.active {
+.top-nav a.active {
   color: var(--brand-400);
   background: rgba(54, 125, 255, 0.08);
 }
