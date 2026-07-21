@@ -19,17 +19,14 @@ pub struct AlipayConfig {
     pub gateway: String,
     pub notify_url: String,
     pub return_url: Option<String>,
-    pub app_private_key_path: String,
+    /// 应用私钥：可直接填写密钥文本；与 `app_private_key_file` 二选一。
     pub app_private_key: String,
-    pub app_public_key_path: String,
-    pub app_public_key: String,
-    pub app_cert_path: String,
-    pub app_cert_sn: String,
-    pub alipay_root_cert_path: String,
-    pub alipay_root_cert_sn: String,
-    pub alipay_public_cert_path: String,
-    pub alipay_public_key_path: String,
+    /// 应用私钥文件路径；可使用绝对路径或相对服务端工作目录的路径。
+    pub app_private_key_file: String,
+    /// 支付宝公钥：可直接填写密钥文本；与 `alipay_public_key_file` 二选一。
     pub alipay_public_key: String,
+    /// 支付宝公钥文件路径；可使用绝对路径或相对服务端工作目录的路径。
+    pub alipay_public_key_file: String,
     pub subject_prefix: String,
     pub timeout_express: String,
 }
@@ -51,17 +48,10 @@ impl Default for AlipayConfig {
             gateway: "https://openapi.alipay.com/gateway.do".to_string(),
             notify_url: String::new(),
             return_url: None,
-            app_private_key_path: String::new(),
             app_private_key: String::new(),
-            app_public_key_path: String::new(),
-            app_public_key: String::new(),
-            app_cert_path: String::new(),
-            app_cert_sn: String::new(),
-            alipay_root_cert_path: String::new(),
-            alipay_root_cert_sn: String::new(),
-            alipay_public_cert_path: String::new(),
-            alipay_public_key_path: String::new(),
+            app_private_key_file: String::new(),
             alipay_public_key: String::new(),
+            alipay_public_key_file: String::new(),
             subject_prefix: "PubFlow Pro".to_string(),
             timeout_express: "30m".to_string(),
         }
@@ -94,44 +84,20 @@ impl ConfigSection for PaymentConfig {
                 if let Some(return_url) = alipay.get("return_url").and_then(|v| v.as_str()) {
                     self.alipay.return_url = Some(return_url.to_string());
                 }
-                if let Some(path) = alipay.get("app_private_key_path").and_then(|v| v.as_str()) {
-                    self.alipay.app_private_key_path = path.to_string();
-                }
                 if let Some(key) = alipay.get("app_private_key").and_then(|v| v.as_str()) {
                     self.alipay.app_private_key = key.to_string();
                 }
-                if let Some(path) = alipay.get("app_public_key_path").and_then(|v| v.as_str()) {
-                    self.alipay.app_public_key_path = path.to_string();
-                }
-                if let Some(key) = alipay.get("app_public_key").and_then(|v| v.as_str()) {
-                    self.alipay.app_public_key = key.to_string();
-                }
-                if let Some(path) = alipay.get("app_cert_path").and_then(|v| v.as_str()) {
-                    self.alipay.app_cert_path = path.to_string();
-                }
-                if let Some(sn) = alipay.get("app_cert_sn").and_then(|v| v.as_str()) {
-                    self.alipay.app_cert_sn = sn.to_string();
-                }
-                if let Some(path) = alipay.get("alipay_root_cert_path").and_then(|v| v.as_str()) {
-                    self.alipay.alipay_root_cert_path = path.to_string();
-                }
-                if let Some(sn) = alipay.get("alipay_root_cert_sn").and_then(|v| v.as_str()) {
-                    self.alipay.alipay_root_cert_sn = sn.to_string();
-                }
-                if let Some(path) = alipay
-                    .get("alipay_public_cert_path")
-                    .and_then(|v| v.as_str())
-                {
-                    self.alipay.alipay_public_cert_path = path.to_string();
-                }
-                if let Some(path) = alipay
-                    .get("alipay_public_key_path")
-                    .and_then(|v| v.as_str())
-                {
-                    self.alipay.alipay_public_key_path = path.to_string();
-                }
                 if let Some(key) = alipay.get("alipay_public_key").and_then(|v| v.as_str()) {
                     self.alipay.alipay_public_key = key.to_string();
+                }
+                if let Some(path) = alipay.get("app_private_key_file").and_then(|v| v.as_str()) {
+                    self.alipay.app_private_key_file = path.to_string();
+                }
+                if let Some(path) = alipay
+                    .get("alipay_public_key_file")
+                    .and_then(|v| v.as_str())
+                {
+                    self.alipay.alipay_public_key_file = path.to_string();
                 }
                 if let Some(prefix) = alipay.get("subject_prefix").and_then(|v| v.as_str()) {
                     self.alipay.subject_prefix = prefix.to_string();
@@ -152,8 +118,22 @@ impl ConfigSection for PaymentConfig {
             if self.alipay.notify_url.trim().is_empty() {
                 return Err("支付宝异步通知地址 ALIPAY_NOTIFY_URL 未配置".to_string());
             }
-            // 支付宝密钥支持在构建期嵌入二进制；这里不强制要求文件路径或明文配置。
-            // 具体材料是否齐全在创建订单时由 SDK 初始化流程校验。
+            if self.alipay.app_private_key.trim().is_empty()
+                && self.alipay.app_private_key_file.trim().is_empty()
+            {
+                return Err(
+                    "支付宝应用私钥未配置：填写 app_private_key 或 app_private_key_file"
+                        .to_string(),
+                );
+            }
+            if self.alipay.alipay_public_key.trim().is_empty()
+                && self.alipay.alipay_public_key_file.trim().is_empty()
+            {
+                return Err(
+                    "支付宝公钥未配置：填写 alipay_public_key 或 alipay_public_key_file"
+                        .to_string(),
+                );
+            }
         }
         Ok(())
     }
@@ -177,38 +157,17 @@ impl ConfigSection for PaymentConfig {
         if let Ok(return_url) = env::var("ALIPAY_RETURN_URL") {
             self.alipay.return_url = Some(return_url);
         }
-        if let Ok(path) = env::var("ALIPAY_APP_PRIVATE_KEY_PATH") {
-            self.alipay.app_private_key_path = path;
-        }
         if let Ok(key) = env::var("ALIPAY_APP_PRIVATE_KEY") {
             self.alipay.app_private_key = key;
         }
-        if let Ok(path) = env::var("ALIPAY_APP_PUBLIC_KEY_PATH") {
-            self.alipay.app_public_key_path = path;
-        }
-        if let Ok(key) = env::var("ALIPAY_APP_PUBLIC_KEY") {
-            self.alipay.app_public_key = key;
-        }
-        if let Ok(path) = env::var("ALIPAY_APP_CERT_PATH") {
-            self.alipay.app_cert_path = path;
-        }
-        if let Ok(sn) = env::var("ALIPAY_APP_CERT_SN") {
-            self.alipay.app_cert_sn = sn;
-        }
-        if let Ok(path) = env::var("ALIPAY_ROOT_CERT_PATH") {
-            self.alipay.alipay_root_cert_path = path;
-        }
-        if let Ok(sn) = env::var("ALIPAY_ROOT_CERT_SN") {
-            self.alipay.alipay_root_cert_sn = sn;
-        }
-        if let Ok(path) = env::var("ALIPAY_PUBLIC_CERT_PATH") {
-            self.alipay.alipay_public_cert_path = path;
-        }
-        if let Ok(path) = env::var("ALIPAY_PUBLIC_KEY_PATH") {
-            self.alipay.alipay_public_key_path = path;
-        }
         if let Ok(key) = env::var("ALIPAY_PUBLIC_KEY") {
             self.alipay.alipay_public_key = key;
+        }
+        if let Ok(path) = env::var("ALIPAY_APP_PRIVATE_KEY_FILE") {
+            self.alipay.app_private_key_file = path;
+        }
+        if let Ok(path) = env::var("ALIPAY_PUBLIC_KEY_FILE") {
+            self.alipay.alipay_public_key_file = path;
         }
         if let Ok(prefix) = env::var("ALIPAY_SUBJECT_PREFIX") {
             self.alipay.subject_prefix = prefix;

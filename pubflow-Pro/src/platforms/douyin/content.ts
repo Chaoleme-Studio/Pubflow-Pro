@@ -1,4 +1,9 @@
-import { fillField, fillTopics, humanDelay } from '../../content/fieldFiller';
+import {
+  fillDescriptionWithTopicsByTrustedInput,
+  fillField,
+  fillTopics,
+  humanDelay,
+} from '../../content/fieldFiller';
 import { uploadVideoIfAvailable } from '../../content/videoUploader';
 import { fillArticleBody } from '../../content/articleBodyFiller';
 import { cdpClickElement } from '../../content/cdp';
@@ -654,16 +659,24 @@ export async function fillDouyinContent(config: PlatformConfig, content: Content
     hasArticleBodyField: Boolean(fields.articleBody),
     articleBodySelectors: fields.articleBody?.selectors,
   });
+  const topicField = fields.tags || fields.topics;
   if (isArticle && content.articleContent && fields.articleBody) {
     articleBodyMessage = await fillArticleBody(fields.articleBody, content.articleContent);
     await humanDelay();
-  } else if (fields.description && content.description) {
-    // 视频/图文模式：填充简介
-    await fillField(fields.description, content.description);
+  } else if (fields.description && (content.description || (!topicField && content.topics.length > 0))) {
+    if (topicField) {
+      await fillField(fields.description, content.description);
+    } else {
+      await fillDescriptionWithTopicsByTrustedInput(
+        fields.description,
+        content.description,
+        content.topics,
+        content.fillOptions?.topicIntervalMs,
+      );
+    }
     await humanDelay();
   }
 
-  const topicField = fields.tags || fields.topics;
   if (topicField && content.topics.length > 0) {
     await fillTopics(topicField, content.topics);
     await humanDelay();

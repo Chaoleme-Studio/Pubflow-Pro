@@ -1,5 +1,5 @@
 import { cdpClickElement, cdpDragElement } from '../../content/cdp';
-import { fillField, humanDelay } from '../../content/fieldFiller';
+import { fillDescriptionWithTopicsByTrustedInput, fillField, humanDelay } from '../../content/fieldFiller';
 import { uploadVideoIfAvailable } from '../../content/videoUploader';
 import { fillArticleBodyAsText, extractBase64ImagesAsFiles } from '../../content/articleBodyFiller';
 import { composePublishMessage, waitForArticleEditorReady, waitForEditorReady } from '../../content/publishSteps';
@@ -869,9 +869,14 @@ export async function fillZhihuContent(config: PlatformConfig, content: ContentD
     }
     articleBodyMessage = await fillArticleBodyAsText(fields.articleBody, cleanedMarkdown);
     await humanDelay();
-  } else if (fields.description && content.description) {
-    // 视频模式：填充简介
-    await fillField(fields.description, content.description);
+  } else if (fields.description && (content.description || content.topics.length > 0)) {
+    // 视频简介必须先真实点击激活，再逐个输入并确认话题。
+    await fillDescriptionWithTopicsByTrustedInput(
+      fields.description,
+      content.description,
+      content.topics,
+      content.fillOptions?.topicIntervalMs,
+    );
     await humanDelay();
   }
 

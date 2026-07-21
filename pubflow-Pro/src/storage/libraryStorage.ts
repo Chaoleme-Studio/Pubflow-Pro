@@ -1,11 +1,17 @@
 import { STORAGE_KEYS } from '../types';
 import type { PlatformStatus, PublishRecord, VideoRecord } from '../types';
-import { deleteProjectData, loadAllWorkspaceProjects, writeProjectData } from './workspaceStorage';
+import {
+  deleteProjectData,
+  loadAllWorkspaceProjects,
+  loadWorkspaceDirectory,
+  writeProjectData,
+} from './workspaceStorage';
 
 /** 从工作区或 chrome.storage.local 加载视频与发布记录的对照数据。 */
 async function loadPersistedLibraryPairs() {
+  const workspace = await loadWorkspaceDirectory();
   const projects = await loadAllWorkspaceProjects();
-  if (projects.length) {
+  if (workspace?.handle) {
     return {
       videos: projects.map((project) => normalizeVideoRecord(project.video)),
       records: projects.flatMap((project) => project.records || []),
@@ -13,10 +19,16 @@ async function loadPersistedLibraryPairs() {
   }
 
   const stored = await browser.storage.local.get([STORAGE_KEYS.videos, STORAGE_KEYS.records]);
-  return {
-    videos: ((stored[STORAGE_KEYS.videos] as VideoRecord[] | undefined) || []).map(normalizeVideoRecord),
-    records: (stored[STORAGE_KEYS.records] as PublishRecord[] | undefined) || [],
-  };
+  const rawVideos = (stored[STORAGE_KEYS.videos] as VideoRecord[] | undefined) || [];
+  const projectIdByVideoId = new Map(
+    rawVideos.map((video) => [video.id, video.projectId] as const),
+  );
+  const videos = rawVideos.map(normalizeVideoRecord);
+  const records = ((stored[STORAGE_KEYS.records] as PublishRecord[] | undefined) || []).map((record) => {
+    const projectId = projectIdByVideoId.get(record.videoId) || record.videoId;
+    return { ...record, id: `${projectId}:${record.platformId}`, videoId: projectId };
+  });
+  return { videos, records };
 }
 
 /** 筛选出与指定视频关联的发布记录。 */
@@ -24,12 +36,13 @@ function recordsForVideo(records: PublishRecord[], video: VideoRecord) {
   return records.filter((record) => record.videoId === video.id);
 }
 
-/** 规范化视频记录字段，补齐旧数据缺失的 projectId、topics 等字段。 */
+/** 将视频记录收敛到 projectId 唯一身份。 */
 function normalizeVideoRecord(record: VideoRecord): VideoRecord {
+  const projectId = record.projectId;
   return {
     ...record,
-    // 旧记录可能没有 projectId（restoreFromWorkspace 早期版本漏了），回填为 id
-    projectId: record.projectId || record.id,
+    id: projectId,
+    projectId,
     topics: Array.isArray(record.topics) ? record.topics : [],
     campaignIds: Array.isArray(record.campaignIds) ? record.campaignIds : [],
     platforms: Array.isArray(record.platforms) ? record.platforms : [],
@@ -37,15 +50,15 @@ function normalizeVideoRecord(record: VideoRecord): VideoRecord {
 }
 
 /**
- * 仅按记录 ID 合并重复数据。
- * 同一个文件可以被用户多次发布，每次发布都应保留为独立记录，不能再按文件名或标题合并。
+ * projectId 是唯一身份；同一项目出现多个目录快照时只保留最新状态。
  */
 export function deduplicateVideos(videos: VideoRecord[]): VideoRecord[] {
   const groups = new Map<string, VideoRecord[]>();
   for (const v of videos) {
-    const arr = groups.get(v.id);
+    const identity = v.projectId;
+    const arr = groups.get(identity);
     if (arr) arr.push(v);
-    else groups.set(v.id, [v]);
+    else groups.set(identity, [v]);
   }
 
   const result: VideoRecord[] = [];
@@ -57,10 +70,10 @@ export function deduplicateVideos(videos: VideoRecord[]): VideoRecord[] {
     // 按 updatedAt 降序，保留最新
     arr.sort((a, b) => b.updatedAt - a.updatedAt);
     const kept = { ...arr[0] };
-    // 从旧记录中合并已发布的平台状态
+    // 从较早快照中合并已发布的平台状态
     for (let i = 1; i < arr.length; i++) {
       for (const oldPlatform of arr[i].platforms) {
-        if (oldPlatform.status === 'published' && oldPlatform.publishedUrl) {
+        if (oldPlatform.status === 'published') {
           const existing = kept.platforms.find((p) => p.platformId === oldPlatform.platformId);
           if (existing && existing.status !== 'published') {
             existing.status = 'published';
@@ -143,34 +156,7 @@ export function mergeRecordsFromVideos(videos: VideoRecord[], records: PublishRe
   );
 }
 
-/** 生成发布记录的稳定签名，用于判断记录集合是否发生变化。 */
-function publishRecordSignature(record: PublishRecord) {
-  return [
-    record.id,
-    record.videoId,
-    record.platformId,
-    record.title,
-    record.coverFileName || '',
-    record.publishedUrl || '',
-    record.publishedAt || 0,
-    record.updatedAt || 0,
-    record.status,
-    record.error || '',
-  ].join('\u001f');
-}
-
-/** 比较两组发布记录是否不同。 */
-function recordsChanged(next: PublishRecord[], previous: PublishRecord[]) {
-  if (next.length !== previous.length) return true;
-  for (let index = 0; index < next.length; index++) {
-    if (publishRecordSignature(next[index]) !== publishRecordSignature(previous[index])) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/** 加载并去重后的视频库和发布记录。 */
+/** 从当前工作区加载项目库；浏览器存储只作为未选择工作区时的数据源。 */
 export async function loadLibraryData() {
   const persisted = await loadPersistedLibraryPairs();
   const videos = persisted.videos;
@@ -178,12 +164,10 @@ export async function loadLibraryData() {
 
   const deduped = deduplicateVideos(videos);
   const mergedRecords = mergeRecordsFromVideos(deduped, records);
-  // 去重或规范化后数据有变化则回写
-  const videosChanged = deduped.length < videos.length || deduped.some((v, i) => v !== videos[i]);
-  const publishRecordsChanged = recordsChanged(mergedRecords, records);
-  if (videosChanged || publishRecordsChanged) {
-    await saveLibraryData(deduped, mergedRecords);
-  }
+  await browser.storage.local.set({
+    [STORAGE_KEYS.videos]: deduped,
+    [STORAGE_KEYS.records]: mergedRecords,
+  });
 
   return { videos: deduped, records: mergedRecords };
 }
@@ -219,12 +203,12 @@ export async function saveRecords(records: PublishRecord[]) {
   await browser.storage.local.set({ [STORAGE_KEYS.records]: records });
 }
 
-/** 删除指定视频及其关联的发布记录，同时清理工作区中的项目目录。 */
-export async function deleteVideoRecord(videoId: string) {
+/** 删除指定项目及其关联发布记录，同时清理工作区项目目录。 */
+export async function deleteVideoRecord(projectId: string) {
   const persisted = await loadPersistedLibraryPairs();
-  const target = persisted.videos.find((video) => video.id === videoId);
-  const videos = persisted.videos.filter((video) => video.id !== videoId);
-  const records = persisted.records.filter((record) => record.videoId !== videoId);
+  const target = persisted.videos.find((video) => video.projectId === projectId);
+  const videos = persisted.videos.filter((video) => video.projectId !== projectId);
+  const records = persisted.records.filter((record) => record.videoId !== projectId);
 
   if (target) {
     await deleteProjectData(target);

@@ -90,11 +90,13 @@ function isDemoWorkspaceVideo(video: VideoRecord) {
   return !!video.coverFileName && PACKAGED_DEMO_COVER_FILE_NAMES.has(video.coverFileName);
 }
 
-/** 确保视频记录包含 projectId，若无则使用 id 作为默认值 */
+/** 将演示视频身份统一到 projectId。 */
 function normalizeProjectVideo(video: VideoRecord): VideoRecord {
+  const projectId = video.projectId;
   return {
     ...video,
-    projectId: video.projectId || video.id,
+    id: projectId,
+    projectId,
   };
 }
 
@@ -135,7 +137,8 @@ export async function seedDemoWorkspace(): Promise<SeedDemoWorkspaceResult> {
   let copiedCovers = 0;
 
   for (const video of demoProjectVideos) {
-    const projectId = video.projectId || video.id;
+    const projectId = video.projectId;
+    if (!projectId) continue;
     const projectName = createProjectFolderName(projectId, video.title, video.contentType);
     const projectResult = await getOrCreateDirectory(projectsDir, projectName);
     if (projectResult.existed) skippedProjects += 1;

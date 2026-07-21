@@ -27,7 +27,9 @@ import {
   defaultWorkspaceSettings,
   importProjectAsset,
   loadProjectAssetFiles,
+  videoRecordFromDraft,
 } from '../../src/storage/workspaceStorage';
+import { saveVideos } from '../../src/storage/libraryStorage';
 import type {
   AIProviderSettings,
   DistributionTask,
@@ -204,7 +206,6 @@ async function loadArticleImageUrl(relativePath: string): Promise<string> {
   const fileName = parts[parts.length - 1];
   const assets = await loadProjectAssetFiles({
     projectId: draft.projectId,
-    title: draft.title,
     imageFileNames: [fileName],
   });
   if (assets.imageFiles[0]) {
@@ -248,6 +249,7 @@ const {
   resetDraft,
   prepareDraftForNextPublication,
   revokeAllUrls,
+  replicateDraftFromVideo,
   restoreDraftFromVideo,
   setPersistArticleContent,
 } = usePublishDraft({
@@ -286,6 +288,7 @@ const { startDistribution } = useDistributionLauncher({
   busy,
   notice,
   platformSettings,
+  globalSettings,
   videos,
   task,
   persistDraft,
@@ -381,6 +384,34 @@ async function startFromVideo(video: VideoRecord, targetPlatformId?: PlatformId)
   const restored = await restoreDraftFromVideo(video, targetPlatformId);
   if (restored) {
     notice.value = '已恢复到发布页，可继续编辑或重新分发。';
+  }
+}
+
+async function replicateVideo(video: VideoRecord) {
+  if (busy.value) return;
+  busy.value = true;
+  uploadTab.value = video.contentType || (video.imageFileNames?.length ? 'image' : 'video');
+  activeView.value = 'publish';
+  notice.value = '正在复刻项目发布信息…';
+  try {
+    const restored = await replicateDraftFromVideo(video);
+    if (!restored || !draft.projectId) return;
+
+    const existingIndex = videos.value.findIndex((item) => item.projectId === draft.projectId);
+    const existing = existingIndex >= 0 ? videos.value[existingIndex] : undefined;
+    const replica = videoRecordFromDraft(draft, existing, { resetPlatformStatuses: true });
+    videos.value = existingIndex >= 0
+      ? [...videos.value.slice(0, existingIndex), replica, ...videos.value.slice(existingIndex + 1)]
+      : [replica, ...videos.value].slice(0, 100);
+    await saveVideos(videos.value);
+    await preloadVideoCovers();
+    notice.value = existing
+      ? '已用当前视频的发布信息覆盖复刻草稿，请重新选择素材。'
+      : '已创建仅包含发布信息的复刻草稿，请重新选择素材。';
+  } catch (error) {
+    notice.value = error instanceof Error ? error.message : '复刻项目失败';
+  } finally {
+    busy.value = false;
   }
 }
 
@@ -651,7 +682,8 @@ onUnmounted(() => {
             @sync-data="syncData('videos')"
             @open-publish="activeView = 'publish'"
             @open-records="activeView = 'records'"
-            @start-from-video="startFromVideo"
+            @edit-video="startFromVideo"
+            @replicate-video="replicateVideo"
             @delete-video="deleteVideo"
           />
 

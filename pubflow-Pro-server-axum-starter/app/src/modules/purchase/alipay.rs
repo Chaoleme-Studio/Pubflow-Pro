@@ -1,7 +1,6 @@
 use std::fs;
 
 use alipay_sdk_rust::biz::{self, BizContenter};
-use alipay_sdk_rust::cert;
 use alipay_sdk_rust::pay::{PayClient, Payer};
 
 use crate::core::config::AlipayConfig;
@@ -98,13 +97,16 @@ fn build_pay_client(
     builder
         .api_url(config.gateway.trim())
         .app_id(config.app_id.trim())
-        .alipay_root_cert_sn(&material.alipay_root_cert_sn)
+        // Empty certificate fields select the ordinary RSA public-key mode.
+        .alipay_root_cert_sn("")
         .alipay_public_key(&material.alipay_public_key)
-        .app_cert_sn(&material.app_cert_sn)
+        .app_cert_sn("")
         .charset_utf8()
         .format_json()
         .private_key(&material.app_private_key)
-        .public_key(&material.app_public_key)
+        // alipay_sdk_rust requires this builder slot even in public-key mode;
+        // verification uses alipay_public_key above.
+        .public_key(&material.alipay_public_key)
         .sign_type_rsa2()
         .version_1_0()
         .notify_url(config.notify_url.trim());
@@ -125,9 +127,6 @@ fn build_pay_client(
 
 struct AlipayMaterial {
     app_private_key: String,
-    app_public_key: String,
-    app_cert_sn: String,
-    alipay_root_cert_sn: String,
     alipay_public_key: String,
 }
 
@@ -136,84 +135,22 @@ impl AlipayMaterial {
         Ok(Self {
             app_private_key: read_key_material(
                 &config.app_private_key,
-                &config.app_private_key_path,
+                &config.app_private_key_file,
                 "支付宝应用私钥",
                 EmbeddedKey::AppPrivate,
             )?,
-            app_public_key: read_key_material(
-                &config.app_public_key,
-                &config.app_public_key_path,
-                "支付宝应用公钥",
-                EmbeddedKey::AppPublic,
-            )?,
-            app_cert_sn: read_or_derive_app_cert_sn(config)?,
-            alipay_root_cert_sn: read_or_derive_root_cert_sn(config)?,
             alipay_public_key: read_or_derive_alipay_public_key(config)?,
         })
     }
 }
 
-fn read_or_derive_app_cert_sn(config: &AlipayConfig) -> Result<String, crate::AppError> {
-    let sn = config.app_cert_sn.trim();
-    if !sn.is_empty() {
-        return Ok(sn.to_string());
-    }
-    if let Some(sn) = embedded::APP_CERT_SN
-        .map(str::trim)
-        .filter(|sn| !sn.is_empty())
-    {
-        return Ok(sn.to_string());
-    }
-    if !config.app_cert_path.trim().is_empty() {
-        return cert::get_cert_sn(config.app_cert_path.trim()).map_err(|error| {
-            PubFlowError::Internal(format!("支付宝应用公钥证书 SN 读取失败: {error}")).into()
-        });
-    }
-    if let Some(value) = embedded::APP_CERT {
-        return cert::cert_sn_from_utf8(value.as_bytes()).map_err(|error| {
-            PubFlowError::Internal(format!("嵌入的支付宝应用公钥证书 SN 读取失败: {error}")).into()
-        });
-    }
-    Err(ValidationError::custom(
-        "支付宝应用公钥证书 SN 未配置：纯公钥 TXT 无法推导 SN，请填写 ALIPAY_APP_CERT_SN、放入 secrets/alipay/app_cert_sn.txt，或放入 appCertPublicKey.crt",
-    )
-    .into())
-}
-
-fn read_or_derive_root_cert_sn(config: &AlipayConfig) -> Result<String, crate::AppError> {
-    let sn = config.alipay_root_cert_sn.trim();
-    if !sn.is_empty() {
-        return Ok(sn.to_string());
-    }
-    if let Some(sn) = embedded::ALIPAY_ROOT_CERT_SN
-        .map(str::trim)
-        .filter(|sn| !sn.is_empty())
-    {
-        return Ok(sn.to_string());
-    }
-    if !config.alipay_root_cert_path.trim().is_empty() {
-        return cert::get_root_cert_sn(config.alipay_root_cert_path.trim()).map_err(|error| {
-            PubFlowError::Internal(format!("支付宝根证书 SN 读取失败: {error}")).into()
-        });
-    }
-    if let Some(value) = embedded::ALIPAY_ROOT_CERT {
-        return cert::root_cert_sn_from_utf8(value.as_bytes()).map_err(|error| {
-            PubFlowError::Internal(format!("嵌入的支付宝根证书 SN 读取失败: {error}")).into()
-        });
-    }
-    Err(ValidationError::custom(
-        "支付宝根证书 SN 未配置：纯公钥 TXT 无法推导 SN，请填写 ALIPAY_ROOT_CERT_SN、放入 secrets/alipay/alipay_root_cert_sn.txt，或放入 alipayRootCert.crt",
-    )
-    .into())
-}
-
 fn read_or_derive_alipay_public_key(config: &AlipayConfig) -> Result<String, crate::AppError> {
     if !config.alipay_public_key.trim().is_empty()
-        || !config.alipay_public_key_path.trim().is_empty()
+        || !config.alipay_public_key_file.trim().is_empty()
     {
         return read_key_material(
             &config.alipay_public_key,
-            &config.alipay_public_key_path,
+            &config.alipay_public_key_file,
             "支付宝公钥",
             EmbeddedKey::AlipayPublic,
         );
@@ -221,18 +158,15 @@ fn read_or_derive_alipay_public_key(config: &AlipayConfig) -> Result<String, cra
     if let Some(value) = embedded_key(EmbeddedKey::AlipayPublic) {
         return Ok(strip_pem_noise(value));
     }
-    if !config.alipay_public_cert_path.trim().is_empty() {
-        return cert::get_public_key_with_path(config.alipay_public_cert_path.trim()).map_err(
-            |error| PubFlowError::Internal(format!("支付宝公钥证书读取失败: {error}")).into(),
-        );
-    }
-    Err(ValidationError::custom("支付宝公钥或支付宝公钥证书未配置").into())
+    Err(ValidationError::custom(
+        "支付宝公钥未配置：请填写 alipay_public_key 或 alipay_public_key_file",
+    )
+    .into())
 }
 
 #[derive(Clone, Copy)]
 enum EmbeddedKey {
     AppPrivate,
-    AppPublic,
     AlipayPublic,
 }
 
@@ -251,7 +185,7 @@ fn read_key_material(
         return fs::read_to_string(path)
             .map(|value| strip_pem_noise(&value))
             .map_err(|error| {
-                PubFlowError::Internal(format!("{label}文件读取失败: {error}")).into()
+                PubFlowError::Internal(format!("{label}文件读取失败（{path}）: {error}")).into()
             });
     }
     if let Some(value) = embedded_key(embedded) {
@@ -263,7 +197,6 @@ fn read_key_material(
 fn embedded_key(kind: EmbeddedKey) -> Option<&'static str> {
     match kind {
         EmbeddedKey::AppPrivate => embedded::APP_PRIVATE_KEY,
-        EmbeddedKey::AppPublic => embedded::APP_PUBLIC_KEY,
         EmbeddedKey::AlipayPublic => embedded::ALIPAY_PUBLIC_KEY,
     }
 }

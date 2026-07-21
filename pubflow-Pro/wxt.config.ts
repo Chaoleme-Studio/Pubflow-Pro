@@ -11,6 +11,9 @@ import { obfuscate, type ObfuscatorOptions } from 'javascript-obfuscator';
 const ROOT_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_VERSION = JSON.parse(readFileSync(resolve(ROOT_DIR, 'package.json'), 'utf8')).version;
 const WORKSPACE_DIR = resolve(ROOT_DIR, '..');
+// 公钥不是密钥；固定它可让 dist 与 .output 的 unpacked 产物使用同一个扩展 ID。
+// 对应的 CRX 私钥由发布环境保管，不进入源码。
+const EXTENSION_PUBLIC_KEY = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyJfKJlFaT3wwk0H8D1ZyVdiIo02mSk4sxVlQfnQP1NIQqpSg24dtImxO0sKtUPzfJsv9pSASnF2vFLc3C2pmj2CXzkE5xeVasrw6rN0w0/D6bMJTf9hv5O1SW7882tWVXm+Cz5b+kFVe+unmDAT3dVvTB4Ca1gVaB8a0oMDxSgP+/AZfnV7/bdsbh6CyeOL5IZ8SFOvGzSo4OH4nkFLKJV1X1cjsyC9xGds8K121mlDn6xbtYgwzGqlEvJlv7zRiKiRAwVFuQbPMlxJGUZTCFmRxRW2ED5KiV9kg6uD7Ij4EdNHQ7OaMxBRdB33MWnXD6KVjr6VX7PluiOnhZw0hhQIDAQAB';
 const WXT_COMMAND = process.argv.includes('build') || process.argv.includes('zip') ? 'production' : 'development';
 const ENV_NAME = process.env.PUBFLOW_ENV || process.env.ENV || WXT_COMMAND;
 const LOCAL_CONFIG = deriveLocalConfig({
@@ -18,6 +21,7 @@ const LOCAL_CONFIG = deriveLocalConfig({
   ...process.env,
 });
 const DEV_WORKSPACE_PATH = normalizeLocalPath(LOCAL_CONFIG.PUBFLOW_DEV_WORKSPACE_PATH) || '';
+const DEFAULT_TOPIC_INTERVAL_MS = requireIntegerConfig(LOCAL_CONFIG, 'PUBFLOW_TOPIC_INTERVAL_MS', 100, 3000);
 const CHROMIUM_PORT = Number(LOCAL_CONFIG.PUBFLOW_CHROMIUM_PORT?.trim() || '9222') || 9222;
 const CHROMIUM_PROFILE = normalizeLocalPath(LOCAL_CONFIG.PUBFLOW_CHROMIUM_PROFILE);
 const MANUAL_BROWSER = parseBooleanEnv(LOCAL_CONFIG.PUBFLOW_MANUAL_BROWSER);
@@ -68,6 +72,7 @@ export default defineConfig({
     define: {
       // 仅开发环境使用，用于在设置页展示预设工作区路径。
       __PUBFLOW_DEV_WORKSPACE_PATH__: JSON.stringify(DEV_WORKSPACE_PATH),
+      __PUBFLOW_DEFAULT_TOPIC_INTERVAL_MS__: JSON.stringify(DEFAULT_TOPIC_INTERVAL_MS),
       __PUBFLOW_DEFAULT_LICENSE_API_BASE_URL__: JSON.stringify(DEFAULT_LICENSE_API_BASE_URL),
       __PUBFLOW_OFFICIAL_SITE_URL__: JSON.stringify(OFFICIAL_SITE_URL),
       __PUBFLOW_PROTOCOL_PUBLIC_KEY__: JSON.stringify(PROTOCOL_PUBLIC_KEY),
@@ -93,6 +98,7 @@ export default defineConfig({
     startUrls: ['chrome://extensions/'],
   },
   manifest: {
+    key: EXTENSION_PUBLIC_KEY,
     name: 'PubFlow 多平台短视频发布助手',
     short_name: 'PubFlow',
     description: '打开平台发布页后先检测阻挡，由用户确认后按拟真人节奏填充标题、描述和话题。',
@@ -163,6 +169,20 @@ function deriveLocalConfig(config: Record<string, string | undefined>): Record<s
 function parseBooleanEnv(rawValue?: string): boolean {
   if (!rawValue) return false;
   return ['1', 'true', 'yes', 'on'].indexOf(rawValue.trim().toLowerCase()) >= 0;
+}
+
+function requireIntegerConfig(
+  config: Record<string, string>,
+  key: string,
+  min: number,
+  max: number,
+) {
+  const rawValue = config[key]?.trim();
+  const value = Number(rawValue);
+  if (!rawValue || !Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`${key} must be an integer between ${min} and ${max}`);
+  }
+  return value;
 }
 
 function normalizeLocalPath(rawPath?: string): string | undefined {

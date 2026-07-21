@@ -1,4 +1,5 @@
 import { AI_PROVIDER_PRESETS } from '../features/settings/aiPresets';
+import { DEFAULT_TOPIC_INTERVAL_MS } from '../domain/fillSettings';
 import { PLATFORM_ORDER } from '../platforms';
 import { STORAGE_KEYS } from '../types';
 import type { AIProviderSettings, GlobalSettings, LicensingSettings, PlatformId, PlatformSettings, ServerConfig } from '../types';
@@ -22,6 +23,7 @@ export const defaultGlobalSettings: GlobalSettings = {
   fillSpeed: 'normal',
   autoSubmit: false,
   distributionInterval: 3,
+  topicIntervalMs: DEFAULT_TOPIC_INTERVAL_MS,
 };
 
 export const defaultServerConfig: ServerConfig = {

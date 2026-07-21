@@ -1,6 +1,7 @@
 import { PLATFORM_CONFIGS, PLATFORM_ORDER, supportsContentType } from '../platforms';
 import { STORAGE_KEYS } from '../types';
 import type { ContentDraft } from '../types';
+import { normalizeScheduledAt } from '../domain/content';
 import { readDataFile, mergeDataFile } from './workspaceStorage';
 
 export const DEFAULT_DRAFT: ContentDraft = {
@@ -11,6 +12,7 @@ export const DEFAULT_DRAFT: ContentDraft = {
   selectedPlatforms: ['douyin', 'xiaohongshu', 'kuaishou'],
   selectedCampaignIds: [],
   sourceVideoId: '',
+  replicaSourceProjectId: '',
   projectId: '',
   videoCacheId: '',
   coverCacheId: '',
@@ -62,6 +64,7 @@ function normalizeDraft(raw: Partial<ContentDraft> | undefined): ContentDraft {
     topicsText: raw.topicsText || '',
     selectedCampaignIds,
     sourceVideoId: raw.sourceVideoId || '',
+    replicaSourceProjectId: raw.replicaSourceProjectId || '',
     projectId: raw.projectId || '',
     videoCacheId: raw.videoCacheId || '',
     coverCacheId: raw.coverCacheId || '',
@@ -75,7 +78,7 @@ function normalizeDraft(raw: Partial<ContentDraft> | undefined): ContentDraft {
     videoSize: raw.videoSize || 0,
     coverSize: raw.coverSize || 0,
     musicSize: raw.musicSize || 0,
-    scheduledAt: raw.scheduledAt || 0,
+    scheduledAt: normalizeScheduledAt(raw.scheduledAt),
     visibility: raw.visibility || 'public',
     originalDeclare: raw.originalDeclare ?? false,
     platformSettings: raw.platformSettings || {},

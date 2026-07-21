@@ -1,4 +1,5 @@
-import { fillField, humanDelay } from '../../content/fieldFiller';
+import { appendTopicsToDescription, fillDescriptionWithTopics, fillField, humanDelay } from '../../content/fieldFiller';
+import { splitDescriptionAndTopics } from '../../domain/content';
 import { uploadVideoIfAvailable } from '../../content/videoUploader';
 import { fillArticleBody } from '../../content/articleBodyFiller';
 import { cdpClickElement } from '../../content/cdp';
@@ -678,15 +679,32 @@ export async function fillXiaohongshuContent(config: PlatformConfig, content: Co
   if (isArticle && content.articleContent && fields.articleBody) {
     articleBodyMessage = await fillArticleBody(fields.articleBody, content.articleContent);
     await humanDelay();
-  } else if (isImagePost && content.description) {
-    const filled = await fillXiaohongshuImageDescription(content.description);
+  } else if (isImagePost && fields.description && (content.description || content.topics.length > 0)) {
+    const prepared = splitDescriptionAndTopics(content.description, content.topics);
+    const filled = await fillXiaohongshuImageDescription(prepared.description);
     if (!filled && fields.description) {
-      await fillField(fields.description, content.description);
+      await fillDescriptionWithTopics(
+        fields.description,
+        prepared.description,
+        prepared.topics,
+        content.fillOptions?.topicIntervalMs,
+      );
+    } else if (prepared.topics.length > 0) {
+      await appendTopicsToDescription(
+        fields.description,
+        prepared.description,
+        prepared.topics,
+        content.fillOptions?.topicIntervalMs,
+      );
     }
     await humanDelay();
-  } else if (fields.description && content.description) {
-    // 视频/图文模式：填充简介
-    await fillField(fields.description, content.description);
+  } else if (fields.description && (content.description || content.topics.length > 0)) {
+    await fillDescriptionWithTopics(
+      fields.description,
+      content.description,
+      content.topics,
+      content.fillOptions?.topicIntervalMs,
+    );
     await humanDelay();
   }
 

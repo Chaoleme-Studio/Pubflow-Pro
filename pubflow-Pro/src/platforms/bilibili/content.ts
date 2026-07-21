@@ -14,6 +14,8 @@ import {
   waitForImageEditorReady,
 } from '../../content/publishSteps';
 import { findVisibleElement, isVisible, scrollIntoView, waitForIdle } from '../../content/dom';
+import { splitDescriptionAndTopics } from '../../domain/content';
+import { normalizeTopicIntervalMs } from '../../domain/fillSettings';
 import { resolveContentFields } from '../shared';
 import { loadFileForTransfer } from '../../storage/videoTransferStorage';
 import type { ContentData } from '../../types';
@@ -411,7 +413,7 @@ async function waitForBilibiliCoverPreviewChange(
 }
 
 /** 填充 B站标签；先清除已有自动标签，再逐个填入新标签。 */
-async function fillBilibiliTags(tags: string[], keepAutoTags: boolean) {
+async function fillBilibiliTags(tags: string[], keepAutoTags: boolean, topicIntervalMs?: number) {
   const tagInput = document.querySelector<HTMLInputElement>('#tag-container input.input-val');
   if (!tagInput) return;
 
@@ -419,7 +421,7 @@ async function fillBilibiliTags(tags: string[], keepAutoTags: boolean) {
   if (!keepAutoTags) {
     let existingTag = findClickableBilibiliElement('#tag-container .label-item-v2-container');
     while (existingTag) {
-      existingTag.click();
+      await clickBilibiliElement(existingTag);
       await humanDelay(200, 400);
       existingTag = findClickableBilibiliElement('#tag-container .label-item-v2-container');
     }
@@ -443,7 +445,7 @@ async function fillBilibiliTags(tags: string[], keepAutoTags: boolean) {
         cancelable: true,
       }),
     );
-    await humanDelay(400, 700);
+    await waitForIdle(normalizeTopicIntervalMs(topicIntervalMs));
   }
 }
 
@@ -455,14 +457,14 @@ async function fillBilibiliCategory(targetText: string) {
   const currentVal = controller.querySelector('.select-item-cont')?.textContent?.trim() || '';
   if (currentVal === targetText) return;
 
-  controller.click();
+  await clickBilibiliElement(controller);
   await humanDelay(600);
 
   const items = document.querySelectorAll('.drop-list-v2-container.human-type-list .drop-list-v2-item');
   for (const item of items) {
     if (!(item instanceof HTMLElement) || typeof item.click !== 'function') continue;
     if (item.getAttribute('title') === targetText) {
-      item.click();
+      await clickBilibiliElement(item);
       await humanDelay(500);
       break;
     }
@@ -522,6 +524,7 @@ export async function fillBilibiliContent(config: PlatformConfig, content: Conte
     hasArticleBodyField: Boolean(fields.articleBody),
     articleBodySelectors: fields.articleBody?.selectors,
   });
+  const preparedDescription = splitDescriptionAndTopics(content.description, content.topics);
   if (isArticle && content.articleContent && fields.articleBody) {
     logStep('fillArticleBodyPlainParagraphs');
     const normalizedArticleContent = content.articleContent.replace(/\n{3,}/g, '\n\n');
@@ -530,20 +533,19 @@ export async function fillBilibiliContent(config: PlatformConfig, content: Conte
   } else if (fields.description && content.description) {
     // 视频模式：填充简介
     logStep('fillField description');
-    await fillField(fields.description, content.description);
+    await fillField(fields.description, preparedDescription.description);
     await humanDelay();
   }
 
-  // 合并话题字段的 topics 和描述中的 #话题 标签
-  const descTags = content.description
-    ? Array.from(content.description.matchAll(/#([一-龥\w]+)/g), (m) => m[1])
-    : [];
-  const allTags = Array.from(new Set([...content.topics, ...descTags]));
   const topicField = fields.tags || fields.topics;
-  if (topicField && allTags.length > 0) {
+  if (topicField && preparedDescription.topics.length > 0) {
     const keepAutoTags = Boolean(content.platformSettings?.bilibili?.keepAutoTags ?? false);
     logStep('fillBilibiliTags');
-    await fillBilibiliTags(allTags, keepAutoTags);
+    await fillBilibiliTags(
+      preparedDescription.topics,
+      keepAutoTags,
+      content.fillOptions?.topicIntervalMs,
+    );
     await humanDelay();
   }
 

@@ -4,7 +4,7 @@ import type { PublishRecord, VideoRecord } from '../../types';
 /** 生成演示用的视频记录数据。 */
 export function createDemoVideos(): VideoRecord[] {
   const now = Date.now();
-  return [
+  const videos: Array<Omit<VideoRecord, 'projectId'>> = [
     {
       id: 'demo-video-1',
       title: '5个Excel技巧，职场人必备',
@@ -429,6 +429,7 @@ export function createDemoVideos(): VideoRecord[] {
       updatedAt: now - (90 + 24) * 60 * 60 * 1000,
     },
   ];
+  return videos.map((video) => ({ ...video, projectId: video.id }));
 }
 
 /** 根据演示视频生成对应的发布记录数据。 */

@@ -64,6 +64,7 @@ p256 = { workspace = true }
 indexmap = { version = "2.12.0", features = ["serde"] }
 url = "2.5"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+rustls = { version = "0.23.28", default-features = false, features = ["ring", "std", "tls12"] }
 alipay_sdk_rust = "1.0.16"
 
 [dev-dependencies]

@@ -25,7 +25,8 @@ const emit = defineEmits<{
   openPublish: [];
   openRecords: [];
   syncData: [];
-  startFromVideo: [video: VideoRecord];
+    editVideo: [video: VideoRecord];
+    replicateVideo: [video: VideoRecord];
   deleteVideo: [video: VideoRecord];
 }>();
 
@@ -122,9 +123,9 @@ const pagedVideos = computed(() => {
                   v-for="platform in video.platforms"
                   :key="platform.platformId"
                   class="platform-badge"
-                  :class="platform.status === 'published' ? 'badge-published' : platform.status === 'error' ? 'badge-error' : platform.status === 'filling' ? 'badge-filling' : platform.status === 'skipped' ? 'badge-skipped' : 'badge-pending'"
+                  :class="platform.status === 'published' || platform.status === 'filled' ? 'badge-published' : platform.status === 'error' ? 'badge-error' : platform.status === 'filling' ? 'badge-filling' : platform.status === 'skipped' ? 'badge-skipped' : 'badge-pending'"
                 >
-                  <span class="status-dot" :class="platform.status === 'published' ? 'dot-published' : platform.status === 'error' ? 'dot-error' : platform.status === 'filling' ? 'dot-filling' : platform.status === 'skipped' ? 'dot-skipped' : 'dot-pending'"></span>
+                  <span class="status-dot" :class="platform.status === 'published' || platform.status === 'filled' ? 'dot-published' : platform.status === 'error' ? 'dot-error' : platform.status === 'filling' ? 'dot-filling' : platform.status === 'skipped' ? 'dot-skipped' : 'dot-pending'"></span>
                   {{ platformShort[platform.platformId] || platform.platformId }}
                 </span>
               </div>
@@ -137,10 +138,8 @@ const pagedVideos = computed(() => {
             <!-- 操作 -->
             <td>
               <div class="action-row">
-                <button class="act-btn" type="button" @click="emit('startFromVideo', video)">编辑</button>
-                <button class="act-btn act-btn-go" type="button" @click="emit('startFromVideo', video)">
-                  {{ video.platforms.some(p => p.status === 'pending') ? '继续' : '重发' }}
-                </button>
+                <button class="act-btn" type="button" @click="emit('editVideo', video)">编辑</button>
+                <button class="act-btn act-btn-go" type="button" @click="emit('replicateVideo', video)">复刻</button>
                 <button class="act-btn" type="button" @click="emit('openRecords')">记录</button>
                 <button class="act-btn act-btn-danger" type="button" @click="emit('deleteVideo', video)">删除</button>
               </div>

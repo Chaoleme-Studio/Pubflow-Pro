@@ -43,7 +43,7 @@ load_root_env() {
         # 去除可选的引号
         if { [ "${value#\"}" != "$value" ] && [ "${value%\"}" != "$value" ]; } ||
            { [ "${value#\'}" != "$value" ] && [ "${value%\'}" != "$value" ]; }; then
-          value="${value:1:-1}"
+          value="${value:1:$((${#value} - 2))}"
         fi
 
         if [ -n "$key" ] && [ -z "${!key+x}" ]; then

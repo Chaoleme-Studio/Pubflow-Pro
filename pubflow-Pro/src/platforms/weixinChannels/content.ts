@@ -1,6 +1,8 @@
 import { loadFileForTransfer, loadVideoForTransfer } from '../../storage/videoTransferStorage';
 import { humanDelay } from '../../content/fieldFiller';
 import { composePublishMessage } from '../../content/publishSteps';
+import { splitDescriptionAndTopics } from '../../domain/content';
+import { normalizeTopicIntervalMs } from '../../domain/fillSettings';
 import { resolveContentFields } from '../shared';
 import type { ContentData, RuntimeMessage } from '../../types';
 import type { PlatformConfig } from '../types';
@@ -112,16 +114,18 @@ async function uploadVideoViaPageWorld(config: PlatformConfig, file: File): Prom
 
 /** 通过页面主世界填充编辑器内容（标题、话题、描述） */
 async function fillWeixinChannelsEditor(content: ContentData, skipTitle = false) {
-  const hasText = Boolean(content.title || content.description || content.topics.length > 0);
+  const prepared = splitDescriptionAndTopics(content.description, content.topics);
+  const hasText = Boolean(content.title || prepared.description || prepared.topics.length > 0);
   if (!hasText) return;
 
   const response = await browser.runtime.sendMessage({
     type: 'EXECUTE_IN_PAGE_WORLD',
     payload: {
       title: content.title || '',
-      topics: content.topics || [],
-      description: content.description || '',
+      topics: prepared.topics,
+      description: prepared.description,
       skipTitle,
+      topicIntervalMs: normalizeTopicIntervalMs(content.fillOptions?.topicIntervalMs),
     },
   } satisfies RuntimeMessage).catch((err: unknown) => ({ ok: false, error: String(err) })) as {
     ok: boolean;

@@ -135,8 +135,36 @@ export async function runWeixinChannelsPageWorldAction(
       document.execCommand('insertParagraph', false);
     } else if (key === ' ') {
       document.execCommand('insertText', false, ' ');
+      editor.dispatchEvent(new InputEvent('input', {
+        data: ' ',
+        inputType: 'insertText',
+        bubbles: true,
+      }));
     }
     editor.dispatchEvent(new KeyboardEvent('keyup', init));
+  }
+
+  /** 只派发 Enter 键，由编辑器自己的话题逻辑完成确认，不额外插入换行。 */
+  function confirmTopicWithEnter(editor: HTMLElement) {
+    const init: KeyboardEventInit = {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      bubbles: true,
+      cancelable: true,
+    };
+    editor.dispatchEvent(new KeyboardEvent('keydown', init));
+    editor.dispatchEvent(new KeyboardEvent('keyup', init));
+  }
+
+  /** 单次追加一个话题，避免 paste 监听器和 insertText 同时写入造成重复。 */
+  function insertTopicText(editor: HTMLElement, text: string) {
+    document.execCommand('insertText', false, text);
+    editor.dispatchEvent(new InputEvent('input', {
+      data: text,
+      inputType: 'insertText',
+      bubbles: true,
+    }));
   }
 
   /** 查找页面主编辑器元素 */
@@ -195,6 +223,11 @@ export async function runWeixinChannelsPageWorldAction(
     const topics = Array.isArray(payload.topics) ? payload.topics.map(String) : [];
     const description = String(payload.description || '');
     const skipTitle = Boolean(payload.skipTitle);
+    const rawTopicIntervalMs = Number(payload.topicIntervalMs);
+    if (!Number.isFinite(rawTopicIntervalMs)) {
+      return { ok: false, error: '页面填充指令缺少话题间隔配置' };
+    }
+    const topicIntervalMs = Math.min(3000, Math.max(100, Math.round(rawTopicIntervalMs)));
 
     const editor = findEditor();
     if (!editor) {
@@ -209,38 +242,27 @@ export async function runWeixinChannelsPageWorldAction(
       document.execCommand('insertText', false, title);
     }
 
-    if (!skipTitle && title && (topics.length > 0 || description)) {
+    if (!skipTitle && title && (description || topics.length > 0)) {
       simulateKey(editor, 'Enter');
+    }
+
+    if (description) {
+      document.execCommand('insertText', false, description);
+    }
+
+    if (description && topics.length > 0) {
+      simulateKey(editor, ' ');
+      await sleep(topicIntervalMs);
     }
 
     for (const rawTopic of topics) {
       const clean = rawTopic.trim().replace(/^#+/, '');
       if (!clean) continue;
-      for (const char of `#${clean}`) {
-        editor.dispatchEvent(new KeyboardEvent('keydown', {
-          key: char,
-          code: `Key${char.toUpperCase()}`,
-          keyCode: char.charCodeAt(0),
-          bubbles: true,
-          cancelable: true,
-        }));
-        document.execCommand('insertText', false, char);
-        editor.dispatchEvent(new KeyboardEvent('keyup', {
-          key: char,
-          code: `Key${char.toUpperCase()}`,
-          keyCode: char.charCodeAt(0),
-          bubbles: true,
-          cancelable: true,
-        }));
-      }
+      insertTopicText(editor, `#${clean}`);
+      await sleep(topicIntervalMs);
+      confirmTopicWithEnter(editor);
+      await sleep(topicIntervalMs);
       simulateKey(editor, ' ');
-    }
-
-    if (description) {
-      if (topics.length > 0) {
-        simulateKey(editor, 'Enter');
-      }
-      document.execCommand('insertText', false, description);
     }
 
     editor.dispatchEvent(new Event('input', { bubbles: true }));

@@ -15,6 +15,32 @@ export async function cdpClickElement(el: HTMLElement): Promise<boolean> {
   }
 }
 
+/**
+ * 用浏览器级可信输入完成描述和话题填写。
+ * 后台会先真实点击激活编辑器，再按配置节奏逐个确认话题。
+ */
+export async function cdpFillDescriptionWithTopics(
+  el: HTMLElement,
+  description: string,
+  topics: string[],
+  topicIntervalMs: number,
+): Promise<void> {
+  const point = getTopFrameCenterPoint(el);
+  const response = (await browser.runtime.sendMessage({
+    type: 'CDP_FILL_DESCRIPTION_TOPICS',
+    payload: {
+      ...point,
+      description,
+      topics,
+      topicIntervalMs,
+    },
+  } satisfies RuntimeMessage)) as RuntimeResponse | undefined;
+
+  if (!response?.ok) {
+    throw new Error(response?.error || '浏览器级描述和话题输入失败');
+  }
+}
+
 /** 通过 CDP 拖动元素中心，用于 ReactCrop 等需要可信指针事件的控件。 */
 export async function cdpDragElement(
   el: HTMLElement,

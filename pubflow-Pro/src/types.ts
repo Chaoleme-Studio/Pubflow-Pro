@@ -59,10 +59,16 @@ export interface BaseContent {
   platformSettings?: PlatformSpecificSettings;
 }
 
+export interface ContentFillOptions {
+  /** 输入 #话题 后及按 Enter 确认后的步骤间隔。 */
+  topicIntervalMs?: number;
+}
+
 /** 运行时分发使用的内容数据，topics/campaignIds 已经被解析成数组。 */
 export interface ContentData extends BaseContent {
   topics: string[];
   campaignIds: string[];
+  fillOptions?: ContentFillOptions;
 }
 
 /** Dashboard 草稿结构，保留文本输入态和用户勾选的平台/活动。 */
@@ -71,6 +77,8 @@ export interface ContentDraft extends BaseContent {
   selectedPlatforms: PlatformId[];
   selectedCampaignIds: string[];
   sourceVideoId?: string;
+  /** 当前项目是可被后续“复刻”覆盖的草稿时，记录最近一次源项目身份。 */
+  replicaSourceProjectId?: string;
 }
 
 /** 当前任务中某个平台的执行状态和对应 tab/frame。 */
@@ -123,7 +131,7 @@ export interface VideoRecord {
   description: string;
   topics: string[];
   campaignIds: string[];
-  projectId?: string;
+  projectId: string;
   videoCacheId?: string;
   coverCacheId?: string;
   imageCacheIds?: string[];
@@ -183,6 +191,8 @@ export interface GlobalSettings {
   fillSpeed: 'slow' | 'normal' | 'fast';
   autoSubmit: boolean;
   distributionInterval: number;
+  /** 输入 #话题 后及按 Enter 确认后的步骤间隔，单位毫秒。 */
+  topicIntervalMs: number;
 }
 
 /** 后端服务器连接配置。 */
@@ -389,6 +399,7 @@ export type RuntimeMessage =
       topics: string[];
       description: string;
       skipTitle?: boolean;
+      topicIntervalMs?: number;
     };
   }
   | {
@@ -463,6 +474,16 @@ export type RuntimeMessage =
     payload: {
       x: number;
       y: number;
+    };
+  }
+  | {
+    type: 'CDP_FILL_DESCRIPTION_TOPICS';
+    payload: {
+      x: number;
+      y: number;
+      description: string;
+      topics: string[];
+      topicIntervalMs: number;
     };
   }
   | {

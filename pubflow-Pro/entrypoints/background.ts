@@ -5,6 +5,8 @@ import {
 } from '../src/platforms';
 import { injectDouyinArticleCover, injectDouyinCover } from '../src/platforms/douyin/pageWorld';
 import { injectXiaohongshuImageDescription } from '../src/platforms/xiaohongshu/pageWorld';
+import { normalizeScheduledAt } from '../src/domain/content';
+import { normalizeTopicIntervalMs } from '../src/domain/fillSettings';
 import { runWeixinChannelsPageWorldAction } from '../src/platforms/weixinChannels/pageWorld';
 import type { PageWorldAction, PageWorldPayload } from '../src/platforms/weixinChannels/pageWorld';
 import { loadLibraryData, saveLibraryData } from '../src/storage/libraryStorage';
@@ -141,6 +143,19 @@ async function handleMessage(
       }
     }
 
+    if (message.type === 'CDP_FILL_DESCRIPTION_TOPICS') {
+      const tabId = sender.tab?.id;
+      if (!tabId) {
+        return fail('无法确定目标标签页');
+      }
+      try {
+        await cdpFillDescriptionTopics(tabId, message.payload);
+        return ok(undefined);
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : 'CDP 描述和话题输入失败');
+      }
+    }
+
     if (message.type === 'CDP_DRAG') {
       const tabId = sender.tab?.id;
       if (!tabId) {
@@ -190,8 +205,14 @@ async function handleMessage(
 
     if (message.type === 'EXECUTE_IN_PAGE_WORLD') {
       try {
-        const { title, topics, description, skipTitle } = message.payload;
-        return ok(await executeWeixinPageWorldAction(sender, 'fillEditor', { title, topics, description, skipTitle }));
+        const { title, topics, description, skipTitle, topicIntervalMs } = message.payload;
+        return ok(await executeWeixinPageWorldAction(sender, 'fillEditor', {
+          title,
+          topics,
+          description,
+          skipTitle,
+          topicIntervalMs,
+        }));
       } catch (error) {
         return fail(error instanceof Error ? error.message : '页面脚本执行失败');
       }
@@ -836,6 +857,7 @@ function isTerminalPlatformStatus(status: PlatformTaskStatus) {
 function normalizeCurrentTaskPlatforms() {
   if (!currentTask) return false;
   const before = getTaskNormalizationSignature(currentTask);
+  currentTask.content.scheduledAt = normalizeScheduledAt(currentTask.content.scheduledAt) || undefined;
   const contentType = currentTask.content.contentType || 'video';
   currentTask.platforms = currentTask.platforms.filter((item) =>
     supportsContentType(getPlatformConfig(item.platformId), contentType),
@@ -860,6 +882,7 @@ function getTaskNormalizationSignature(task: DistributionTask) {
   return JSON.stringify({
     status: task.status,
     currentIndex: task.currentIndex,
+    scheduledAt: task.content.scheduledAt || 0,
     platforms: task.platforms.map((item) => `${item.platformId}:${item.status}`),
   });
 }
@@ -1128,9 +1151,7 @@ async function cdpClick(tabId: number, x: number, y: number): Promise<void> {
     attachedHere = true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes('Another debugger is already attached')) {
-      throw new Error(`CDP 调试器连接失败：${message}`);
-    }
+    throw new Error(`无法激活平台编辑器，请先关闭该页面的开发者工具后重试：${message}`);
   }
   try {
     await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
@@ -1161,6 +1182,108 @@ async function cdpClick(tabId: number, x: number, y: number): Promise<void> {
       } catch { /* ignore */ }
     }
   }
+}
+
+/**
+ * 真实点击并填写描述/话题。每个话题严格执行：逐字输入、等待、Enter、等待、空格。
+ * 整段操作复用同一个 debugger 会话，避免逐个按键反复连接导致焦点丢失。
+ */
+async function cdpFillDescriptionTopics(
+  tabId: number,
+  payload: {
+    x: number;
+    y: number;
+    description: string;
+    topics: string[];
+    topicIntervalMs: number;
+  },
+): Promise<void> {
+  const debuggee = { tabId };
+  const topicIntervalMs = normalizeTopicIntervalMs(payload.topicIntervalMs);
+  const topics = payload.topics
+    .map((topic) => topic.trim().replace(/^#+/, ''))
+    .filter(Boolean);
+  let attachedHere = false;
+
+  try {
+    await chrome.debugger.attach(debuggee, '1.3');
+    attachedHere = true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`无法激活平台编辑器，请先关闭该页面的开发者工具后重试：${message}`);
+  }
+
+  try {
+    await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: payload.x,
+      y: payload.y,
+      button: 'none',
+    });
+    await new Promise((resolve) => setTimeout(resolve, CDP_CLICK_MOVE_SETTLE_MS));
+    await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: payload.x,
+      y: payload.y,
+      button: 'left',
+      clickCount: 1,
+    });
+    await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: payload.x,
+      y: payload.y,
+      button: 'left',
+      clickCount: 1,
+    });
+    await new Promise((resolve) => setTimeout(resolve, CDP_CLICK_MOVE_SETTLE_MS));
+
+    const platformInfo = await chrome.runtime.getPlatformInfo();
+    const selectAllModifier = platformInfo.os === 'mac' ? 4 : 2;
+    await dispatchCdpKey(debuggee, 'a', 'KeyA', 65, selectAllModifier);
+    await dispatchCdpKey(debuggee, 'Backspace', 'Backspace', 8);
+
+    if (payload.description) {
+      await chrome.debugger.sendCommand(debuggee, 'Input.insertText', { text: payload.description });
+    }
+    if (payload.description && topics.length > 0) {
+      await chrome.debugger.sendCommand(debuggee, 'Input.insertText', { text: ' ' });
+    }
+
+    for (const topic of topics) {
+      for (const character of `#${topic}`) {
+        await chrome.debugger.sendCommand(debuggee, 'Input.insertText', { text: character });
+      }
+      await new Promise((resolve) => setTimeout(resolve, topicIntervalMs));
+      await dispatchCdpKey(debuggee, 'Enter', 'Enter', 13);
+      await new Promise((resolve) => setTimeout(resolve, topicIntervalMs));
+      await chrome.debugger.sendCommand(debuggee, 'Input.insertText', { text: ' ' });
+    }
+  } finally {
+    if (attachedHere) {
+      try {
+        await chrome.debugger.detach(debuggee);
+      } catch { /* ignore */ }
+    }
+  }
+}
+
+/** 派发一组可信 keyDown/keyUp，修饰位遵循 CDP 的 Alt/Control/Meta 编码。 */
+async function dispatchCdpKey(
+  debuggee: { tabId: number },
+  key: string,
+  code: string,
+  keyCode: number,
+  modifiers = 0,
+) {
+  const params = {
+    key,
+    code,
+    modifiers,
+    windowsVirtualKeyCode: keyCode,
+    nativeVirtualKeyCode: keyCode,
+  };
+  await chrome.debugger.sendCommand(debuggee, 'Input.dispatchKeyEvent', { type: 'rawKeyDown', ...params });
+  await chrome.debugger.sendCommand(debuggee, 'Input.dispatchKeyEvent', { type: 'keyUp', ...params });
 }
 
 /** 通过 CDP 发送可信拖拽事件，让 ReactCrop 接收真实的裁剪框移动操作。 */

@@ -8,12 +8,14 @@ import {
 } from '../../storage/videoTransferStorage';
 import {
   importProjectAsset,
+  createProjectId,
   loadProjectAssetFiles,
-  loadProjectManifestByVideo,
+  loadProjectManifest,
   loadWorkspaceSettings,
   writeProjectManifest,
 } from '../../storage/workspaceStorage';
 import { PLATFORM_CONFIGS, supportsContentType } from '../../platforms';
+import { normalizeScheduledAt } from '../../domain/content';
 import type { ContentDraft, PlatformId, VideoRecord, WorkspaceSettings } from '../../types';
 
 /** 恢复单条发布记录时只返回其目标平台，避免误重试同一项目的其他平台。 */
@@ -27,6 +29,24 @@ export function getRestorablePlatformIds(
     .filter((item) => item.status !== 'published' && item.status !== 'skipped')
     .filter((item) => supportsContentType(PLATFORM_CONFIGS[item.platformId], contentType || 'video'))
     .map((item) => item.platformId);
+}
+
+/** 复刻会重新发布源项目选择过的平台，不继承这些平台原来的完成状态。 */
+export function getReplicaPlatformIds(
+  video: VideoRecord,
+  contentType: ContentDraft['contentType'],
+) {
+  return video.platforms
+    .filter((item) => item.status !== 'skipped')
+    .filter((item) => supportsContentType(PLATFORM_CONFIGS[item.platformId], contentType || 'video'))
+    .map((item) => item.platformId);
+}
+
+/** 平台设置本身会持久化为 JSON，用 JSON 转换可同时去掉所有层级的 Vue Proxy。 */
+export function clonePlatformSettings(
+  settings: VideoRecord['platformSettings'],
+): NonNullable<VideoRecord['platformSettings']> {
+  return JSON.parse(JSON.stringify(settings || {})) as NonNullable<VideoRecord['platformSettings']>;
 }
 
 /** 组合式函数：管理发布页草稿的媒体文件、缓存和从项目恢复。 */
@@ -341,6 +361,7 @@ export function usePublishDraft(params: {
     persistArticleContent = '';
     Object.assign(draft, {
       sourceVideoId: '',
+      replicaSourceProjectId: '',
       projectId: '',
       videoCacheId: '',
       coverCacheId: '',
@@ -359,52 +380,79 @@ export function usePublishDraft(params: {
     void persistDraft();
   }
 
-  /** 从视频记录恢复草稿状态并加载项目素材 */
-  async function restoreDraftFromVideo(video: VideoRecord, targetPlatformId?: PlatformId) {
+  /** 从视频记录恢复草稿；复刻只复用发布信息，不恢复或复制素材。 */
+  async function restoreDraft(
+    video: VideoRecord,
+    targetPlatformId?: PlatformId,
+    asReplica = false,
+  ) {
+    const reuseReplicaProject = Boolean(asReplica && draft.replicaSourceProjectId && draft.projectId);
+    const replicaProjectId = reuseReplicaProject ? draft.projectId! : createProjectId();
+    const previousReplicaVideoCacheId = reuseReplicaProject ? draft.videoCacheId : '';
+    const previousReplicaCoverCacheId = reuseReplicaProject ? draft.coverCacheId : '';
+    const previousReplicaImageCacheIds = reuseReplicaProject ? [...(draft.imageCacheIds || [])] : [];
+    const restoredPlatformSettings = clonePlatformSettings(video.platformSettings);
+
     draft.sourceVideoId = video.id;
     draft.contentType = video.contentType || (video.imageFileNames?.length ? 'image' : 'video');
     draft.title = video.title;
     draft.description = video.description;
     draft.topicsText = video.topics.join(' ');
     draft.selectedCampaignIds = [...(video.campaignIds || [])];
-    draft.projectId = video.projectId || '';
-    draft.videoCacheId = video.videoCacheId || '';
-    draft.coverCacheId = video.coverCacheId || '';
-    draft.imageCacheIds = [...(video.imageCacheIds || [])];
-    draft.videoFileName = video.videoFileName || '';
-    draft.coverFileName = video.coverFileName || '';
-    draft.musicFileName = video.musicFileName || '';
-    draft.imageFileNames = [...(video.imageFileNames || [])];
-    draft.videoSize = video.videoSize || 0;
-    draft.coverSize = video.coverSize || 0;
-    draft.musicSize = video.musicSize || 0;
-    draft.scheduledAt = video.scheduledAt || 0;
+    draft.projectId = asReplica ? replicaProjectId : video.projectId;
+    draft.replicaSourceProjectId = asReplica ? video.projectId : '';
+    draft.videoCacheId = asReplica ? '' : video.videoCacheId || '';
+    draft.coverCacheId = asReplica ? '' : video.coverCacheId || '';
+    draft.imageCacheIds = asReplica ? [] : [...(video.imageCacheIds || [])];
+    draft.videoFileName = asReplica ? '' : video.videoFileName || '';
+    draft.coverFileName = asReplica ? '' : video.coverFileName || '';
+    draft.musicFileName = asReplica ? '' : video.musicFileName || '';
+    draft.musicName = asReplica ? '' : video.musicName || '';
+    draft.imageFileNames = asReplica ? [] : [...(video.imageFileNames || [])];
+    draft.videoSize = asReplica ? 0 : video.videoSize || 0;
+    draft.coverSize = asReplica ? 0 : video.coverSize || 0;
+    draft.musicSize = asReplica ? 0 : video.musicSize || 0;
+    draft.scheduledAt = asReplica ? 0 : normalizeScheduledAt(video.scheduledAt);
     draft.visibility = video.visibility || 'public';
     draft.originalDeclare = video.originalDeclare ?? false;
-    draft.platformSettings = video.platformSettings || {};
+    draft.platformSettings = restoredPlatformSettings;
     // articleContent 存在 project.json manifest 中，不在 VideoRecord 里
     try {
-      const manifest = await loadProjectManifestByVideo(video.projectId || video.id, video.title);
+      const manifest = video.projectId ? await loadProjectManifest(video.projectId) : null;
       const restoredArticleContent = manifest?.articleContent ?? video.articleContent ?? '';
       draft.articleContent = restoredArticleContent;
-      if (restoredArticleContent) {
-        persistArticleContent = restoredArticleContent;
-      }
+      persistArticleContent = restoredArticleContent;
     } catch {
       draft.articleContent = video.articleContent || '';
       persistArticleContent = draft.articleContent;
     }
-    draft.selectedPlatforms = getRestorablePlatformIds(video, draft.contentType, targetPlatformId);
+    draft.selectedPlatforms = asReplica
+      ? getReplicaPlatformIds(video, draft.contentType)
+      : getRestorablePlatformIds(video, draft.contentType, targetPlatformId);
 
     resetPreviewUrls();
     videoFile.value = null;
     coverFile.value = null;
+    imageFiles.value = [];
     musicFile.value = null;
+
+    if (asReplica) {
+      await Promise.allSettled([
+        previousReplicaVideoCacheId
+          ? cleanupVideoTransfer(previousReplicaVideoCacheId)
+          : Promise.resolve(),
+        previousReplicaCoverCacheId
+          ? cleanupFileTransfer(previousReplicaCoverCacheId)
+          : Promise.resolve(),
+        ...previousReplicaImageCacheIds.map((cacheId) => cleanupFileTransfer(cacheId)),
+      ]);
+      await persistDraft();
+      return true;
+    }
 
     try {
       const assets = await loadProjectAssetFiles({
         projectId: video.projectId,
-        title: video.title,
         videoFileName: video.videoFileName,
         coverFileName: video.coverFileName,
         musicFileName: video.musicFileName,
@@ -461,6 +509,16 @@ export function usePublishDraft(params: {
     return true;
   }
 
+  /** 编辑原项目。 */
+  function restoreDraftFromVideo(video: VideoRecord, targetPlatformId?: PlatformId) {
+    return restoreDraft(video, targetPlatformId, false);
+  }
+
+  /** 只将发布信息复刻到独立草稿项目；连续复刻会覆盖同一个草稿项目。 */
+  function replicateDraftFromVideo(video: VideoRecord) {
+    return restoreDraft(video, undefined, true);
+  }
+
   return {
     videoFile,
     videoPreviewUrl,
@@ -484,6 +542,7 @@ export function usePublishDraft(params: {
     prepareDraftForNextPublication,
     revokeAllUrls,
     restoreDraftFromVideo,
+    replicateDraftFromVideo,
     setPersistArticleContent,
   };
 }

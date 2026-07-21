@@ -1,10 +1,10 @@
 import type { Ref } from 'vue';
-import { clearLibraryData, saveLibraryData } from '../../storage/libraryStorage';
+import { clearLibraryData, loadLibraryData, saveLibraryData } from '../../storage/libraryStorage';
 import {
   clearWorkspaceDirectory,
   defaultWorkspaceSettings,
+  inspectWorkspaceRoot,
   invalidateWorkspaceCache,
-  loadAllWorkspaceProjects,
   readDataFile,
   saveWorkspaceDirectory,
   writeDataFile,
@@ -71,11 +71,19 @@ export function useWorkspaceManager(params: {
 
     try {
       const handle = await picker({ mode: 'readwrite' });
+      if (handle.name === 'projects') {
+        notice.value = '请选择 projects 的上一级工作区根目录，不能直接选择 projects 文件夹。';
+        return;
+      }
+      const inspection = await inspectWorkspaceRoot(handle);
+      if (inspection.kind === 'invalid') {
+        notice.value = inspection.reason;
+        return;
+      }
       await saveWorkspaceDirectory(handle);
       invalidateWorkspaceCache();
 
-      const existingData = await readDataFile();
-      if (!existingData) {
+      if (inspection.kind === 'empty') {
         await writeDataFile({
           draft: { ...draft },
           settings: {
@@ -85,21 +93,23 @@ export function useWorkspaceManager(params: {
             licensingSettings: { ...licensingSettings } as Record<string, unknown>,
             aiSettings: { ...aiSettings } as Record<string, unknown>,
           },
-          projectIndex: videos.value.map((video) => ({
-            projectId: video.projectId || video.id,
-            path: `projects/${video.projectId || video.id}`,
-            title: video.title,
-            updatedAt: video.updatedAt,
-          })),
+          projectIndex: [],
         });
-        await saveLibraryData(videos.value, records.value);
+        videos.value = [];
+        records.value = [];
+        task.value = null;
+        await saveLibraryData([], []);
         await hydrate();
-        notice.value = `工作区已设置为：${handle.name}，并已用当前浏览器数据初始化。`;
+        notice.value = `已创建空工作区：${handle.name}。`;
         return;
       }
 
+      const existingData = await readDataFile();
+      if (!existingData) {
+        throw new Error('工作区校验通过后无法读取 pubflow-data.json。');
+      }
       await hydrate();
-      notice.value = `工作区已设置为：${handle.name}，已载入工作区数据。`;
+      notice.value = `工作区已设置为：${handle.name}，已载入 ${videos.value.length} 个项目。`;
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
       notice.value = error instanceof Error ? error.message : '选择工作区失败';
@@ -131,19 +141,15 @@ export function useWorkspaceManager(params: {
     busy.value = true;
     notice.value = '正在从工作区读取项目…';
     try {
-      const projects = await loadAllWorkspaceProjects();
-      if (!projects.length) {
+      const restored = await loadLibraryData();
+      if (!restored.videos.length) {
         notice.value = '工作区里没有找到任何项目，请先在设置里选择工作区文件夹并导入过素材。';
         return;
       }
 
-      const restored: VideoRecord[] = projects.map((project) => project.video);
-      const restoredRecords: PublishRecord[] = projects.flatMap((project) => project.records || []);
-
-      videos.value = restored;
-      records.value = restoredRecords;
-      await saveLibraryData(restored, restoredRecords);
-      notice.value = `已从工作区恢复 ${restored.length} 个项目。`;
+      videos.value = restored.videos;
+      records.value = restored.records;
+      notice.value = `已从工作区恢复 ${restored.videos.length} 个项目。`;
     } catch (error) {
       notice.value = error instanceof Error ? error.message : '恢复失败';
     } finally {

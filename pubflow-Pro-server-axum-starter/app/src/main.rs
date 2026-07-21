@@ -60,6 +60,10 @@ async fn hello_world() -> ApiResponse<Value> {
 /// 正常退出返回 Ok(())，发生错误返回 AppError
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
+    // Multiple dependencies enable different rustls providers, so rustls cannot
+    // select one automatically. Install ring before any HTTPS client is created.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // 加载配置
     let config = AppConfig::load()?;
     // 初始化 tracing 日志系统

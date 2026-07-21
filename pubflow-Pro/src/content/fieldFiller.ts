@@ -1,4 +1,7 @@
 import type { FieldConfig } from '../platforms';
+import { splitDescriptionAndTopics } from '../domain/content';
+import { normalizeTopicIntervalMs } from '../domain/fillSettings';
+import { cdpFillDescriptionWithTopics } from './cdp';
 import {
   asEditable,
   dispatchClipboardEvent,
@@ -40,7 +43,7 @@ export async function fillField(field: FieldConfig, value: string) {
   await pasteLike(element, value);
 }
 
-/** 逐个输入话题并用 Enter/Space 确认，适配平台话题 token 化输入框。 */
+/** 逐个输入话题并用 Enter/Space 确认，适配平台独立的话题 token 输入框。 */
 export async function fillTopics(field: FieldConfig, topics: string[]) {
   const element = findEditableElement(field.selectors);
   if (!element) {
@@ -59,6 +62,100 @@ export async function fillTopics(field: FieldConfig, topics: string[]) {
     await simulateTyping(element, text, confirmKey);
     await waitForIdle(delayMs);
   }
+}
+
+/**
+ * 先替换作品描述，再逐个输入话题，按 Enter 确认后补空格分隔。
+ * 支持描述末尾已经包含 #话题 的旧数据，避免整段粘贴导致平台漏掉话题 token。
+ */
+export async function fillDescriptionWithTopics(
+  field: FieldConfig,
+  description: string,
+  topics: string[],
+  topicIntervalMs?: number,
+) {
+  const element = findEditableElement(field.selectors);
+  if (!element) {
+    throw new Error(`没有找到作品描述字段：${field.selectors[0]}`);
+  }
+
+  const content = splitDescriptionAndTopics(description, topics);
+  const editable = asEditable(element);
+  scrollIntoView(editable);
+  await humanDelay(...FIELD_FOCUS_DELAY_RANGE_MS);
+  replaceEditableText(editable, content.description);
+  await appendTopicValues(editable, content.topics, Boolean(content.description), topicIntervalMs);
+}
+
+/**
+ * 通过真实点击和可信键盘输入填写描述及话题。
+ * 用于会忽略合成事件或把合成 Enter 当换行的受控编辑器。
+ */
+export async function fillDescriptionWithTopicsByTrustedInput(
+  field: FieldConfig,
+  description: string,
+  topics: string[],
+  topicIntervalMs?: number,
+) {
+  const element = findEditableElement(field.selectors);
+  if (!element) {
+    throw new Error(`没有找到作品描述字段：${field.selectors[0]}`);
+  }
+
+  const content = splitDescriptionAndTopics(description, topics);
+  const editable = asEditable(element);
+  scrollIntoView(editable);
+  await humanDelay(...FIELD_FOCUS_DELAY_RANGE_MS);
+  await cdpFillDescriptionWithTopics(
+    editable,
+    content.description,
+    content.topics,
+    normalizeTopicIntervalMs(topicIntervalMs),
+  );
+}
+
+/** 在已经由平台主世界写好的描述后追加话题，用于必须调用页面编辑器 API 的场景。 */
+export async function appendTopicsToDescription(
+  field: FieldConfig,
+  description: string,
+  topics: string[],
+  topicIntervalMs?: number,
+) {
+  const element = findEditableElement(field.selectors);
+  if (!element) {
+    throw new Error(`没有找到作品描述字段：${field.selectors[0]}`);
+  }
+
+  const content = splitDescriptionAndTopics(description, topics);
+  const editable = asEditable(element);
+  scrollIntoView(editable);
+  await humanDelay(...FIELD_FOCUS_DELAY_RANGE_MS);
+  await appendTopicValues(editable, content.topics, Boolean(content.description), topicIntervalMs);
+}
+
+async function appendTopicValues(
+  editable: HTMLElement,
+  topics: string[],
+  hasDescription: boolean,
+  topicIntervalMs?: number,
+) {
+  const delayMs = normalizeTopicIntervalMs(topicIntervalMs);
+  if (hasDescription && topics.length > 0) {
+    insertTextAtCaret(editable, ' ');
+    dispatchInputEvent(editable, 'input', ' ');
+    await waitForIdle(delayMs);
+  }
+
+  for (let index = 0; index < topics.length; index++) {
+    insertTopicAtCaret(editable, `#${topics[index]}`);
+    await waitForIdle(delayMs);
+    confirmTopicWithEnter(editable);
+    await waitForIdle(delayMs);
+    insertTopicSeparatorSpace(editable);
+  }
+
+  editable.dispatchEvent(new Event('change', { bubbles: true }));
+  editable.dispatchEvent(new Event('blur', { bubbles: true }));
 }
 
 /** 统一拟人等待，避免连续 DOM 操作过快导致平台组件状态还没同步。 */
@@ -85,6 +182,91 @@ async function pasteLike(element: Element, value: string) {
   dispatchInputEvent(editable, 'input', value);
   editable.dispatchEvent(new Event('change', { bubbles: true }));
   editable.dispatchEvent(new Event('blur', { bubbles: true }));
+}
+
+/** 替换描述，不再额外派发 paste，避免平台编辑器自行处理后出现双份文本。 */
+function replaceEditableText(editable: HTMLElement, value: string) {
+  editable.focus();
+  selectExistingText(editable);
+  dispatchInputEvent(editable, 'beforeinput', value);
+
+  if (editable instanceof HTMLInputElement || editable instanceof HTMLTextAreaElement) {
+    setNativeValue(editable, value);
+  } else {
+    const activeDocument = getActiveDocument(editable);
+    activeDocument.execCommand('delete', false);
+    activeDocument.execCommand('insertText', false, value);
+  }
+
+  dispatchInputEvent(editable, 'input', value);
+  editable.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+/** 逐个追加话题文本；每次只走一次 DOM 写入，避免 paste 事件和 insertText 重复生效。 */
+function insertTopicAtCaret(editable: HTMLElement, value: string) {
+  editable.focus();
+  moveCaretToEnd(editable);
+  insertTextAtCaret(editable, value);
+  dispatchInputEvent(editable, 'input', value);
+}
+
+/** 派发 Enter，让平台把当前话题转成 token。 */
+function confirmTopicWithEnter(editable: HTMLElement) {
+  dispatchTopicKey(editable, 'keydown', 'Enter');
+  dispatchTopicKey(editable, 'keyup', 'Enter');
+}
+
+/** Enter 确认完成后输入一个真实空格，再继续下一个话题。 */
+function insertTopicSeparatorSpace(editable: HTMLElement) {
+  dispatchTopicKey(editable, 'keydown', ' ');
+  insertTextAtCaret(editable, ' ');
+  dispatchInputEvent(editable, 'input', ' ');
+  dispatchTopicKey(editable, 'keyup', ' ');
+}
+
+function dispatchTopicKey(
+  editable: HTMLElement,
+  type: 'keydown' | 'keyup',
+  key: 'Enter' | ' ',
+) {
+  const isEnter = key === 'Enter';
+  editable.dispatchEvent(new KeyboardEvent(type, {
+    key,
+    code: isEnter ? 'Enter' : 'Space',
+    keyCode: isEnter ? 13 : 32,
+    which: isEnter ? 13 : 32,
+    bubbles: true,
+    cancelable: true,
+  }));
+}
+
+function moveCaretToEnd(editable: HTMLElement) {
+  if (editable instanceof HTMLInputElement || editable instanceof HTMLTextAreaElement) {
+    editable.setSelectionRange(editable.value.length, editable.value.length);
+    return;
+  }
+
+  const activeDocument = getActiveDocument(editable);
+  const range = activeDocument.createRange();
+  range.selectNodeContents(editable);
+  range.collapse(false);
+  const selection = activeDocument.defaultView?.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+function insertTextAtCaret(editable: HTMLElement, value: string) {
+  if (editable instanceof HTMLInputElement || editable instanceof HTMLTextAreaElement) {
+    const start = editable.selectionStart ?? editable.value.length;
+    const end = editable.selectionEnd ?? start;
+    const nextValue = `${editable.value.slice(0, start)}${value}${editable.value.slice(end)}`;
+    setNativeValue(editable, nextValue);
+    const nextCaret = start + value.length;
+    editable.setSelectionRange(nextCaret, nextCaret);
+    return;
+  }
+
+  getActiveDocument(editable).execCommand('insertText', false, value);
 }
 
 /** 使用 execCommand 填充 contenteditable，保留平台编辑器对 input/change 的监听。 */

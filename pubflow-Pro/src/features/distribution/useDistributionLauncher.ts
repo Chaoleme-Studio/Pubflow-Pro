@@ -1,11 +1,14 @@
 import type { Ref } from 'vue';
-import { buildContent, parseTopics } from '../../domain/content';
+import { buildContent, normalizeScheduledAt, parseTopics } from '../../domain/content';
+import { normalizeTopicIntervalMs } from '../../domain/fillSettings';
 import { sendRuntimeMessage } from '../../messaging';
 import { PLATFORM_CONFIGS, PLATFORM_ORDER, supportsContentType } from '../../platforms';
 import { saveVideos } from '../../storage/libraryStorage';
+import { createProjectId } from '../../storage/workspaceStorage';
 import type {
   ContentDraft,
   DistributionTask,
+  GlobalSettings,
   PlatformId,
   PlatformSettings,
   VideoRecord,
@@ -18,6 +21,7 @@ export function useDistributionLauncher(params: {
   busy: Ref<boolean>;
   notice: Ref<string>;
   platformSettings: Record<PlatformId, PlatformSettings>;
+  globalSettings: GlobalSettings;
   videos: Ref<VideoRecord[]>;
   task: Ref<DistributionTask | null>;
   persistDraft: () => Promise<void>;
@@ -31,6 +35,7 @@ export function useDistributionLauncher(params: {
     busy,
     notice,
     platformSettings,
+    globalSettings,
     videos,
     task,
     persistDraft,
@@ -43,20 +48,24 @@ export function useDistributionLauncher(params: {
   async function upsertVideoFromDraft() {
     const now = Date.now();
     const contentType = draft.contentType || (draft.imageCacheIds?.length ? 'image' : 'video');
-    const existingIndex = draft.sourceVideoId
-      ? videos.value.findIndex((v) => v.id === draft.sourceVideoId)
+    const projectId = draft.projectId || createProjectId();
+    draft.projectId = projectId;
+    draft.sourceVideoId = projectId;
+    const existingIndex = draft.projectId
+      ? videos.value.findIndex((video) => video.projectId === draft.projectId)
       : -1;
 
     if (existingIndex >= 0) {
       const existing = videos.value[existingIndex];
       const updated: VideoRecord = {
         ...existing,
+        id: projectId,
         contentType,
         title: draft.title.trim() || '未命名内容',
         description: draft.description.trim(),
         topics: parseTopics(draft.topicsText),
         campaignIds: [...draft.selectedCampaignIds],
-        projectId: draft.projectId,
+        projectId,
         videoCacheId: draft.videoCacheId,
         coverCacheId: draft.coverCacheId,
         imageCacheIds: draft.imageCacheIds,
@@ -68,7 +77,7 @@ export function useDistributionLauncher(params: {
         coverSize: draft.coverSize,
         musicSize: draft.musicSize,
         articleContent: draft.articleContent || undefined,
-        scheduledAt: draft.scheduledAt || 0,
+        scheduledAt: normalizeScheduledAt(draft.scheduledAt),
         visibility: draft.visibility,
         originalDeclare: draft.originalDeclare,
         platformSettings: draft.platformSettings,
@@ -88,13 +97,13 @@ export function useDistributionLauncher(params: {
     }
 
     const video: VideoRecord = {
-      id: crypto.randomUUID(),
+      id: projectId,
       contentType,
       title: draft.title.trim() || '未命名内容',
       description: draft.description.trim(),
       topics: parseTopics(draft.topicsText),
       campaignIds: [...draft.selectedCampaignIds],
-      projectId: draft.projectId,
+      projectId,
       videoCacheId: draft.videoCacheId,
       coverCacheId: draft.coverCacheId,
       imageCacheIds: draft.imageCacheIds,
@@ -106,7 +115,7 @@ export function useDistributionLauncher(params: {
       coverSize: draft.coverSize,
       musicSize: draft.musicSize,
       articleContent: draft.articleContent || undefined,
-      scheduledAt: draft.scheduledAt || 0,
+      scheduledAt: normalizeScheduledAt(draft.scheduledAt),
       visibility: draft.visibility,
       originalDeclare: draft.originalDeclare,
       platformSettings: draft.platformSettings,
@@ -137,6 +146,9 @@ export function useDistributionLauncher(params: {
       await persistDraft();
       const video = await upsertVideoFromDraft();
       const content = buildContent(draft);
+      content.fillOptions = {
+        topicIntervalMs: normalizeTopicIntervalMs(globalSettings.topicIntervalMs),
+      };
       const enabledOnly = PLATFORM_ORDER.filter((id) => (
         draft.selectedPlatforms.includes(id) &&
         platformSettings[id]?.enabled !== false &&

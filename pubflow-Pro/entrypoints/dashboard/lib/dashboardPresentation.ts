@@ -53,7 +53,7 @@ export function statusText(status: string) {
 export function statusClass(status: string) {
   const map: Record<string, string> = {
     published: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-    filled: 'bg-blue-50 text-blue-700 ring-blue-200',
+    filled: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
     filling: 'bg-amber-50 text-amber-700 ring-amber-200',
     pending: 'bg-slate-100 text-slate-600 ring-slate-200',
     skipped: 'bg-slate-100 text-slate-500 ring-slate-200',

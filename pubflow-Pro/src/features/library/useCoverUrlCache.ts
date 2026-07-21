@@ -32,7 +32,6 @@ export function useCoverUrlCache(params: {
         targets.map(async (video) => {
           const assets = await loadProjectAssetFiles({
             projectId: video.projectId,
-            title: video.title,
             coverFileName: video.coverFileName,
           });
           if (assets.coverFile && video.coverFileName) {

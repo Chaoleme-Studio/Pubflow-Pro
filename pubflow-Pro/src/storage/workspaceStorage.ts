@@ -1,5 +1,5 @@
 import { PLATFORM_ORDER } from '../platforms';
-import { parseTopics } from '../domain/content';
+import { normalizeScheduledAt, parseTopics } from '../domain/content';
 import { STORAGE_KEYS } from '../types';
 import { sleep } from '../utils/time';
 import type { ContentDraft, PlatformStatus, PublishRecord, VideoRecord, WorkspaceSettings } from '../types';
@@ -8,6 +8,7 @@ const DB_NAME = 'pubflow-workspace';
 const DB_VERSION = 1;
 const STORE_NAME = 'handles';
 const WORKSPACE_HANDLE_KEY = 'workspace-directory';
+const DATA_FILE_NAME = 'pubflow-data.json';
 
 type PermissionMode = { mode: 'read' | 'readwrite' };
 type PermissionAwareDirectoryHandle = FileSystemDirectoryHandle & {
@@ -135,6 +136,70 @@ export async function requestWorkspacePermission(
   return permissionHandle.requestPermission({ mode: 'readwrite' });
 }
 
+export type WorkspaceRootInspection =
+  | { kind: 'empty' }
+  | { kind: 'existing'; projectSnapshotCount: number }
+  | { kind: 'invalid'; reason: string };
+
+/**
+ * 在保存目录句柄前校验工作区根目录，防止把 dist/.output 等构建目录写成新工作区。
+ * 新工作区只允许空目录；已有工作区必须完整符合 v2 根文件和项目清单结构。
+ */
+export async function inspectWorkspaceRoot(
+  handle: FileSystemDirectoryHandle,
+): Promise<WorkspaceRootInspection> {
+  const entries = await listDirectoryEntries(handle);
+  const meaningfulEntries = entries.filter(([name]) => name !== '.DS_Store');
+  if (meaningfulEntries.length === 0) return { kind: 'empty' };
+
+  const dataEntry = meaningfulEntries.find(([name]) => name === DATA_FILE_NAME)?.[1];
+  const projectsEntry = meaningfulEntries.find(([name]) => name === 'projects')?.[1];
+  if (dataEntry?.kind !== 'file' || projectsEntry?.kind !== 'directory') {
+    return {
+      kind: 'invalid',
+      reason: `所选目录不是 PubFlow 工作区根目录：必须同时包含 ${DATA_FILE_NAME} 和 projects/。`,
+    };
+  }
+
+  const rootData = await readJsonFile(handle, DATA_FILE_NAME);
+  if (!rootData || typeof rootData !== 'object' || (rootData as Record<string, unknown>).version !== 2) {
+    return { kind: 'invalid', reason: `${DATA_FILE_NAME} 不是有效的 v2 工作区数据。` };
+  }
+
+  const projectsDirectory = projectsEntry as FileSystemDirectoryHandle;
+  let projectSnapshotCount = 0;
+  const invalidDirectories: string[] = [];
+  for (const [name, entry] of await listDirectoryEntries(projectsDirectory)) {
+    if (entry.kind !== 'directory') continue;
+    const manifest = await readProjectManifest(entry as FileSystemDirectoryHandle);
+    if (!manifest) {
+      invalidDirectories.push(name);
+      continue;
+    }
+    if (!manifest.deletedAt) projectSnapshotCount += 1;
+  }
+
+  if (invalidDirectories.length > 0) {
+    return {
+      kind: 'invalid',
+      reason: `工作区包含 ${invalidDirectories.length} 个无效项目目录，请先修复 project.json。`,
+    };
+  }
+
+  return { kind: 'existing', projectSnapshotCount };
+}
+
+/** 读取目录的直接子项，统一封装 File System Access API 的异步迭代类型。 */
+async function listDirectoryEntries(handle: FileSystemDirectoryHandle) {
+  const entries: Array<[string, FileSystemHandle]> = [];
+  for await (const entry of (handle as unknown as {
+    entries: () => AsyncIterableIterator<[string, FileSystemHandle]>;
+  }).entries()) {
+    entries.push(entry);
+  }
+  return entries;
+}
+
 /** 生成一个新的项目 ID，格式为 日期-随机串。 */
 export function createProjectId() {
   return `${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 8)}`;
@@ -202,7 +267,7 @@ export async function ensureWorkspaceProject(draft: ContentDraft) {
 
   const projectsDir = await getOrCreateDirectory(storedWorkspace.handle, 'projects');
   const projectId = draft.projectId || createProjectId();
-  const existingProjectDir = await getProjectDirectoryById(projectId, draft.title);
+  const existingProjectDir = await getProjectDirectoryById(projectId);
   const projectName = existingProjectDir
     ? await getProjectDirectoryName(projectsDir, existingProjectDir, projectId, draft.title)
     : createProjectFolderName(projectId, draft.title, draft.contentType);
@@ -230,7 +295,11 @@ async function getProjectDirectoryName(
 ) {
   for await (const [name, entry] of (projectsDir as unknown as { entries: () => AsyncIterableIterator<[string, FileSystemHandle]> }).entries()) {
     if (entry.kind === 'directory' && entry === projectDir) return name;
-    if (entry.kind === 'directory' && name.startsWith(`${projectId}-`)) return name;
+    if (entry.kind !== 'directory') continue;
+    const comparable = entry as FileSystemDirectoryHandle & {
+      isSameEntry?: (other: FileSystemHandle) => Promise<boolean>;
+    };
+    if (comparable.isSameEntry && await comparable.isSameEntry(projectDir)) return name;
   }
   return createProjectFolderName(projectId, title);
 }
@@ -272,13 +341,17 @@ function draftToPlatformStatuses(draft: ContentDraft, existing?: PlatformStatus[
   });
 }
 
-/** 将草稿转换为视频记录，复用已有记录的 ID 和创建时间。 */
-function draftToVideoRecord(draft: ContentDraft, existing?: VideoRecord): VideoRecord {
+/** 将草稿转换为项目记录，projectId 是项目和作品的唯一身份。 */
+export function videoRecordFromDraft(
+  draft: ContentDraft,
+  existing?: VideoRecord,
+  options: { resetPlatformStatuses?: boolean } = {},
+): VideoRecord {
   const now = Date.now();
-  const projectId = draft.projectId || existing?.projectId || existing?.id || createProjectId();
+  const projectId = draft.projectId || existing?.projectId || createProjectId();
   return {
     contentType: draft.contentType || existing?.contentType || (draft.imageCacheIds?.length ? 'image' : 'video'),
-    id: draft.sourceVideoId || existing?.id || projectId,
+    id: projectId,
     title: draft.title.trim() || '未命名内容',
     description: draft.description.trim(),
     topics: parseTopics(draft.topicsText),
@@ -286,24 +359,32 @@ function draftToVideoRecord(draft: ContentDraft, existing?: VideoRecord): VideoR
     projectId,
     videoCacheId: draft.videoCacheId || '',
     coverCacheId: draft.coverCacheId || '',
+    imageCacheIds: [...(draft.imageCacheIds || [])],
     videoFileName: draft.videoFileName || '',
     coverFileName: draft.coverFileName || '',
     musicFileName: draft.musicFileName || '',
+    musicName: draft.musicName || '',
     imageFileNames: [...(draft.imageFileNames || [])],
     videoSize: draft.videoSize || 0,
     coverSize: draft.coverSize || 0,
     musicSize: draft.musicSize || 0,
     articleContent: draft.articleContent || existing?.articleContent || undefined,
+    scheduledAt: normalizeScheduledAt(draft.scheduledAt),
+    visibility: draft.visibility || 'public',
+    originalDeclare: draft.originalDeclare ?? false,
     platformSettings: draft.platformSettings || existing?.platformSettings || {},
-    platforms: draftToPlatformStatuses(draft, existing?.platforms),
+    platforms: draftToPlatformStatuses(
+      draft,
+      options.resetPlatformStatuses ? undefined : existing?.platforms,
+    ),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
 }
 
-/** 按 projectId 加载项目 manifest（含 articleContent） */
-export async function loadProjectManifestByVideo(projectId: string, title?: string): Promise<WorkspaceProjectManifest | null> {
-  const projectDir = await getProjectDirectoryById(projectId, title);
+/** 按唯一 projectId 加载项目 manifest（含 articleContent）。 */
+export async function loadProjectManifest(projectId: string): Promise<WorkspaceProjectManifest | null> {
+  const projectDir = await getProjectDirectoryById(projectId);
   if (!projectDir) return null;
   return readProjectManifest(projectDir);
 }
@@ -314,7 +395,7 @@ export async function writeProjectManifest(draft: ContentDraft, persistArticleCo
   if (!project) return null;
 
   const existing = await readProjectManifest(project.projectDir);
-  const video = draftToVideoRecord(draft, existing?.video);
+  const video = videoRecordFromDraft(draft, existing?.video);
   const articleContent =
     typeof persistArticleContent === 'string'
       ? persistArticleContent
@@ -395,7 +476,9 @@ export async function loadAllWorkspaceProjects(): Promise<WorkspaceProjectManife
       void cleanupDeletedProjectDirs(projectsDir, deletedDirs).catch(() => undefined);
     }
 
-    return projects.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    return projects.sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+    );
   } catch {
     return [];
   }
@@ -419,9 +502,8 @@ async function cleanupDeletedProjectDirs(
   }
 }
 
-// 优先按 manifest 里的 projectId 找目录；目录名可能因为标题或迁移历史保留旧前缀。
-/** 根据 projectId 在工作区中查找对应的项目目录。 */
-async function getProjectDirectoryById(projectId: string, title?: string) {
+/** 严格根据 project.json 的 id 查找项目目录。 */
+async function getProjectDirectoryById(projectId: string) {
   const storedWorkspace = await loadWorkspaceDirectory();
   if (!storedWorkspace?.handle || !projectId) return null;
 
@@ -430,26 +512,16 @@ async function getProjectDirectoryById(projectId: string, title?: string) {
 
   try {
     const projectsDir = await storedWorkspace.handle.getDirectoryHandle('projects');
-    const expectedName = title ? createProjectFolderName(projectId, title) : '';
-
-    if (expectedName) {
-      try {
-        return await projectsDir.getDirectoryHandle(expectedName);
-      } catch {
-        // Fall through to prefix search.
-      }
-    }
-
-    for await (const [name, entry] of (projectsDir as unknown as { entries: () => AsyncIterableIterator<[string, FileSystemHandle]> }).entries()) {
+    let match: { directory: FileSystemDirectoryHandle; updatedAt: number } | null = null;
+    for await (const [, entry] of (projectsDir as unknown as { entries: () => AsyncIterableIterator<[string, FileSystemHandle]> }).entries()) {
       if (entry.kind !== 'directory') continue;
-      const manifest = await readProjectManifest(entry as FileSystemDirectoryHandle);
-      if (manifest && !manifest.deletedAt && (manifest.id === projectId || manifest.video.projectId === projectId)) {
-        return entry as FileSystemDirectoryHandle;
-      }
-      if (entry.kind === 'directory' && name.startsWith(`${projectId}-`)) {
-        return entry as FileSystemDirectoryHandle;
-      }
+      const directory = entry as FileSystemDirectoryHandle;
+      const manifest = await readProjectManifest(directory);
+      if (!manifest || manifest.deletedAt || manifest.id !== projectId) continue;
+      const updatedAt = Date.parse(manifest.updatedAt) || 0;
+      if (!match || updatedAt > match.updatedAt) match = { directory, updatedAt };
     }
+    return match?.directory || null;
   } catch {
     return null;
   }
@@ -457,14 +529,12 @@ async function getProjectDirectoryById(projectId: string, title?: string) {
   return null;
 }
 
-/** 读取项目目录下的 project.json 并校验版本。 */
-export async function readProjectManifest(
-  projectDir: FileSystemDirectoryHandle,
-): Promise<WorkspaceProjectManifest | null> {
-  const raw = await readJsonFile(projectDir, 'project.json');
+/** 校验标准 project.json，并统一使用 manifest.id 作为项目全链路身份。 */
+export function normalizeProjectManifest(raw: unknown): WorkspaceProjectManifest | null {
   if (!raw || typeof raw !== 'object') return null;
   const manifest = raw as Partial<WorkspaceProjectManifest>;
-  if (manifest.version !== 2 || !manifest.video?.id) return null;
+  const projectId = typeof manifest.id === 'string' ? manifest.id.trim() : '';
+  if (manifest.version !== 2 || !projectId || !manifest.video) return null;
   const articleContent =
     typeof manifest.articleContent === 'string'
       ? manifest.articleContent
@@ -473,21 +543,35 @@ export async function readProjectManifest(
         : undefined;
   return {
     version: 2,
-    id: manifest.id || manifest.video.projectId || manifest.video.id,
+    id: projectId,
     updatedAt: manifest.updatedAt || new Date(manifest.video.updatedAt || Date.now()).toISOString(),
     deletedAt: typeof manifest.deletedAt === 'number' ? manifest.deletedAt : null,
     video: {
       ...manifest.video,
-      projectId: manifest.video.projectId || manifest.id || manifest.video.id,
+      id: projectId,
+      projectId,
       topics: Array.isArray(manifest.video.topics) ? manifest.video.topics : [],
       campaignIds: Array.isArray(manifest.video.campaignIds) ? manifest.video.campaignIds : [],
       imageFileNames: Array.isArray(manifest.video.imageFileNames) ? manifest.video.imageFileNames : [],
       platforms: Array.isArray(manifest.video.platforms) ? manifest.video.platforms : [],
       articleContent,
     },
-    records: Array.isArray(manifest.records) ? manifest.records : [],
+    records: Array.isArray(manifest.records)
+      ? manifest.records.map((record) => ({
+        ...record,
+        id: `${projectId}:${record.platformId}`,
+        videoId: projectId,
+      }))
+      : [],
     articleContent,
   };
+}
+
+/** 读取项目目录中的标准 project.json。 */
+export async function readProjectManifest(
+  projectDir: FileSystemDirectoryHandle,
+): Promise<WorkspaceProjectManifest | null> {
+  return normalizeProjectManifest(await readJsonFile(projectDir, 'project.json'));
 }
 
 /** 用视频和发布记录构造标准化的项目 manifest 对象。 */
@@ -496,7 +580,8 @@ export function createProjectManifest(input: {
   records?: PublishRecord[];
   articleContent?: string;
 }): WorkspaceProjectManifest {
-  const projectId = input.video.projectId || input.video.id;
+  const projectId = input.video.projectId?.trim();
+  if (!projectId) throw new Error('项目缺少 projectId，无法写入工作区。');
   const manifest: WorkspaceProjectManifest = {
     version: 2,
     id: projectId,
@@ -504,9 +589,14 @@ export function createProjectManifest(input: {
     deletedAt: null,
     video: {
       ...input.video,
+      id: projectId,
       projectId,
     },
-    records: input.records || [],
+    records: (input.records || []).map((record) => ({
+      ...record,
+      id: `${projectId}:${record.platformId}`,
+      videoId: projectId,
+    })),
   };
   if (typeof input.articleContent === 'string') {
     manifest.articleContent = input.articleContent;
@@ -522,9 +612,10 @@ export async function writeProjectData(video: VideoRecord, records: PublishRecor
   const permission = await ensureReadwritePermission(storedWorkspace.handle);
   if (permission === 'denied') return false;
 
-  const projectId = video.projectId || video.id;
+  const projectId = video.projectId?.trim();
+  if (!projectId) return false;
   const projectsDir = await getOrCreateDirectory(storedWorkspace.handle, 'projects');
-  const existingProjectDir = await getProjectDirectoryById(projectId, video.title);
+  const existingProjectDir = await getProjectDirectoryById(projectId);
   const projectName = existingProjectDir
     ? await getProjectDirectoryName(projectsDir, existingProjectDir, projectId, video.title)
     : createProjectFolderName(projectId, video.title, video.contentType);
@@ -593,19 +684,20 @@ async function markProjectManifestDeleted(
 }
 
 /** 删除项目数据：先移动到 Trash，再标记软删除，并尝试移除原目录。 */
-export async function deleteProjectData(video: Pick<VideoRecord, 'id' | 'projectId' | 'title'>) {
+export async function deleteProjectData(video: Pick<VideoRecord, 'projectId' | 'title'>) {
   const storedWorkspace = await loadWorkspaceDirectory();
   if (!storedWorkspace?.handle) return { ok: false, reason: 'no-workspace' as const };
 
   const permission = await ensureReadwritePermission(storedWorkspace.handle);
   if (permission === 'denied') return { ok: false, reason: 'permission-denied' as const };
 
-  const projectId = video.projectId || video.id;
+  const projectId = video.projectId?.trim();
+  if (!projectId) return { ok: false, reason: 'missing-project-id' as const };
   const deletedAt = Date.now();
 
   try {
     const projectsDir = await storedWorkspace.handle.getDirectoryHandle('projects');
-    const projectDir = await getProjectDirectoryById(projectId, video.title);
+    const projectDir = await getProjectDirectoryById(projectId);
     if (!projectDir) {
       await markProjectDeletedInIndex({ projectId, title: video.title, deletedAt });
       return { ok: true, reason: 'missing-project' as const };
@@ -664,14 +756,13 @@ async function tryReadProjectAssetFile(
 /** 从工作区加载项目相关的视频、封面、音乐和图文素材文件。 */
 export async function loadProjectAssetFiles(params: {
   projectId?: string;
-  title?: string;
   videoFileName?: string;
   coverFileName?: string;
   musicFileName?: string;
   imageFileNames?: string[];
 }) {
   // “继续/编辑” 会走这里，把工作区里的素材重新恢复成 File 对象。
-  const projectDir = await getProjectDirectoryById(params.projectId || '', params.title);
+  const projectDir = await getProjectDirectoryById(params.projectId || '');
   if (!projectDir) {
     return {
       videoFile: null,
@@ -723,7 +814,6 @@ export interface PubFlowDataFile {
   }>;
 }
 
-const DATA_FILE_NAME = 'pubflow-data.json';
 const REDACTED_SECRET = '';
 
 /** 从设置中移除 API 密钥等敏感信息，避免写入工作区数据文件时泄露。 */
@@ -825,7 +915,7 @@ export async function mergeDataFile(partial: Partial<Omit<PubFlowDataFile, 'vers
 
   const projectIndex = [...existing.projectIndex];
   for (const incoming of partial.projectIndex || []) {
-    const index = projectIndex.findIndex((item) => item.projectId === incoming.projectId);
+    const index = projectIndex.findIndex((item) => item.path === incoming.path);
     if (index >= 0) projectIndex[index] = { ...projectIndex[index], ...incoming };
     else projectIndex.push(incoming);
   }

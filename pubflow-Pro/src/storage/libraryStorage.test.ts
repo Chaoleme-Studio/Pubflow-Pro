@@ -21,22 +21,22 @@ function video(overrides: Partial<VideoRecord>): VideoRecord {
 describe('deduplicateVideos', () => {
   it('keeps separate publication records even when file and project metadata match', () => {
     const result = deduplicateVideos([
-      video({ id: 'publication-1', updatedAt: 10 }),
-      video({ id: 'publication-2', updatedAt: 20 }),
+      video({ id: 'project-1', projectId: 'project-1', updatedAt: 10 }),
+      video({ id: 'project-2', projectId: 'project-2', updatedAt: 20 }),
     ]);
 
-    expect(result.map((item) => item.id)).toEqual(['publication-2', 'publication-1']);
+    expect(result.map((item) => item.id)).toEqual(['project-2', 'project-1']);
   });
 
   it('still merges duplicated snapshots of the same record id', () => {
     const result = deduplicateVideos([
       video({
-        id: 'publication-1',
+        id: 'project-1',
         updatedAt: 10,
         platforms: [{ platformId: 'douyin', status: 'published', publishedUrl: 'https://example.test/1' }],
       }),
       video({
-        id: 'publication-1',
+        id: 'project-1',
         title: '较新的标题',
         updatedAt: 20,
         platforms: [{ platformId: 'douyin', status: 'pending' }],
@@ -49,6 +49,31 @@ describe('deduplicateVideos', () => {
       status: 'published',
       publishedUrl: 'https://example.test/1',
     });
+  });
+
+  it('merges snapshots when project id matches', () => {
+    const result = deduplicateVideos([
+      video({ id: 'shared-video', projectId: 'same-project', updatedAt: 10 }),
+      video({ id: 'shared-video', projectId: 'same-project', title: '最新快照', updatedAt: 20 }),
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe('最新快照');
+  });
+
+  it('keeps a published status even when the platform did not return a URL', () => {
+    const result = deduplicateVideos([
+      video({
+        updatedAt: 10,
+        platforms: [{ platformId: 'douyin', status: 'published' }],
+      }),
+      video({
+        updatedAt: 20,
+        platforms: [{ platformId: 'douyin', status: 'pending' }],
+      }),
+    ]);
+
+    expect(result[0].platforms[0].status).toBe('published');
   });
 });
 

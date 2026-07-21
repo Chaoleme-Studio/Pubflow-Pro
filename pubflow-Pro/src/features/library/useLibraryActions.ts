@@ -33,7 +33,9 @@ export function useLibraryActions(params: {
   async function syncData(scope: 'videos' | 'records') {
     await loadLibraryData();
     if (scope === 'videos') await preloadVideoCovers();
-    notice.value = scope === 'videos' ? '视频数据已同步。' : '发布记录已同步。';
+    notice.value = scope === 'videos'
+      ? `已从当前数据源同步 ${videos.value.length} 个项目。`
+      : `已同步 ${records.value.length} 条发布记录。`;
   }
 
   /** 删除指定视频项目，同步更新列表和工作区 Trash */
@@ -43,7 +45,8 @@ export function useLibraryActions(params: {
 
     busy.value = true;
     try {
-      const deleted = await deleteVideoRecord(video.id);
+      if (!video.projectId) throw new Error('项目缺少 projectId，无法删除。');
+      const deleted = await deleteVideoRecord(video.projectId);
       videos.value = deleted.videos;
       records.value = deleted.records;
       await preloadVideoCovers();

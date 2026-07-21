@@ -1,4 +1,4 @@
-import { fillField, humanDelay } from '../../content/fieldFiller';
+import { fillDescriptionWithTopics, fillField, humanDelay } from '../../content/fieldFiller';
 import { uploadVideoIfAvailable } from '../../content/videoUploader';
 import { cdpClickElement } from '../../content/cdp';
 import {
@@ -526,8 +526,13 @@ export async function fillKuaishouContent(config: PlatformConfig, content: Conte
     await humanDelay();
   }
 
-  if (fields.description && content.description) {
-    await fillField(fields.description, content.description);
+  if (fields.description && (content.description || content.topics.length > 0)) {
+    await fillDescriptionWithTopics(
+      fields.description,
+      content.description,
+      content.topics,
+      content.fillOptions?.topicIntervalMs,
+    );
     await humanDelay();
   }
 

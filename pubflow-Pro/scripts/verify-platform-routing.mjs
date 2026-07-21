@@ -355,14 +355,14 @@ assertIncludes(
 
 assertIncludes(
   'src/platforms/xiaohongshu/content.ts',
-  '} else if (fields.description && content.description) {',
-  '小红书图文正文必须使用 description 填入正文编辑器。',
+  '} else if (fields.description && (content.description || content.topics.length > 0)) {',
+  '小红书图文正文必须使用 description 和逐个话题填入正文编辑器。',
 );
 
 assertIncludes(
   'src/platforms/douyin/content.ts',
-  '} else if (fields.description && content.description) {',
-  '抖音图文正文必须使用 description 填入正文编辑器。',
+  '} else if (fields.description && (content.description || (!topicField && content.topics.length > 0))) {',
+  '抖音图文正文必须使用 description 和逐个话题填入正文编辑器。',
 );
 
 assertIncludes(
@@ -379,7 +379,7 @@ assertIncludes(
 
 assertIncludes(
   'src/platforms/weixinChannels/pageWorld.ts',
-  'if (!skipTitle && title && (topics.length > 0 || description))',
+  'if (!skipTitle && title && (description || topics.length > 0))',
   '视频号图文描述跳过标题时不能先插入多余换行。',
 );
 
@@ -421,14 +421,14 @@ assertIncludes(
 
 assertIncludes(
   'src/features/distribution/useDistributionLauncher.ts',
-  'scheduledAt: draft.scheduledAt || 0',
-  '从我的视频重发/继续必须保存定时发布时间。',
+  'scheduledAt: normalizeScheduledAt(draft.scheduledAt)',
+  '从我的视频重发/继续必须仅保存有效的未来定时发布时间。',
 );
 
 assertIncludes(
   'src/features/publish/usePublishDraft.ts',
-  'draft.scheduledAt = video.scheduledAt || 0;',
-  '从我的视频重发/继续必须恢复定时发布时间。',
+  'draft.scheduledAt = asReplica ? 0 : normalizeScheduledAt(video.scheduledAt);',
+  '从我的视频重发/继续必须只恢复有效的未来定时发布时间。',
 );
 
 assertIncludes(
@@ -651,6 +651,60 @@ assertIncludes(
   'entrypoints/background.ts',
   '没有设置|不是\\s*contenteditable',
   '知乎所属领域设置失败必须被后台识别为失败状态。',
+);
+
+assertMatches(
+  'src/content/fieldFiller.ts',
+  /insertTopicAtCaret\(editable, `#\$\{topics\[index\]\}`\);[\s\S]*?await waitForIdle\(delayMs\);[\s\S]*?confirmTopicWithEnter\(editable\);[\s\S]*?await waitForIdle\(delayMs\);[\s\S]*?insertTopicSeparatorSpace\(editable\);/,
+  '共用描述编辑器必须按 #话题、等待、Enter、等待、空格的顺序填写。',
+);
+
+assertIncludes(
+  'src/platforms/douyin/content.ts',
+  'fillDescriptionWithTopicsByTrustedInput(',
+  '抖音描述和话题必须走可信点击及键盘输入，不能再用合成 Enter 造成换行。',
+);
+
+assertIncludes(
+  'src/platforms/zhihu/content.ts',
+  'fillDescriptionWithTopicsByTrustedInput(',
+  '知乎视频简介必须先可信点击激活，并合并填写独立话题。',
+);
+
+assertMatches(
+  'entrypoints/background.ts',
+  /for \(const topic of topics\)[\s\S]*?Input\.insertText'[\s\S]*?topicIntervalMs[\s\S]*?dispatchCdpKey\(debuggee, 'Enter'[\s\S]*?topicIntervalMs[\s\S]*?Input\.insertText', \{ text: ' ' \}/,
+  '可信话题输入必须按逐个输入、等待、Enter、等待、空格的顺序执行。',
+);
+
+assertMatches(
+  'src/platforms/weixinChannels/pageWorld.ts',
+  /insertTopicText\(editor, `#\$\{clean\}`\);[\s\S]*?await sleep\(topicIntervalMs\);[\s\S]*?confirmTopicWithEnter\(editor\);[\s\S]*?await sleep\(topicIntervalMs\);[\s\S]*?simulateKey\(editor, ' '\);/,
+  '视频号主世界必须按 #话题、等待、Enter、等待、空格的顺序填写。',
+);
+
+assertIncludes(
+  'entrypoints/dashboard/views/VideosView.vue',
+  "platform.status === 'published' || platform.status === 'filled' ? 'badge-published'",
+  '我的视频平台状态列必须把已填充和已发布都显示为完成绿色。',
+);
+
+assertIncludes(
+  'entrypoints/dashboard/views/VideosView.vue',
+  `@click="emit('replicateVideo', video)">复刻</button>`,
+  '我的视频第二个操作必须是独立的复刻事件，不能继续复用编辑原项目事件。',
+);
+
+assertIncludes(
+  'entrypoints/dashboard/App.vue',
+  'videoRecordFromDraft(draft, existing, { resetPlatformStatuses: true })',
+  '复刻草稿项目不得继承源项目或旧草稿的已发布状态。',
+);
+
+assertIncludes(
+  'src/features/publish/usePublishDraft.ts',
+  'const reuseReplicaProject = Boolean(asReplica && draft.replicaSourceProjectId && draft.projectId);',
+  '连续复刻必须复用同一个未发布复刻草稿项目。',
 );
 
 console.info('[PubFlow] platform routing invariants verified.');

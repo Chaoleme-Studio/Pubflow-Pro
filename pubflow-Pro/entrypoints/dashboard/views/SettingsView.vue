@@ -345,6 +345,20 @@ watch(
           <span :class="fieldLabelClass">分发间隔</span>
           <input v-model.number="globalSettings.distributionInterval" class="pf-input w-28" min="1" type="number" />
         </label>
+        <label class="grid grid-cols-[140px_1fr] items-center gap-4">
+          <span :class="fieldLabelClass">话题步骤间隔</span>
+          <div class="flex items-center gap-2">
+            <input
+              v-model.number="globalSettings.topicIntervalMs"
+              class="pf-input w-28"
+              max="3000"
+              min="100"
+              step="100"
+              type="number"
+            />
+            <span class="text-xs text-slate-400">毫秒</span>
+          </div>
+        </label>
       </div>
     </section>
 
