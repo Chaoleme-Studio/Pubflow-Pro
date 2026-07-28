@@ -18,6 +18,7 @@ mod not_found;
 pub mod product;
 /// PubFlow 购买订单模块
 pub mod purchase;
+pub mod remote_publish;
 /// PubFlow Selector 模块
 pub mod selector;
 /// 用户管理模块（注册、登录、获取用户信息）

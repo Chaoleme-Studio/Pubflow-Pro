@@ -1,7 +1,7 @@
 import { reactive, ref } from 'vue';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_DRAFT } from '../../storage/draftStorage';
-import { createProjectId, loadProjectAssetFiles } from '../../storage/workspaceStorage';
+import { loadProjectAssetFiles } from '../../storage/workspaceStorage';
 import type { ContentDraft, VideoRecord, WorkspaceSettings } from '../../types';
 import {
   clonePlatformSettings,
@@ -16,7 +16,6 @@ vi.mock('../../storage/workspaceStorage', async () => {
   );
   return {
     ...actual,
-    createProjectId: vi.fn(() => 'replica-project-1'),
     loadProjectAssetFiles: vi.fn(async () => ({
       videoFile: null,
       coverFile: null,
@@ -67,7 +66,6 @@ function setup(draft: ContentDraft) {
 describe('usePublishDraft publication lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(createProjectId).mockReturnValue('replica-project-1');
   });
 
   it('prepares an independent next publication while retaining reusable copy', () => {
@@ -184,12 +182,13 @@ describe('usePublishDraft publication lifecycle', () => {
     expect(draft.platformSettings).toEqual({ douyin: { declaration: '原创内容' } });
   });
 
-  it('reuses one replica draft project when another source is replicated before distribution', async () => {
+  it('keeps replicated content as a persisted draft until a project is needed', async () => {
     const draft = reactive(populatedDraft());
     const {
       coverFile,
       imageFiles,
       musicFile,
+      persistDraft,
       replicateDraftFromVideo,
       videoFile,
     } = setup(draft);
@@ -232,12 +231,10 @@ describe('usePublishDraft publication lifecycle', () => {
     } satisfies VideoRecord;
 
     await replicateDraftFromVideo(reactive(first));
-    const replicaProjectId = draft.projectId!;
     await replicateDraftFromVideo(reactive(second));
 
-    expect(createProjectId).toHaveBeenCalledOnce();
     expect(draft).toMatchObject({
-      projectId: replicaProjectId,
+      projectId: '',
       replicaSourceProjectId: 'source-project-2',
       title: '源项目二',
       description: '描述二',
@@ -263,12 +260,7 @@ describe('usePublishDraft publication lifecycle', () => {
     expect(imageFiles.value).toEqual([]);
     expect(loadProjectAssetFiles).not.toHaveBeenCalled();
 
-    await replicateDraftFromVideo({
-      ...second,
-      id: replicaProjectId,
-      projectId: replicaProjectId,
-    });
-    expect(loadProjectAssetFiles).not.toHaveBeenCalled();
+    expect(persistDraft).toHaveBeenCalledTimes(2);
   });
 });
 

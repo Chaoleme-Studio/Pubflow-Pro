@@ -45,6 +45,7 @@ impl ProductService {
                 let pricing = effective_plan_pricing(item);
                 PlanItem {
                     id: item.code.clone(),
+                    tier: item.tier.clone(),
                     name: item.name.clone(),
                     price: cents_to_yuan(pricing.amount_cents),
                     unit: item.unit.clone().unwrap_or_default(),
@@ -65,7 +66,7 @@ impl ProductService {
 
         let downloads = rows
             .into_iter()
-            .filter(|item| item.kind == "download" && is_extension_download(item))
+            .filter(|item| item.kind == "download" && is_public_download(item))
             .map(|item| DownloadItem {
                 platform: item.platform.unwrap_or(item.code),
                 name: item.name,
@@ -78,10 +79,11 @@ impl ProductService {
         Ok(ProductCatalogResponse { plans, downloads })
     }
 
-    pub async fn plan_amount_cents(&self, plan: &str) -> Result<i32, crate::AppError> {
+    pub async fn plan_amount_cents(&self, plan: &str, tier: &str) -> Result<i32, crate::AppError> {
         let row = product_catalog::Entity::find()
             .filter(product_catalog::Column::Kind.eq("plan"))
             .filter(product_catalog::Column::Code.eq(plan))
+            .filter(product_catalog::Column::Tier.eq(tier))
             .filter(product_catalog::Column::IsActive.eq(true))
             .one(&self.db)
             .await?
@@ -173,14 +175,14 @@ fn cents_to_yuan(amount_cents: i32) -> String {
     }
 }
 
-fn is_extension_download(item: &product_catalog::Model) -> bool {
+fn is_public_download(item: &product_catalog::Model) -> bool {
     item.platform.as_deref() == Some("extension")
         || item.code == "zip"
         || item.code == "crx"
         || item
             .file_name
             .as_deref()
-            .is_some_and(|name| name.ends_with(".zip") || name.ends_with(".crx"))
+            .is_some_and(|name| name.starts_with("pubflow-pro-native-"))
 }
 
 fn normalize_platform(platform: Option<String>) -> String {

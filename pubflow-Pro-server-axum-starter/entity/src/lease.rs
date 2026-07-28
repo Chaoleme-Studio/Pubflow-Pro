@@ -13,7 +13,7 @@ pub struct Model {
     /// lease 类型：subscription / perpetual
     pub lease_type: String,
 
-    /// 订阅等级：pro / enterprise
+    /// 订阅等级：basic / plus / pro
     pub tier: String,
 
     /// 功能列表，JSON 格式

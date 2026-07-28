@@ -3,6 +3,13 @@ export function planLabel(plan: string) {
   return '月卡';
 }
 
+export function tierLabel(tier: string) {
+  if (tier === 'basic') return 'Basic';
+  if (tier === 'plus') return 'Plus';
+  if (tier === 'pro') return 'Pro';
+  return tier || '-';
+}
+
 export function sourceLabel(source: string) {
   if (source === 'wechat') return '微信';
   if (source === 'alipay') return '支付宝';

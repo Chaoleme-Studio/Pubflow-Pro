@@ -1,4 +1,4 @@
-use crate::core::config::PaymentConfig;
+use crate::core::config::{PaymentConfig, RemotePublishConfig};
 
 /// 应用状态运行时配置
 ///
@@ -43,4 +43,6 @@ pub struct AppStateConfig {
 
     /// 支付运行时配置
     pub payment: PaymentConfig,
+
+    pub remote_publish: RemotePublishConfig,
 }

@@ -166,8 +166,7 @@ pubflow-Pro/
 
 ```bash
 cd pubflow-Pro-server-axum-starter
-cp .env.example .env
-# 编辑 .env 配置数据库连接等
+# 编辑仓库根目录 .env.development 配置数据库连接等
 cargo run -p app
 ```
 

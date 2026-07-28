@@ -10,13 +10,20 @@ use tokio_util::io::ReaderStream;
 
 use crate::{AppError, AppState};
 
-const ALLOWED_FILENAMES: [&str; 2] = ["pubflow-extension.zip", "pubflow-extension.crx"];
+const ALLOWED_FILENAMES: [&str; 6] = [
+    "pubflow-extension.zip",
+    "pubflow-extension.crx",
+    "pubflow-pro-native-mac-arm64.zip",
+    "pubflow-pro-native-mac-x64.zip",
+    "pubflow-pro-native-win-x64.zip",
+    "pubflow-pro-native-linux-x64.zip",
+];
 
 pub async fn download_file(
     State(state): State<Arc<AppState>>,
     Path(filename): Path<String>,
 ) -> Result<Response, AppError> {
-    if !ALLOWED_FILENAMES.contains(&filename.as_str()) {
+    if !is_allowed_filename(&filename) {
         return Err(crate::error::PubFlowError::DownloadNotFound.into());
     }
 
@@ -65,7 +72,25 @@ pub async fn download_file(
 }
 
 pub fn download_file_docs(op: TransformOperation) -> TransformOperation {
-    op.description("下载浏览器扩展安装包")
+    op.description("下载浏览器扩展或 Native 安装包")
         .tag("PubFlow Download")
         .response::<200, ()>()
+}
+
+fn is_allowed_filename(filename: &str) -> bool {
+    ALLOWED_FILENAMES.contains(&filename)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_allowed_filename;
+
+    #[test]
+    fn only_known_release_packages_are_downloadable() {
+        assert!(is_allowed_filename("pubflow-extension.zip"));
+        assert!(is_allowed_filename("pubflow-pro-native-mac-arm64.zip"));
+        assert!(is_allowed_filename("pubflow-pro-native-win-x64.zip"));
+        assert!(!is_allowed_filename("../pubflow-pro-native-win-x64.zip"));
+        assert!(!is_allowed_filename("unregistered.zip"));
+    }
 }

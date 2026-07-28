@@ -169,12 +169,15 @@ export function useDistributionLauncher(params: {
           content,
           platforms: enabledOnly,
           videoId: video.id,
+          autoSubmit: globalSettings.autoSubmit,
         },
       });
       if (!response.ok) throw new Error(response.error || '启动失败');
       task.value = response.data || null;
       onStarted();
-      notice.value = '任务已启动。插件会按平台顺序自动上传并填充，遇到登录或弹窗时会等待处理。';
+      notice.value = globalSettings.autoSubmit
+        ? '任务已启动。插件会按平台顺序自动上传、填充并直接发布。'
+        : '任务已启动。插件会按平台顺序自动上传并填充，遇到登录或弹窗时会等待处理。';
     } catch (error) {
       notice.value = error instanceof Error ? error.message : '启动失败';
     } finally {

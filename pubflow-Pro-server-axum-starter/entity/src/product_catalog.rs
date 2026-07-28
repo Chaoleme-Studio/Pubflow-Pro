@@ -8,6 +8,7 @@ pub struct Model {
     pub id: Uuid,
     pub kind: String,
     pub code: String,
+    pub tier: String,
     pub name: String,
     pub price: Option<String>,
     pub unit: Option<String>,

@@ -1,6 +1,8 @@
 use aide::axum::{ApiRouter, IntoApiResponse};
 use aide::openapi::{OpenApi, Tag};
 use aide::transform::TransformOpenApi;
+use app::shared::TrustedProxyIpKeyExtractor;
+use app::shared::requests_per_second_period;
 use app::*;
 use axum::body::Body;
 use axum::error_handling::HandleErrorLayer;
@@ -84,9 +86,27 @@ async fn main() -> Result<(), AppError> {
     info!("服务器地址: {}", config.server_addr());
     info!("数据库连接池: {} 个连接", config.database.max_connections);
     info!("日志级别: {}", config.logging.level);
+    info!(
+        "远程素材总传输上限: {} bytes/s，最大并发 {}",
+        config.remote_publish.aggregate_transfer_bytes_per_second,
+        config.remote_publish.max_concurrent_transfers
+    );
 
     // 初始化应用状态（包含数据库连接、Redis 连接池等）
     let app_state = Arc::new(AppState::init(&config).await?);
+    tokio::fs::create_dir_all(&config.remote_publish.storage_path).await?;
+    {
+        let cleanup_state = app_state.clone();
+        tokio::spawn(async move {
+            let service = remote_publish::service::RemotePublishService::from_state(&cleanup_state);
+            loop {
+                if let Err(error) = service.cleanup_expired().await {
+                    tracing::error!(%error, "远程发布数据清理失败");
+                }
+                tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+            }
+        });
+    }
 
     // 输出 Redis 连接状态
     if app_state.redis.is_some() {
@@ -139,17 +159,21 @@ async fn main() -> Result<(), AppError> {
     );
 
     // 配置速率限制
-    // 注意：在本地开发环境中，SmartIpKeyExtractor 可能无法正确提取 IP 地址
-    // 生产环境中，确保配置了正确的 ConnectInfo 中间件
     let general_limiter = Arc::new(
         GovernorConfigBuilder::default()
-            .per_second(20)
-            .burst_size(40)
+            .key_extractor(TrustedProxyIpKeyExtractor)
+            .period(requests_per_second_period(
+                config.server.http_rate_limit_requests_per_second,
+            ))
+            .burst_size(config.server.http_rate_limit_burst)
             .use_headers()
             .finish()
             .unwrap(),
     );
-    info!("⚡ 速率限制已启用: 每秒20个请求，突发40个请求");
+    info!(
+        "⚡ 速率限制已启用: 每客户端 IP 平均每秒{}个请求，突发{}个请求",
+        config.server.http_rate_limit_requests_per_second, config.server.http_rate_limit_burst
+    );
 
     // 应用所有中间件
     let app = app

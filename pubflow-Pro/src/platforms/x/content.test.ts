@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ContentData } from '../../types';
-import { buildXPostText } from './content';
+import { buildXPostText, normalizeXComposerText, resolveXScheduleParts } from './content';
 
 function content(overrides: Partial<ContentData> = {}): ContentData {
   return {
@@ -38,5 +38,22 @@ describe('buildXPostText', () => {
     const result = buildXPostText(content({ description: '🎬'.repeat(281) }));
     expect(Array.from(result)).toHaveLength(280);
     expect(result.endsWith('…')).toBe(true);
+  });
+
+  it('把定时时间转换为 X 安排表五个原生选择器的值', () => {
+    const scheduledAt = new Date(2026, 6, 27, 22, 17).getTime();
+    expect(resolveXScheduleParts(scheduledAt)).toEqual({
+      year: '2026',
+      month: '7',
+      day: '27',
+      hour: '22',
+      minute: '17',
+    });
+  });
+
+  it('校验编辑器文案时兼容 Draft 编辑器的换行和特殊空格', () => {
+    const source = '标题\n\n正文\n\n#科技 #AI';
+    const editorText = '标题\n\n正文\n\n#科技\u00a0#AI\u200b';
+    expect(normalizeXComposerText(editorText)).toBe(normalizeXComposerText(source));
   });
 });

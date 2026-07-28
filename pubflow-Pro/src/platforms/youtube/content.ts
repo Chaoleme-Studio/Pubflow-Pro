@@ -20,16 +20,18 @@ type YouTubeAudience = 'madeForKids' | 'notForKids';
 type YouTubeAlteredContent = 'yes' | 'no' | '';
 type YouTubeAgeRestriction = 'none' | 'over18';
 type YouTubeRemixPermission = 'videoAndAudio' | 'audioOnly' | 'none';
+type YouTubeVisibilityName = 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
+
+export type YouTubeVisibilityPlan =
+  | { container: 'second'; scheduledAt: number }
+  | { container: 'first'; visibilityName: YouTubeVisibilityName };
 
 /** YouTube Studio 使用浏览器现有登录态打开上传弹窗并填写视频详情，不点击最终发布。 */
 export async function fillYouTubeContent(config: PlatformConfig, content: ContentData) {
   await ensureYouTubeUploadDialog(config);
 
-  let uploadMessage = '';
-  if (content.videoCacheId) {
-    uploadMessage = await uploadVideoIfAvailable(config, content);
-    await humanDelay();
-  }
+  const uploadMessage = await uploadVideoIfAvailable(config, content);
+  await humanDelay();
 
   await waitForEditorReady(config);
   if (config.fields.title && content.title) {
@@ -313,16 +315,14 @@ async function fillYouTubeVisibilityAndSchedule(content: ContentData) {
   );
   if (!visibilityRoot) throw new Error('YouTube 已进入“公开范围”，但没有找到公开范围设置区域。');
 
-  if (content.scheduledAt) {
-    if (content.scheduledAt <= Date.now()) {
+  const plan = resolveYouTubeVisibilityPlan(content);
+  if (plan.container === 'second') {
+    if (plan.scheduledAt <= Date.now()) {
       throw new Error('YouTube 定时发布时间必须晚于当前时间。');
     }
-    // 两个容器互斥：先完成公开视频设置，等待 Polymer 状态稳定后再切换到安排时间。
-    await selectYouTubeVisibilityContainer(visibilityRoot, 'first');
-    await selectYouTubeRadio('PUBLIC', '公开范围');
-    await waitForYouTubeVisibilitySelectionStable(visibilityRoot, 'PUBLIC');
+    // “保存或发布”和“安排时间”是互斥容器。定时发布本身固定为公开，只操作第二个容器。
     await selectYouTubeVisibilityContainer(visibilityRoot, 'second');
-    await fillYouTubeSchedule(visibilityRoot, content.scheduledAt);
+    await fillYouTubeSchedule(visibilityRoot, plan.scheduledAt);
     const visibilityOverride = content.visibility && content.visibility !== 'public'
       ? 'YouTube 定时发布仅支持公开，已按平台规则覆盖通用可见性；'
       : '';
@@ -330,16 +330,27 @@ async function fillYouTubeVisibilityAndSchedule(content: ContentData) {
   }
 
   await selectYouTubeVisibilityContainer(visibilityRoot, 'first');
-  const visibilityNames = {
+  await selectYouTubeRadio(plan.visibilityName, '公开范围');
+  await waitForYouTubeVisibilitySelectionStable(visibilityRoot, plan.visibilityName);
+  return 'YouTube 已填写公开范围，未点击最终“发布 / 保存”，请检查后确认；';
+}
+
+/** 将互斥的“保存或发布 / 安排时间”建模成单选计划，避免定时任务同时操作两个容器。 */
+export function resolveYouTubeVisibilityPlan(
+  content: Pick<ContentData, 'scheduledAt' | 'visibility'>,
+): YouTubeVisibilityPlan {
+  if (content.scheduledAt) {
+    return { container: 'second', scheduledAt: content.scheduledAt };
+  }
+  const visibilityNames: Record<NonNullable<ContentData['visibility']>, YouTubeVisibilityName> = {
     public: 'PUBLIC',
     friends: 'UNLISTED',
     private: 'PRIVATE',
-  } as const;
-  const visibility = content.visibility || 'public';
-  const visibilityName = visibilityNames[visibility];
-  await selectYouTubeRadio(visibilityName, '公开范围');
-  await waitForYouTubeVisibilitySelectionStable(visibilityRoot, visibilityName);
-  return 'YouTube 已填写公开范围，未点击最终“发布 / 保存”，请检查后确认；';
+  };
+  return {
+    container: 'first',
+    visibilityName: visibilityNames[content.visibility || 'public'],
+  };
 }
 
 async function selectYouTubeVisibilityContainer(root: HTMLElement, target: 'first' | 'second') {

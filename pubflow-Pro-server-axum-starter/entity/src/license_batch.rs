@@ -8,6 +8,7 @@ pub struct Model {
     pub id: Uuid,
     pub batch_name: String,
     pub sales_channel: String,
+    pub tier: String,
     pub plan: String,
     pub quantity: i32,
     pub max_devices: i32,

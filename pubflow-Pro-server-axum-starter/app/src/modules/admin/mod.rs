@@ -1,4 +1,4 @@
-use crate::AppState;
+use crate::{AppState, shared::requests_per_second_period};
 use aide::axum::ApiRouter;
 use aide::axum::routing::{get_with, post_with};
 use std::sync::Arc;
@@ -10,7 +10,7 @@ pub mod service;
 
 pub fn public_routes(state: Arc<AppState>) -> ApiRouter {
     let admin_login_limiter = GovernorConfigBuilder::default()
-        .per_second(1)
+        .period(requests_per_second_period(1))
         .burst_size(5)
         .use_headers()
         .finish()

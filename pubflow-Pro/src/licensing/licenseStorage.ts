@@ -1,4 +1,4 @@
-import type { LicensingSettings } from '../types';
+import type { LicenseFeature, LicenseTier, LicensingSettings } from '../types';
 import { defaultLicensingSettings } from '../storage/settingsStorage';
 import { loadSettings, saveSettings } from '../storage/settingsStorage';
 
@@ -25,6 +25,38 @@ export function hasLicenseCredentials(settings: LicensingSettings) {
   );
 }
 
+const FEATURES_BY_TIER: Record<LicenseTier, LicenseFeature[]> = {
+  basic: ['publish', 'batch', 'selector-updates'],
+  plus: ['publish', 'batch', 'selector-updates', 'native-publish'],
+  pro: ['publish', 'batch', 'selector-updates', 'native-publish', 'remote-publish'],
+};
+
+export function parseLicenseGrant(tier: unknown, features: unknown): {
+  tier: LicenseTier;
+  features: LicenseFeature[];
+} {
+  if (tier !== 'basic' && tier !== 'plus' && tier !== 'pro') {
+    throw new Error('服务端返回了无效的授权层级，请更新插件或联系支持。');
+  }
+  if (!Array.isArray(features) || features.some((feature) => typeof feature !== 'string')) {
+    throw new Error('服务端返回了无效的授权能力，请更新插件或联系支持。');
+  }
+  const expected = FEATURES_BY_TIER[tier];
+  const actual = [...new Set(features)].sort();
+  const sortedExpected = [...expected].sort();
+  if (actual.length !== sortedExpected.length || actual.some((feature, index) => feature !== sortedExpected[index])) {
+    throw new Error('服务端返回的授权层级与能力不一致，请重新验证授权。');
+  }
+  return { tier, features: [...expected] };
+}
+
+export function hasLicenseFeature(
+  settings: LicensingSettings | null | undefined,
+  feature: LicenseFeature,
+) {
+  return settings?.status === 'active' && settings.features.includes(feature);
+}
+
 /**
  * 仅当持久化配置与后台内存属于同一授权身份时，保留启动阶段刚验证或续租的 lease。
  * 激活码、授权服务地址或安装实例发生变化时，以持久化配置为准。
@@ -41,6 +73,8 @@ export function mergeStoredLicenseWithRuntimeLease(
     ...stored,
     clientInstallId: runtime.clientInstallId || stored.clientInstallId,
     leaseToken: runtime.leaseToken,
+    tier: runtime.tier,
+    features: [...runtime.features],
     status: runtime.status,
     statusMessage: runtime.statusMessage,
     validUntil: runtime.validUntil,

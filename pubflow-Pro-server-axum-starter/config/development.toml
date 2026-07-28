@@ -8,4 +8,8 @@ level = "debug"
 console_format = "pretty"
 
 [cors]
-allow_origins = ["*"]
+allow_credentials = true
+allow_origins = ["http://127.0.0.1:5188", "http://localhost:5188"]
+
+[remote_publish]
+secure_cookies = false

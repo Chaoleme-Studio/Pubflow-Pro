@@ -10,7 +10,7 @@ export async function buildDeviceProof(
   apiBaseUrl: string,
   leaseToken: string,
   clientInstallId: string,
-  purpose: 'verify' | 'permit' = 'verify',
+  purpose: 'verify' | 'permit' | 'remote' = 'verify',
 ) {
   const deviceKey = await getOrCreateBrowserDeviceKey();
   const response = await fetch(`${apiBaseUrl}/v1/lease/challenge`, {

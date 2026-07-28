@@ -17,6 +17,8 @@ mod m20260701_000002_normalize_extension_download_urls;
 mod m20260704_000001_add_browser_device_key_to_leases;
 mod m20260704_000002_add_admin_audit_fields_to_license_events;
 mod m20260705_000001_add_deleted_at_to_licenses;
+mod m20260726_000001_remote_publish;
+mod m20260727_000001_license_tiers;
 
 pub struct Migrator;
 
@@ -41,6 +43,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260704_000001_add_browser_device_key_to_leases::Migration),
             Box::new(m20260704_000002_add_admin_audit_fields_to_license_events::Migration),
             Box::new(m20260705_000001_add_deleted_at_to_licenses::Migration),
+            Box::new(m20260726_000001_remote_publish::Migration),
+            Box::new(m20260727_000001_license_tiers::Migration),
         ]
     }
 }

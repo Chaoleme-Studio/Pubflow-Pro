@@ -1,9 +1,11 @@
 export type Plan = 'monthly' | 'yearly';
+export type LicenseTier = 'basic' | 'plus' | 'pro';
 export type PayChannel = 'wechat' | 'alipay';
 export type Platform = 'macos' | 'windows' | 'linux' | 'extension';
 
 export interface PlanOption {
   id: Plan;
+  tier: LicenseTier;
   name: string;
   price: string;
   unit: string;
@@ -28,6 +30,8 @@ export interface DownloadOption {
 
 export interface OrderResult {
   orderNo: string;
+  tier: LicenseTier;
+  plan: Plan;
   payUrl: string;
   qrCode?: string;
   queryToken: string;
@@ -40,6 +44,7 @@ export interface AdminLoginResult {
 
 export interface AdminFilters {
   keyword?: string;
+  tier?: string;
   plan?: string;
   clientInstallId?: string;
   machineHash?: string;
@@ -55,7 +60,7 @@ export interface AdminFilters {
 export interface AdminLicenseItem {
   id: string;
   activationCode: string;
-  tier: string;
+  tier: LicenseTier;
   plan: Plan;
   status: string;
   sourceChannel: string;
@@ -144,6 +149,7 @@ export interface ResetDevicesResult {
 
 export interface AdminPlanConfig {
   id: Plan;
+  tier: LicenseTier;
   name: string;
   unit?: string;
   note?: string;
@@ -175,6 +181,7 @@ export interface AdminProductCatalogConfig {
 export interface AdminOrderItem {
   id: string;
   orderNo: string;
+  tier: LicenseTier;
   plan: Plan;
   channel: string;
   status: string;
@@ -188,6 +195,7 @@ export interface AdminOrderItem {
 }
 
 export interface GenerateLicenseParams {
+  tier: LicenseTier;
   plan: Plan;
   quantity?: number;
   maxDevices?: number;
@@ -243,6 +251,7 @@ export const FALLBACK_PRODUCT_CATALOG: ProductCatalog = {
   plans: [
     {
       id: 'monthly',
+      tier: 'basic',
       name: '月卡',
       price: '14.9',
       unit: '月',
@@ -255,12 +264,65 @@ export const FALLBACK_PRODUCT_CATALOG: ProductCatalog = {
     },
     {
       id: 'yearly',
+      tier: 'basic',
       name: '年卡',
       price: '99',
       unit: '年',
       note: '适合长期运营团队',
       amountCents: 9900,
       originalAmountCents: 9900,
+      discountEnabled: false,
+      isDiscountActive: false,
+      savingsCents: 0,
+    },
+    {
+      id: 'monthly',
+      tier: 'plus',
+      name: '月卡',
+      price: '29.9',
+      unit: '月',
+      note: '包含 Native、脚本和局域网发布',
+      amountCents: 2990,
+      originalAmountCents: 2990,
+      discountEnabled: false,
+      isDiscountActive: false,
+      savingsCents: 0,
+    },
+    {
+      id: 'yearly',
+      tier: 'plus',
+      name: '年卡',
+      price: '199',
+      unit: '年',
+      note: '适合使用本地自动化的长期创作者',
+      amountCents: 19900,
+      originalAmountCents: 19900,
+      discountEnabled: false,
+      isDiscountActive: false,
+      savingsCents: 0,
+    },
+    {
+      id: 'monthly',
+      tier: 'pro',
+      name: '月卡',
+      price: '49.9',
+      unit: '月',
+      note: '包含公网远程发布和云端通道',
+      amountCents: 4990,
+      originalAmountCents: 4990,
+      discountEnabled: false,
+      isDiscountActive: false,
+      savingsCents: 0,
+    },
+    {
+      id: 'yearly',
+      tier: 'pro',
+      name: '年卡',
+      price: '299',
+      unit: '年',
+      note: '适合需要随时远程发布的团队',
+      amountCents: 29900,
+      originalAmountCents: 29900,
       discountEnabled: false,
       isDiscountActive: false,
       savingsCents: 0,
@@ -280,6 +342,34 @@ export const FALLBACK_PRODUCT_CATALOG: ProductCatalog = {
       chip: 'Chrome / Edge / Chromium',
       fileName: 'pubflow-extension.crx',
       href: '/v1/downloads/pubflow-extension.crx',
+    },
+    {
+      platform: 'macos',
+      name: 'PubFlow Native',
+      chip: 'macOS / Apple Silicon',
+      fileName: 'pubflow-pro-native-mac-arm64.zip',
+      href: '/v1/downloads/pubflow-pro-native-mac-arm64.zip',
+    },
+    {
+      platform: 'macos',
+      name: 'PubFlow Native',
+      chip: 'macOS / Intel',
+      fileName: 'pubflow-pro-native-mac-x64.zip',
+      href: '/v1/downloads/pubflow-pro-native-mac-x64.zip',
+    },
+    {
+      platform: 'windows',
+      name: 'PubFlow Native',
+      chip: 'Windows / x64',
+      fileName: 'pubflow-pro-native-win-x64.zip',
+      href: '/v1/downloads/pubflow-pro-native-win-x64.zip',
+    },
+    {
+      platform: 'linux',
+      name: 'PubFlow Native',
+      chip: 'Linux / x64',
+      fileName: 'pubflow-pro-native-linux-x64.zip',
+      href: '/v1/downloads/pubflow-pro-native-linux-x64.zip',
     },
   ],
 };
@@ -343,6 +433,7 @@ export async function getProductCatalog(): Promise<ProductCatalog> {
   const data = (payload?.data ?? payload) as Record<string, unknown>;
   const plans = arrayOfRecord(data.plans).map((item) => ({
     id: normalizePlan(item.id) ?? 'monthly',
+    tier: requireLicenseTier(item.tier),
     name: String(item.name ?? ''),
     price: String(item.price ?? ''),
     unit: String(item.unit ?? ''),
@@ -394,6 +485,7 @@ export async function saveAdminProductCatalog(
     body: JSON.stringify({
       plans: config.plans.map((item) => ({
         id: item.id,
+        tier: item.tier,
         name: item.name,
         unit: item.unit,
         note: item.note,
@@ -798,11 +890,11 @@ export async function selfResetDevices(activationCode: string, reason?: string):
   };
 }
 
-export async function createOrder(plan: Plan, channel: PayChannel): Promise<OrderResult> {
+export async function createOrder(tier: LicenseTier, plan: Plan, channel: PayChannel): Promise<OrderResult> {
   const response = await fetchWithTimeout('/v1/purchase/orders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ plan, channel }),
+    body: JSON.stringify({ tier, plan, channel }),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -816,6 +908,8 @@ export async function createOrder(plan: Plan, channel: PayChannel): Promise<Orde
   if (!orderNo) throw new Error('订单创建失败：未返回订单号');
   return {
     orderNo,
+    tier: requireLicenseTier(data.tier),
+    plan: normalizePlan(data.plan) ?? plan,
     payUrl: /^https?:\/\//.test(payUrl) ? payUrl : '',
     qrCode: typeof qrCode === 'string' && qrCode ? qrCode : undefined,
     queryToken,
@@ -887,6 +981,7 @@ export async function listAdminOrders(token: string, filters: AdminFilters): Pro
   return normalizeList(payload).map((item: Record<string, unknown>) => ({
     id: String(item.id ?? ''),
     orderNo: String(item.order_no ?? item.orderNo ?? ''),
+    tier: requireLicenseTier(item.tier),
     plan: normalizePlan(item.plan) ?? 'monthly',
     channel: String(item.channel ?? ''),
     status: String(item.status ?? ''),
@@ -950,6 +1045,7 @@ export async function uploadSelector(token: string, payload: UploadSelectorPaylo
 async function adminGet(path: string, token: string, filters: AdminFilters): Promise<unknown> {
   const params = new URLSearchParams();
   addParam(params, 'keyword', filters.keyword);
+  addParam(params, 'tier', filters.tier === 'all' ? '' : filters.tier);
   addParam(params, 'plan', filters.plan === 'all' ? '' : filters.plan);
   addParam(params, 'client_install_id', filters.clientInstallId);
   addParam(params, 'machine_hash', filters.machineHash);
@@ -988,6 +1084,16 @@ function normalizeList(payload: unknown): Record<string, unknown>[] {
 
 function normalizePlan(value: unknown): Plan | undefined {
   return value === 'monthly' || value === 'yearly' ? value : undefined;
+}
+
+function normalizeLicenseTier(value: unknown): LicenseTier | undefined {
+  return value === 'basic' || value === 'plus' || value === 'pro' ? value : undefined;
+}
+
+function requireLicenseTier(value: unknown): LicenseTier {
+  const tier = normalizeLicenseTier(value);
+  if (!tier) throw new Error('服务端返回了无效的授权层级');
+  return tier;
 }
 
 function normalizePlatform(value: unknown): Platform | undefined {
@@ -1042,6 +1148,7 @@ export async function generateLicenses(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
+      tier: params.tier,
       plan: params.plan,
       quantity: params.quantity ?? 1,
       max_devices: params.maxDevices ?? 1,
@@ -1106,7 +1213,7 @@ function normalizeLicenseItem(item: Record<string, unknown>): AdminLicenseItem {
   return {
     id: String(item.id ?? ''),
     activationCode: String(item.activation_code ?? item.activationCode ?? ''),
-    tier: String(item.tier ?? ''),
+    tier: requireLicenseTier(item.tier),
     plan: normalizePlan(item.plan) ?? 'monthly',
     status: String(item.status ?? ''),
     sourceChannel: String(item.source_channel ?? item.sourceChannel ?? ''),
@@ -1134,6 +1241,7 @@ function normalizeAdminProductCatalog(data: Record<string, unknown>): AdminProdu
   return {
     plans: arrayOfRecord(data.plans).map((item) => ({
       id: normalizePlan(item.id) ?? 'monthly',
+      tier: requireLicenseTier(item.tier),
       name: String(item.name ?? ''),
       unit: stringOrUndefined(item.unit),
       note: stringOrUndefined(item.note),

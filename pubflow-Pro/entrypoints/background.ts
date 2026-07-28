@@ -13,6 +13,7 @@ import { loadLibraryData, saveLibraryData } from '../src/storage/libraryStorage'
 import { loadCurrentTask, saveCurrentTask } from '../src/storage/taskStorage';
 import {
   hasLicenseCredentials,
+  hasLicenseFeature,
   loadLicensingSettings,
   mergeStoredLicenseWithRuntimeLease,
   saveLicensingSettings,
@@ -20,6 +21,17 @@ import {
 import { verifyLicense } from '../src/licensing/licenseManager';
 import { issueDistributionPermit } from '../src/licensing/permitManager';
 import { checkExtensionUpdate } from '../src/licensing/updateChecker';
+import { AgentClient } from '../src/agent/agentClient';
+import { CloudAgentClient } from '../src/agent/cloudAgentClient';
+import { InboundTaskCoordinator } from '../src/agent/inboundTaskCoordinator';
+import type { AgentJobDetail } from '../src/agent/protocol';
+import { assembleProjectTask } from '../src/features/distribution/projectTaskAssembler';
+import { readWorkspaceIdentity } from '../src/storage/workspaceStorage';
+import {
+  startDistribution,
+  stopDistributionTask,
+  type DistributionStartRequest,
+} from '../src/features/distribution/distributionCoordinator';
 import type {
   DistributionTask,
   LicensingSettings,
@@ -56,13 +68,46 @@ const FILL_COMPLETION_GRACE_MS = 120000;
 const FILL_COMPLETION_MIN_TIMEOUT_MS = 180000;
 const NON_VIDEO_FILL_COMPLETION_TIMEOUT_MS = 120000;
 const CDP_CLICK_MOVE_SETTLE_MS = 120;
+const FINAL_PUBLISH_CLICK_SETTLE_MS = 800;
 const pendingFillAcks = new Map<string, () => void>();
 const fillingPlatforms = new Set<PlatformId>();
 const fillCompletionTimers = new Map<PlatformId, ReturnType<typeof setTimeout>>();
+const inboundTaskCoordinator = new InboundTaskCoordinator(() => hasActiveDistributionTask());
+const agentClient = new AgentClient({
+  canClaim: () => !hasActiveDistributionTask(),
+  getWorkspaceId: readWorkspaceIdentity,
+  getLicenseGrant: async () => {
+    await ensureLicensingLoaded();
+    const settings = licensingSettings;
+    if (!settings?.tier || !hasLicenseFeature(settings, 'native-publish')) return null;
+    return {
+      tier: settings.tier,
+      features: [...settings.features],
+      validUntil: settings.validUntil,
+    };
+  },
+  onJob: (job) => handleAgentJob(job, 'native'),
+  onPending: () => inboundTaskCoordinator.notifyTaskMayBeAvailable(),
+  onClaimSettled: () => inboundTaskCoordinator.claimSettled(),
+});
+const cloudAgentClient = new CloudAgentClient({
+  canClaim: () => !hasActiveDistributionTask(),
+  onJob: (job) => handleAgentJob(job, 'cloud'),
+  onPending: () => inboundTaskCoordinator.notifyTaskMayBeAvailable(),
+  onClaimSettled: () => inboundTaskCoordinator.claimSettled(),
+});
+inboundTaskCoordinator.setSources(agentClient, cloudAgentClient);
 
 export default defineBackground(() => {
   restoreTaskPromise = restoreTask();
   void checkExtensionUpdate(__PUBFLOW_DEFAULT_LICENSE_API_BASE_URL__, __PUBFLOW_OFFICIAL_SITE_URL__);
+  // 必须先恢复 currentTask，避免 Service Worker 重启后把同一 Agent job 再领取并启动一次。
+  void restoreTaskPromise.finally(() => syncAgentConnections());
+
+  browser.alarms.onAlarm.addListener((alarm) => {
+    agentClient.handleAlarm(alarm.name);
+    cloudAgentClient.handleAlarm(alarm.name);
+  });
 
   browser.action.onClicked.addListener(async () => {
     try {
@@ -333,54 +378,14 @@ async function handleMessage(
     }
 
     if (message.type === 'START_DISTRIBUTION') {
-      if (
-        currentTask
-        && (currentTask.status === 'running' || currentTask.status === 'paused')
-        && currentTask.platforms.some((item) => !isTerminalPlatformStatus(item.status))
-      ) {
-        return fail('已有分发任务正在进行，请等待完成或跳过当前任务后再开始下一条。');
-      }
-      clearAllFillCompletionTimeouts();
-      const license = await requireActiveLicense();
-      if (!license.ok) {
-        return fail(license.error || license.settings.statusMessage || '授权无效，请先在设置中完成激活。');
-      }
-      // TODO(remote-selector): 远程 selector 曾用于发布前动态下发平台策略，但当前 selector 已全部内置在
-      // src/platforms。为了降低开始发布的延迟和失败点，暂时废弃云端 selector 刷新；后续如果恢复，
-      // 需要做成后台异步刷新，不能阻塞用户点击发布后的主链路。
-      // await refreshRemotePlatformPolicyForLicense(license.settings);
-      const supportedPlatforms = message.payload.platforms.filter((platformId) =>
-        supportsContentType(getPlatformConfig(platformId), message.payload.content.contentType || 'video'),
-      );
-      if (!supportedPlatforms.length) {
-        return fail('当前内容类型没有可发布的平台，请检查目标平台选择。');
-      }
-      const permit = await issueDistributionPermit(license.settings, {
+      return ok(await beginDistribution({
         content: message.payload.content,
-        platforms: supportedPlatforms,
+        platforms: message.payload.platforms,
         videoId: message.payload.videoId,
-      });
-      currentTask = {
-        id: crypto.randomUUID(),
-        videoId: message.payload.videoId,
-        content: message.payload.content,
-        platforms: supportedPlatforms.map((platformId) => ({
-          platformId,
-          status: 'pending',
-        })),
-        currentIndex: 0,
-        status: 'running',
-        createdAt: Date.now(),
-        permitId: permit.permitId,
-        permitExpiresAt: permit.expiresAt,
-        permitTaskHash: permit.taskHash,
-      };
-      await persistAndBroadcast();
-      const first = currentTask.platforms[0];
-      if (first) {
-        await openPlatform(first.platformId);
-      }
-      return ok(currentTask);
+        source: 'dashboard',
+        projectId: message.payload.content.projectId,
+        autoSubmit: message.payload.autoSubmit === true,
+      }));
     }
 
     if (message.type === 'OPEN_PLATFORM') {
@@ -394,7 +399,8 @@ async function handleMessage(
     }
 
     if (message.type === 'CONTINUE_FILL') {
-      ensureTask();
+      const task = ensureTask();
+      if (task.status === 'paused') task.status = 'running';
       // TODO(auth-ux): 当前产品优先保证一轮发布过程顺滑，授权/permit 只在 START_DISTRIBUTION 入口校验。
       // 后续如果风险升高，可以恢复这里的过程校验，但应做成低频缓存校验，避免每个填充步骤都请求服务器。
       // const license = await requireActiveLicense();
@@ -425,6 +431,18 @@ async function handleMessage(
       const task = ensureTask();
       task.status = 'running';
       await persistAndBroadcast();
+      await openNextPending();
+      return ok(currentTask);
+    }
+
+    if (message.type === 'STOP_TASK') {
+      const task = ensureTask();
+      clearAllFillCompletionTimeouts();
+      const tabIds = stopDistributionTask(task);
+      await persistAndBroadcast();
+      if (tabIds.length) {
+        await browser.tabs.remove(tabIds).catch(() => undefined);
+      }
       return ok(currentTask);
     }
 
@@ -469,8 +487,8 @@ async function handleMessage(
           status: 'error',
           error: message.payload.message,
         });
+        if (currentTask) currentTask.status = 'paused';
         await persistAndBroadcast();
-        await openNextPending();
         return ok(currentTask);
       }
       updatePlatform(message.payload.platformId, {
@@ -480,6 +498,54 @@ async function handleMessage(
       await persistAndBroadcast();
       await openNextPending();
       return ok(currentTask);
+    }
+
+    if (message.type === 'FINAL_PUBLISH_CLICK') {
+      const { platformId, x, y } = message.payload;
+      if (!isMessageFromPlatformTask(platformId, sender)) {
+        return fail('最终发布请求不属于当前平台任务。');
+      }
+      if (!currentTask?.autoSubmit) {
+        return fail('当前任务没有启用直接发布。');
+      }
+      const platformTask = currentTask.platforms.find((item) => item.platformId === platformId);
+      if (!platformTask?.tabId || platformTask.status !== 'filling') {
+        return fail('当前平台不在可直接发布状态。');
+      }
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return fail('最终发布按钮坐标无效。');
+      }
+
+      clearFillCompletionTimeout(platformId);
+      updatePlatform(platformId, {
+        status: 'publishing',
+        message: '内容已填充，正在点击最终发布按钮。',
+        error: undefined,
+      });
+      await persistAndBroadcast();
+
+      try {
+        await browser.tabs.update(platformTask.tabId, { active: true });
+        await cdpClick(platformTask.tabId, x, y);
+        await new Promise((resolve) => setTimeout(resolve, FINAL_PUBLISH_CLICK_SETTLE_MS));
+        updatePlatform(platformId, {
+          status: 'published',
+          message: currentTask.content.scheduledAt
+            ? '已点击最终发布按钮，平台将按设定时间发布。'
+            : '已点击最终发布按钮。',
+        });
+        await persistAndBroadcast();
+        await openNextPending();
+        return ok(currentTask);
+      } catch (error) {
+        updatePlatform(platformId, {
+          status: 'error',
+          error: error instanceof Error ? error.message : '最终发布按钮点击失败',
+        });
+        if (currentTask) currentTask.status = 'paused';
+        await persistAndBroadcast();
+        return fail(error instanceof Error ? error.message : '最终发布按钮点击失败');
+      }
     }
 
     if (message.type === 'FILL_CONTENT_ACK') {
@@ -509,14 +575,86 @@ async function handleMessage(
         status: 'error',
         error: message.payload.error,
       });
+      if (currentTask) currentTask.status = 'paused';
       await persistAndBroadcast();
-      await openNextPending();
       return ok(currentTask);
     }
 
     return fail('未知消息');
   } catch (error) {
     return fail(error instanceof Error ? error.message : '操作失败');
+  }
+}
+
+/** 统一判断后台是否正占用发布状态机，Agent 仅在空闲时领取下一条任务。 */
+function hasActiveDistributionTask() {
+  return Boolean(
+    currentTask
+    && (currentTask.status === 'running' || currentTask.status === 'paused')
+    && currentTask.platforms.some((item) => !isTerminalPlatformStatus(item.status)),
+  );
+}
+
+/** 使用现有授权、permit 和页面打开能力启动一次分发。 */
+async function beginDistribution(request: DistributionStartRequest) {
+  const permitSource = request.source === 'agent' ? request.externalTaskSource : 'manual';
+  if (!permitSource) {
+    throw new Error('Agent 发布任务缺少来源标识，请更新插件后重试。');
+  }
+  return startDistribution(request, {
+    getCurrentTask: () => currentTask,
+    authorize: async (content, platforms, videoId) => {
+      const license = await requireActiveLicense();
+      return issueDistributionPermit(license.settings, {
+        content,
+        platforms,
+        videoId,
+        source: permitSource,
+        externalJobId: request.externalJobId,
+      });
+    },
+    setCurrentTask: (task) => {
+      currentTask = task;
+    },
+    persist: persistAndBroadcast,
+    openPlatform,
+    clearTimers: clearAllFillCompletionTimeouts,
+  });
+}
+
+/** 接收 Agent 已领取任务：恢复 Project 素材，然后进入与 Dashboard 相同的发布入口。 */
+async function handleAgentJob(job: AgentJobDetail, source: 'native' | 'cloud') {
+  let accepted = false;
+  try {
+    const assembled = await assembleProjectTask(job.projectId, job.platforms);
+    if (source === 'native') agentClient.acceptJob(job.jobId);
+    accepted = true;
+    await beginDistribution({
+      ...assembled,
+      source: 'agent',
+      externalTaskSource: source,
+      externalJobId: job.jobId,
+      projectId: job.projectId,
+      statusSequence: job.statusSequence,
+      autoSubmit: job.autoSubmit === true,
+    });
+  } catch (error) {
+    if (currentTask?.source === 'agent' && currentTask.externalJobId === job.jobId) {
+      currentTask.status = 'error';
+      currentTask.error = error instanceof Error ? error.message : String(error);
+      try {
+        await persistAndBroadcast();
+        return;
+      } catch {
+        // 持久化自身失败时仍通过 AgentClient 的失败重放兜底。
+      }
+    }
+    // accepted 后初始 persist 可能已发送 sequence=2，失败必须使用更大的序号。
+    if (source === 'native') {
+      agentClient.reportFailure(job.jobId, error, accepted ? 4 : 1);
+    } else {
+      cloudAgentClient.reportFailure(job.jobId, error, Math.max(4, job.statusSequence + 1));
+    }
   }
 }
 
@@ -624,10 +762,15 @@ async function continueFill(platformId: PlatformId) {
         content: currentTask.content,
         platformId,
         requestId,
+        autoSubmit: currentTask.autoSubmit === true,
       },
     } satisfies RuntimeMessage;
 
     for (let attempt = 0; attempt < FILL_COMMAND_MAX_RETRIES; attempt++) {
+      if (
+        currentTask.status !== 'running'
+        || currentTask.platforms.find((item) => item.platformId === platformId)?.status !== 'filling'
+      ) return;
       let ack: ReturnType<typeof waitForFillContentAck> | undefined;
       try {
         // frameId can become stale after reload/navigation. Broadcasting lets each
@@ -648,6 +791,10 @@ async function continueFill(platformId: PlatformId) {
         return;
       } catch (error) {
         ack?.cancel();
+        if (
+          currentTask.status !== 'running'
+          || currentTask.platforms.find((item) => item.platformId === platformId)?.status !== 'filling'
+        ) return;
         lastError = error instanceof Error ? error : new Error(String(error));
         console.warn('[PubFlow] fill command failed', {
           platformId,
@@ -670,8 +817,8 @@ async function continueFill(platformId: PlatformId) {
       status: 'error',
       error: lastError?.message || 'content script 未响应，请刷新页面后重试。',
     });
+    currentTask.status = 'paused';
     await persistAndBroadcast();
-    await openNextPending();
   } finally {
     fillingPlatforms.delete(platformId);
   }
@@ -728,7 +875,7 @@ function scheduleFillCompletionTimeout(platformId: PlatformId, tabId: number | u
   fillCompletionTimers.set(platformId, timer);
 }
 
-/** 填充超时后的失败落库和顺序发布推进。 */
+/** 填充超时后记录失败并暂停任务，等待用户决定重试、跳过或结束全部。 */
 async function handleFillCompletionTimeout(platformId: PlatformId, tabId: number, timeoutMs: number) {
   fillCompletionTimers.delete(platformId);
   const platformTask = currentTask?.platforms.find((item) => item.platformId === platformId);
@@ -737,10 +884,10 @@ async function handleFillCompletionTimeout(platformId: PlatformId, tabId: number
 
   updatePlatform(platformId, {
     status: 'error',
-    error: `平台超过 ${Math.round(timeoutMs / 1000)} 秒没有返回填充结果，已继续下一个平台。`,
+    error: `平台超过 ${Math.round(timeoutMs / 1000)} 秒没有返回填充结果，任务已暂停。`,
   });
+  currentTask.status = 'paused';
   await persistAndBroadcast();
-  await openNextPending();
 }
 
 /** 清理单个平台的填充超时计时器。 */
@@ -832,6 +979,7 @@ async function openNextPending() {
     }
     return;
   }
+  if (currentTask.status !== 'running') return;
   await openPlatform(next.platformId);
 }
 
@@ -908,6 +1056,8 @@ async function restoreTask() {
   licensingSettings = await loadLicensingSettings();
   await verifyLicenseOnStartup();
   if (currentTask) {
+    agentClient.resumeTask(currentTask);
+    cloudAgentClient.resumeTask(currentTask);
     await normalizeAndPersistCurrentTask();
   }
 }
@@ -925,6 +1075,14 @@ async function verifyLicenseOnStartup() {
   } catch (error) {
     console.warn('[PubFlow] 启动授权验证失败', error);
   }
+}
+
+async function syncAgentConnections() {
+  const settings = licensingSettings;
+  await Promise.all([
+    hasLicenseFeature(settings, 'native-publish') ? agentClient.start() : agentClient.stop(),
+    hasLicenseFeature(settings, 'remote-publish') ? cloudAgentClient.start() : cloudAgentClient.stop(),
+  ]);
 }
 
 /** 等待首次任务恢复完成，保证所有消息处理都基于最新 currentTask。 */
@@ -946,6 +1104,7 @@ async function verifyCurrentLicense(input?: LicensingSettings) {
   const result = await verifyLicense(licensingSettings);
   licensingSettings = result.settings;
   await saveLicensingSettings(licensingSettings);
+  await syncAgentConnections();
   return result;
 }
 
@@ -974,6 +1133,10 @@ async function requireActiveLicense() {
 /** 持久化当前任务，并广播给 dashboard/sidepanel 刷新 UI。 */
 async function persistAndBroadcast() {
   normalizeCurrentTaskPlatforms();
+  if (currentTask) {
+    agentClient.reportTask(currentTask);
+    cloudAgentClient.reportTask(currentTask);
+  }
   await syncCurrentTaskToLibrary();
   await saveCurrentTask(currentTask);
   await browser.runtime
@@ -984,6 +1147,7 @@ async function persistAndBroadcast() {
       },
     } satisfies RuntimeMessage)
     .catch(() => undefined);
+  inboundTaskCoordinator.notifyTaskMayBeAvailable();
 }
 
 /** 如果当前任务平台列表因内容类型发生变化，则归一化后立即保存。 */
@@ -1012,7 +1176,13 @@ function toLibraryPlatformStatus(status: PlatformTaskStatus): PlatformStatus['st
   if (status === 'skipped') return 'skipped';
   if (status === 'published') return 'published';
   if (status === 'filled') return 'filled';
-  if (status === 'filling' || status === 'ready' || status === 'opening' || status === 'waitingUser') {
+  if (
+    status === 'filling'
+    || status === 'publishing'
+    || status === 'ready'
+    || status === 'opening'
+    || status === 'waitingUser'
+  ) {
     return 'filling';
   }
   return 'pending';

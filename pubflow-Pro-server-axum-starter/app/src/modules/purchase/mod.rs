@@ -1,4 +1,4 @@
-use crate::AppState;
+use crate::{AppState, shared::requests_per_second_period};
 use aide::axum::ApiRouter;
 use aide::axum::routing::{get_with, post_with};
 use std::sync::Arc;
@@ -11,7 +11,7 @@ pub mod service;
 
 pub fn routes(state: Arc<AppState>) -> ApiRouter {
     let create_order_limiter = GovernorConfigBuilder::default()
-        .per_second(3)
+        .period(requests_per_second_period(3))
         .burst_size(6)
         .use_headers()
         .finish()

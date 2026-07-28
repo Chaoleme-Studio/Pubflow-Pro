@@ -26,6 +26,8 @@ export interface DistributionPermitInput {
   content: ContentData;
   platforms: PlatformId[];
   videoId?: string;
+  source: 'manual' | 'native' | 'cloud';
+  externalJobId?: string;
 }
 
 export async function issueDistributionPermit(
@@ -52,6 +54,8 @@ export async function issueDistributionPermit(
       client_install_id: settings.clientInstallId,
       operation: START_DISTRIBUTION_OPERATION,
       task_hash: taskHash,
+      source: input.source,
+      external_job_id: input.externalJobId,
       device_proof: deviceProof,
     }),
   });
@@ -82,6 +86,8 @@ async function buildDistributionTaskHash(input: DistributionPermitInput) {
     content: input.content,
     platforms: input.platforms,
     videoId: input.videoId || '',
+    source: input.source,
+    externalJobId: input.externalJobId || '',
   });
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical)));
   return `sha256:${bytesToBase64Url(digest)}`;

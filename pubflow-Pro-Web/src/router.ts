@@ -27,6 +27,11 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('./pages/AdminRoute.vue'),
   },
   {
+    path: '/publish',
+    name: 'publish-remote',
+    component: () => import('./pages/RemotePublishPage.vue'),
+  },
+  {
     path: '/404',
     name: 'not-found-static',
     component: () => import('./pages/NotFoundPage.vue'),

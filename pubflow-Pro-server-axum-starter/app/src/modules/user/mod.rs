@@ -2,7 +2,7 @@
 //!
 //! 提供用户注册、登录、获取当前用户信息等功能。
 
-use crate::AppState;
+use crate::{AppState, shared::requests_per_second_period};
 use aide::axum::ApiRouter;
 use aide::axum::routing::{get_with, post_with};
 use std::sync::Arc;
@@ -28,7 +28,7 @@ pub fn routes(state: Arc<AppState>) -> ApiRouter {
     // 注册：严格限速（防暴力破解）
     // 每秒 2 个请求，初始突发 3 个
     let register_limiter = GovernorConfigBuilder::default()
-        .per_second(2)
+        .period(requests_per_second_period(2))
         .burst_size(3)
         .use_headers()
         .finish()
@@ -36,7 +36,7 @@ pub fn routes(state: Arc<AppState>) -> ApiRouter {
 
     // 登录：严格限速（防暴力破解）
     let login_limiter = GovernorConfigBuilder::default()
-        .per_second(2)
+        .period(requests_per_second_period(2))
         .burst_size(3)
         .use_headers()
         .finish()

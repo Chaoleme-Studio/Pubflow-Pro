@@ -2,7 +2,10 @@
 //!
 //! 包含 V1 版本所有的 API 端点。
 
-use crate::{AppState, admin, download, lease, license_center, product, purchase, selector, user};
+use crate::{
+    AppState, admin, download, lease, license_center, product, purchase, remote_publish, selector,
+    user,
+};
 use aide::axum::ApiRouter;
 use std::sync::Arc;
 
@@ -25,6 +28,7 @@ pub fn routes(state: Arc<AppState>) -> ApiRouter {
         .nest_api_service("/product", product::routes(state.clone()))
         .nest_api_service("/selector", selector::routes(state.clone()))
         .nest_api_service("/purchase", purchase::routes(state.clone()))
+        .nest_api_service("/remote", remote_publish::routes(state.clone()))
         .api_route(
             "/downloads/{filename}",
             aide::axum::routing::get_with(
@@ -39,6 +43,7 @@ pub fn routes(state: Arc<AppState>) -> ApiRouter {
                     .merge(selector::admin_routes(state.clone()))
                     .merge(purchase::admin_routes(state.clone()))
                     .merge(lease::admin_routes(state.clone()))
+                    .merge(remote_publish::admin_routes(state.clone()))
                     .route_layer(axum::middleware::from_fn_with_state(
                         state.clone(),
                         crate::core::middleware::auth::require_admin,

@@ -1,6 +1,6 @@
 {
   "name": "pubflow-web",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,6 +10,9 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
+    "@noble/ciphers": "^2.2.0",
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
     "@unhead/vue": "^2.1.16",
     "@vitejs/plugin-vue": "^6.0.3",
     "highcharts": "^12.6.0",

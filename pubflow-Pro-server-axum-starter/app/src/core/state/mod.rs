@@ -3,13 +3,39 @@ mod runtime;
 pub use runtime::AppStateConfig;
 
 use crate::{
-    AppConfig, AppError, ValidationError, core::config::parse_jwt_previous_secrets,
-    shared::jwt::JwtService,
+    AppConfig, AppError, ValidationError,
+    core::config::parse_jwt_previous_secrets,
+    shared::{RemoteTransferLimiter, jwt::JwtService},
 };
 use deadpool_redis::Pool as RedisPool;
 use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::{Mutex, mpsc, oneshot};
+use uuid::Uuid;
+
+#[derive(Debug)]
+pub struct RemoteProbeRequest {
+    pub test_id: Uuid,
+    pub requested_at: std::time::Instant,
+    pub response: oneshot::Sender<RemoteProbeResult>,
+}
+
+#[derive(Debug)]
+pub struct RemoteProbeResult {
+    pub latency_ms: u64,
+    pub extension_version: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct RemoteExtensionConnection {
+    pub connection_id: Uuid,
+    pub cancel: oneshot::Sender<()>,
+    pub probe_sender: mpsc::Sender<RemoteProbeRequest>,
+    pub job_sender: mpsc::Sender<()>,
+}
 
 /// 应用程序运行时状态
 ///
@@ -28,6 +54,14 @@ pub struct AppState {
 
     /// 应用状态配置
     pub config: AppStateConfig,
+
+    /// 每个 License 只保留一个插件长连接；新连接会通知旧连接退出。
+    pub remote_connections: Arc<Mutex<HashMap<Uuid, RemoteExtensionConnection>>>,
+
+    pub remote_quota_locks: Arc<Mutex<HashMap<Uuid, Arc<Mutex<()>>>>>,
+
+    /// 所有远程素材上传和下载共享的带宽与并发限制。
+    pub remote_transfer_limiter: Arc<RemoteTransferLimiter>,
 }
 
 impl AppState {
@@ -91,8 +125,30 @@ impl AppState {
                 admin_password_hash,
                 downloads_fs_path: app_config.downloads_fs_path.clone(),
                 payment: app_config.payment.clone(),
+                remote_publish: app_config.remote_publish.clone(),
             },
+            remote_connections: Arc::new(Mutex::new(HashMap::new())),
+            remote_quota_locks: Arc::new(Mutex::new(HashMap::new())),
+            remote_transfer_limiter: Arc::new(RemoteTransferLimiter::new(
+                app_config
+                    .remote_publish
+                    .aggregate_transfer_bytes_per_second,
+                app_config.remote_publish.max_concurrent_transfers,
+            )),
         })
+    }
+
+    /// 只通知目标 License 的在线插件；容量 1 会合并重复通知。
+    pub async fn notify_remote_job(&self, license_id: Uuid) {
+        let sender = self
+            .remote_connections
+            .lock()
+            .await
+            .get(&license_id)
+            .map(|connection| connection.job_sender.clone());
+        if let Some(sender) = sender {
+            let _ = sender.try_send(());
+        }
     }
 
     /// 创建数据库连接

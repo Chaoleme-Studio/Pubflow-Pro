@@ -41,14 +41,14 @@ Web 后台不需要配置后端地址。前端代码请求的是同源相对路�
 
 ### 插件端
 
-插件端请求哪个授权服务，是构建时写入插件包的。目前使用最简单的方案：只保留一套 `.env`，你在打包前手动切换 `PUBFLOW_LICENSE_API_BASE_URL`。
+插件端请求哪个授权服务，是构建时写入插件包的。仓库根目录分别维护 `.env.development` 和 `.env.production`，构建脚本按环境读取 `PUBLIC_API_BASE_URL`。
 
 ```env
-# 本地调试
-PUBFLOW_LICENSE_API_BASE_URL=http://127.0.0.1:3001
+# .env.development
+PUBLIC_API_BASE_URL=http://127.0.0.1:5189
 
-# 生产打包
-PUBFLOW_LICENSE_API_BASE_URL=http://117.72.147.216:5189
+# .env.production
+PUBLIC_API_BASE_URL=http://117.72.147.216:5189
 ```
 
 这个值是构建期写入插件包的。打完包以后再改 `.env` 不会影响已经生成的 ZIP/CRX，必须重新打包。
@@ -72,6 +72,19 @@ X 与 YouTube 使用和其他平台相同的浏览器页面自动填充方案，
 ```
 
 ## 打包和部署
+
+正式发布由当前 Mac 完成全部编译，Linux 服务器只接收产物并运行：
+
+```bash
+./scripts/build-all.sh
+python3 -m venv .venv-deploy
+.venv-deploy/bin/pip install -r scripts/requirements-deploy.txt
+.venv-deploy/bin/python scripts/deploy-to-nucbox.py jd --no-build --configure-nginx
+```
+
+京东云是生产环境，`.env.production` 默认使用它的 PostgreSQL 本机映射端口
+`25432`。NucBox 只作为测试机，`wan` / `lan` 部署通道会在运行时覆盖为
+`5432`。数据库地址是运行时配置，不需要在 Linux 服务器重新编译二进制。
 
 ### 构建 Web 产物
 

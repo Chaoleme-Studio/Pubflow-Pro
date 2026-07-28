@@ -50,11 +50,12 @@ import {
   type AdminProductCatalogConfig,
   type DauStat,
   type LicenseSummary,
+  type LicenseTier,
   type Plan,
   type SelectorVersionItem,
 } from '../api';
 import AdminOverviewChart from '../components/admin/AdminOverviewChart.vue';
-import { eventLabel, formatDateTime, inDateRange, planLabel, shortHash, sourceLabel, statusLabel, toDateOnly, yuan } from '../utils/format';
+import { eventLabel, formatDateTime, inDateRange, planLabel, shortHash, sourceLabel, statusLabel, tierLabel, toDateOnly, yuan } from '../utils/format';
 
 type AdminView = 'overview' | 'products' | 'versions' | 'users' | 'licenses' | 'leases' | 'selectors';
 
@@ -141,6 +142,7 @@ const selectorUploadMessage = ref('');
 
 // 生成激活码相关
 const generatePlan = ref<Plan>('monthly');
+const generateTier = ref<LicenseTier>('basic');
 const generateQuantity = ref(10);
 const generateMaxDevices = ref(1);
 const generateBatchName = ref('');
@@ -170,6 +172,7 @@ watch(adminView, () => {
 
 const emptyFilters = () => ({
   keyword: '',
+  tier: 'all',
   plan: 'all',
   status: 'all',
   paidFrom: '',
@@ -200,7 +203,7 @@ const adminViewTitles: Record<AdminView, string> = {
   selectors: 'Selector 状态',
 };
 
-const DEFAULT_PLUGIN_DOWNLOADS: AdminDownloadConfig[] = [
+const DEFAULT_DOWNLOAD_PACKAGES: AdminDownloadConfig[] = [
   {
     code: 'zip',
     platform: 'extension',
@@ -221,6 +224,46 @@ const DEFAULT_PLUGIN_DOWNLOADS: AdminDownloadConfig[] = [
     isActive: true,
     sortOrder: 110,
   },
+  {
+    code: 'native-mac-arm64',
+    platform: 'macos',
+    name: 'PubFlow Native',
+    chip: 'macOS / Apple Silicon',
+    fileName: 'pubflow-pro-native-mac-arm64.zip',
+    href: '/v1/downloads/pubflow-pro-native-mac-arm64.zip',
+    isActive: true,
+    sortOrder: 1100,
+  },
+  {
+    code: 'native-mac-x64',
+    platform: 'macos',
+    name: 'PubFlow Native',
+    chip: 'macOS / Intel',
+    fileName: 'pubflow-pro-native-mac-x64.zip',
+    href: '/v1/downloads/pubflow-pro-native-mac-x64.zip',
+    isActive: true,
+    sortOrder: 1110,
+  },
+  {
+    code: 'native-win-x64',
+    platform: 'windows',
+    name: 'PubFlow Native',
+    chip: 'Windows / x64',
+    fileName: 'pubflow-pro-native-win-x64.zip',
+    href: '/v1/downloads/pubflow-pro-native-win-x64.zip',
+    isActive: true,
+    sortOrder: 1120,
+  },
+  {
+    code: 'native-linux-x64',
+    platform: 'linux',
+    name: 'PubFlow Native',
+    chip: 'Linux / x64',
+    fileName: 'pubflow-pro-native-linux-x64.zip',
+    href: '/v1/downloads/pubflow-pro-native-linux-x64.zip',
+    isActive: true,
+    sortOrder: 1130,
+  },
 ];
 
 const normalizedOrders = computed(() => {
@@ -228,6 +271,7 @@ const normalizedOrders = computed(() => {
     id: item.id,
     orderNo: item.orderNo,
     plan: item.plan || 'monthly',
+    tier: item.tier,
     status: item.status,
     source: item.channel || '-',
     activationCode: item.activationCode || '-',
@@ -245,6 +289,7 @@ const normalizedLicenses = computed(() => {
     code: item.activationCode,
     user: item.userId ? `用户 #${item.userId}` : '未激活',
     plan: item.plan,
+    tier: item.tier,
     maxDevices: item.maxDevices,
     deviceMigrationLimit: item.deviceMigrationLimit,
     deviceMigrationCount: item.deviceMigrationCount,
@@ -268,12 +313,13 @@ const filteredOrders = computed(() => {
     const keyword = orderFilters.value.keyword.trim().toLowerCase();
     const inKeyword = !keyword || `${item.orderNo} ${item.source} ${item.status} ${item.activationCode}`.toLowerCase().includes(keyword);
     const inPlan = orderFilters.value.plan === 'all' || item.plan === orderFilters.value.plan;
+    const inTier = orderFilters.value.tier === 'all' || item.tier === orderFilters.value.tier;
     const inStatus = orderFilters.value.status === 'all' || item.status === orderFilters.value.status;
     const inPaidRange = inDateRange(item.paidAt, orderFilters.value.paidFrom, orderFilters.value.paidTo);
     const inExpireRange = item.expiresAt === '未激活'
       ? !(orderFilters.value.expiresFrom || orderFilters.value.expiresTo)
       : inDateRange(item.expiresAt, orderFilters.value.expiresFrom, orderFilters.value.expiresTo);
-    return inKeyword && inPlan && inStatus && inPaidRange && inExpireRange;
+    return inKeyword && inTier && inPlan && inStatus && inPaidRange && inExpireRange;
   });
 });
 
@@ -282,12 +328,13 @@ const filteredLicenses = computed(() => {
     const keyword = licenseFilters.value.keyword.trim().toLowerCase();
     const inKeyword = !keyword || `${item.code} ${item.user} ${item.plan} ${item.status} ${item.orderNo}`.toLowerCase().includes(keyword);
     const inPlan = licenseFilters.value.plan === 'all' || item.plan === licenseFilters.value.plan;
+    const inTier = licenseFilters.value.tier === 'all' || item.tier === licenseFilters.value.tier;
     const inStatus = licenseFilters.value.status === 'all' || item.status === licenseFilters.value.status;
     const inPaidRange = inDateRange(item.paidAt, licenseFilters.value.paidFrom, licenseFilters.value.paidTo);
     const inExpireRange = item.expiresAt === '未激活'
       ? !(licenseFilters.value.expiresFrom || licenseFilters.value.expiresTo)
       : inDateRange(item.expiresAt, licenseFilters.value.expiresFrom, licenseFilters.value.expiresTo);
-    return inKeyword && inPlan && inStatus && inPaidRange && inExpireRange;
+    return inKeyword && inTier && inPlan && inStatus && inPaidRange && inExpireRange;
   });
 });
 
@@ -396,6 +443,7 @@ async function handleGenerateLicenses() {
   generateResult.value = '';
   try {
     const result = await generateLicenses(adminToken.value, {
+      tier: generateTier.value,
       plan: generatePlan.value,
       quantity: generateQuantity.value,
       maxDevices: generateMaxDevices.value,
@@ -452,8 +500,9 @@ async function refreshAdminData() {
     licenseSummaryData.value = licenseResult.summary;
     selectorVersion.value = selector;
     productConfig.value = products;
+    ensureTierPlans();
     appVersions.value = versions;
-    ensurePluginDownloads();
+    ensureDownloadPackages();
   } catch (error) {
     adminDataError.value = error instanceof Error ? error.message : '后台数据加载失败，请确认服务端已启动';
   } finally {
@@ -472,7 +521,8 @@ async function refreshCurrentView() {
       appVersions.value = await refreshAppVersions();
     } else if (adminView.value === 'products') {
       productConfig.value = await getAdminProductCatalog(adminToken.value);
-      ensurePluginDownloads();
+      ensureTierPlans();
+      ensureDownloadPackages();
     } else if (adminView.value === 'leases') {
       applyLeaseTimeRange();
       await refreshLeases();
@@ -491,9 +541,9 @@ async function refreshCurrentView() {
   }
 }
 
-function ensurePluginDownloads() {
+function ensureDownloadPackages() {
   const next = [...productConfig.value.downloads];
-  for (const fallback of DEFAULT_PLUGIN_DOWNLOADS) {
+  for (const fallback of DEFAULT_DOWNLOAD_PACKAGES) {
     const existing = next.find((item) => item.code === fallback.code);
     if (!existing) {
       next.push({ ...fallback });
@@ -507,8 +557,36 @@ function ensurePluginDownloads() {
     existing.sortOrder ??= fallback.sortOrder;
   }
   productConfig.value.downloads = next
-    .filter((item) => ['zip', 'crx'].includes(item.code))
+    .filter((item) => DEFAULT_DOWNLOAD_PACKAGES.some((fallback) => fallback.code === item.code))
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+}
+
+function ensureTierPlans() {
+  const tiers: LicenseTier[] = ['basic', 'plus', 'pro'];
+  const plans: Plan[] = ['monthly', 'yearly'];
+  const next = [...productConfig.value.plans];
+  for (const tier of tiers) {
+    for (const plan of plans) {
+      if (next.some((item) => item.tier === tier && item.id === plan)) continue;
+      const base = next.find((item) => item.tier === 'basic' && item.id === plan)
+        || next.find((item) => item.id === plan);
+      next.push({
+        id: plan,
+        tier,
+        name: base?.name || (plan === 'monthly' ? '月卡' : '年卡'),
+        unit: base?.unit || (plan === 'monthly' ? '元/月' : '元/年'),
+        note: base?.note || '',
+        originalAmountCents: base?.originalAmountCents || (plan === 'monthly' ? 1490 : 9900),
+        discountAmountCents: undefined,
+        discountStartAt: undefined,
+        discountEndAt: undefined,
+        discountEnabled: false,
+        isActive: false,
+        sortOrder: tiers.indexOf(tier) * 100 + plans.indexOf(plan) * 10 + 10,
+      });
+    }
+  }
+  productConfig.value.plans = next.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
 }
 
 async function saveProductSection(section: 'prices' | 'downloads') {
@@ -517,9 +595,10 @@ async function saveProductSection(section: 'prices' | 'downloads') {
   productPriceMessage.value = '';
   productDownloadMessage.value = '';
   try {
-    ensurePluginDownloads();
+    ensureDownloadPackages();
+    ensureTierPlans();
     productConfig.value = await saveAdminProductCatalog(adminToken.value, productConfig.value);
-    ensurePluginDownloads();
+    ensureDownloadPackages();
     if (section === 'prices') {
       productPriceMessage.value = '价格配置已保存';
     } else {
@@ -537,9 +616,9 @@ async function saveProductSection(section: 'prices' | 'downloads') {
   }
 }
 
-function resetPluginDownloads() {
-  productConfig.value.downloads = DEFAULT_PLUGIN_DOWNLOADS.map((item) => ({ ...item }));
-  productDownloadMessage.value = '已恢复默认插件下载项，保存后生效';
+function resetDownloadPackages() {
+  productConfig.value.downloads = DEFAULT_DOWNLOAD_PACKAGES.map((item) => ({ ...item }));
+  productDownloadMessage.value = '已恢复默认下载项，保存后生效';
 }
 
 async function refreshAppVersions() {
@@ -848,9 +927,9 @@ function csvEscape(value: string): string {
 
 function exportLicenses() {
   if (filteredLicenses.value.length === 0) return;
-  const header = '激活码,套餐,状态,用户,授权到期,订单号,来源渠道,批次\n';
+  const header = '激活码,版本,套餐,状态,用户,授权到期,订单号,来源渠道,批次\n';
   const rows = filteredLicenses.value.map((item) =>
-    [item.code, planLabel(item.plan), statusLabel(item.status), item.user, item.expiresAt, item.orderNo, sourceLabel(item.sourceChannel), item.batchName].map(csvEscape).join(',')
+    [item.code, tierLabel(item.tier), planLabel(item.plan), statusLabel(item.status), item.user, item.expiresAt, item.orderNo, sourceLabel(item.sourceChannel), item.batchName].map(csvEscape).join(',')
   ).join('\n');
   const bom = '﻿';
   const blob = new Blob([bom + header + rows], { type: 'text/csv;charset=utf-8;' });
@@ -1043,9 +1122,9 @@ if (adminLoggedIn.value) {
             </div>
             <p v-if="productPriceMessage" class="generate-result">{{ productPriceMessage }}</p>
             <div class="product-config-grid">
-              <article v-for="plan in productConfig.plans" :key="plan.id" class="ops-config-panel">
+              <article v-for="plan in productConfig.plans" :key="`${plan.tier}-${plan.id}`" class="ops-config-panel">
                 <div class="config-panel-head">
-                  <strong>{{ plan.name || plan.id }}</strong>
+                  <strong>{{ tierLabel(plan.tier) }} · {{ plan.name || plan.id }}</strong>
                   <span>{{ planPrice(plan) }} 元</span>
                 </div>
                 <div class="ops-field-grid">
@@ -1069,10 +1148,10 @@ if (adminLoggedIn.value) {
             <div class="config-section-head">
               <div>
                 <span>下载管理</span>
-                <strong>浏览器插件分发，只维护 ZIP 和 CRX</strong>
+                <strong>浏览器插件与 Native 多平台安装包</strong>
               </div>
               <div class="admin-actions">
-                <button class="secondary-button compact" type="button" @click="resetPluginDownloads">恢复默认</button>
+                <button class="secondary-button compact" type="button" @click="resetDownloadPackages">恢复默认</button>
                 <button class="primary-button compact" type="button" :disabled="productSavingSection === 'downloads'" @click="saveProductSection('downloads')">
                   {{ productSavingSection === 'downloads' ? '保存中' : '保存下载' }}
                 </button>
@@ -1234,6 +1313,15 @@ if (adminLoggedIn.value) {
             </div>
           </label>
           <label>
+            <span>版本层级</span>
+            <select v-model="orderFilters.tier">
+              <option value="all">全部版本</option>
+              <option value="basic">Basic</option>
+              <option value="plus">Plus</option>
+              <option value="pro">Pro</option>
+            </select>
+          </label>
+          <label>
             <span>套餐类型</span>
             <select v-model="orderFilters.plan">
               <option value="all">全部套餐</option>
@@ -1265,7 +1353,7 @@ if (adminLoggedIn.value) {
             <tr v-if="paginatedOrders.length === 0"><td colspan="8" class="table-empty">暂无匹配订单，请检查筛选条件或数据库初始化数据。</td></tr>
             <tr v-for="item in paginatedOrders" :key="item.id">
               <td><strong>{{ item.orderNo }}</strong></td>
-              <td>{{ planLabel(item.plan) }}</td>
+              <td>{{ tierLabel(item.tier) }} · {{ planLabel(item.plan) }}</td>
               <td>{{ sourceLabel(item.source) }}</td>
               <td>{{ item.paidAt || '-' }}</td>
               <td>{{ item.expiresAt || '-' }}</td>
@@ -1325,6 +1413,15 @@ if (adminLoggedIn.value) {
             </div>
           </label>
           <label>
+            <span>版本层级</span>
+            <select v-model="licenseFilters.tier">
+              <option value="all">全部版本</option>
+              <option value="basic">Basic</option>
+              <option value="plus">Plus</option>
+              <option value="pro">Pro</option>
+            </select>
+          </label>
+          <label>
             <span>套餐类型</span>
             <select v-model="licenseFilters.plan">
               <option value="all">全部套餐</option>
@@ -1354,7 +1451,7 @@ if (adminLoggedIn.value) {
           <div v-for="item in filteredLicenses" :key="item.code" class="license-card" :class="{ selected: selectedLicense === item.code }" tabindex="0" role="button" :aria-label="`激活码 ${item.code}`" @click="selectedLicense = item.code" @keydown.enter="selectedLicense = item.code" @keydown.space.prevent="selectedLicense = item.code">
             <div class="license-card-top">
               <span :class="`status-${item.status}`">{{ statusLabel(item.status) }}</span>
-              <strong>{{ planLabel(item.plan) }}</strong>
+              <strong>{{ tierLabel(item.tier) }} · {{ planLabel(item.plan) }}</strong>
             </div>
             <code class="license-card-code">{{ item.code }}</code>
             <div class="license-card-meta">
@@ -1384,7 +1481,7 @@ if (adminLoggedIn.value) {
             <tr v-if="filteredLicenses.length === 0"><td colspan="10" class="table-empty">暂无匹配卡密</td></tr>
             <tr v-for="item in filteredLicenses" :key="item.code" :class="{ selected: selectedLicense === item.code }" tabindex="0" @click="selectedLicense = item.code" @keydown.enter="selectedLicense = item.code">
               <td><code class="hash-code">{{ item.code }}</code></td>
-              <td>{{ planLabel(item.plan) }}</td>
+              <td>{{ tierLabel(item.tier) }} · {{ planLabel(item.plan) }}</td>
               <td>{{ sourceLabel(item.sourceChannel) }}</td>
               <td>{{ item.batchName }}</td>
               <td><mark :class="`status-${item.status}`">{{ statusLabel(item.status) }}</mark></td>
@@ -1556,6 +1653,14 @@ if (adminLoggedIn.value) {
           </button>
         </div>
         <div class="modal-body">
+          <label>
+            <span>版本层级</span>
+            <select v-model="generateTier">
+              <option value="basic">Basic</option>
+              <option value="plus">Plus</option>
+              <option value="pro">Pro</option>
+            </select>
+          </label>
           <label>
             <span>套餐类型</span>
             <select v-model="generatePlan">

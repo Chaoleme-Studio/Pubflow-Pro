@@ -41,11 +41,7 @@ impl License {
     }
 
     fn tier_str(&self) -> &str {
-        match self.tier {
-            LicenseTier::Free => "free",
-            LicenseTier::Pro => "pro",
-            LicenseTier::Enterprise => "enterprise",
-        }
+        self.tier.as_str()
     }
 
     /// 用私钥签名，填充 signature 字段
@@ -146,7 +142,7 @@ mod tests {
         license.sign(&sk);
 
         // 篡改 tier
-        license.tier = LicenseTier::Enterprise;
+        license.tier = LicenseTier::Plus;
         assert!(license.verify(&vk).is_err());
     }
 
@@ -161,7 +157,7 @@ mod tests {
         };
         let license_b = License {
             device_id: "abcp".into(),
-            tier: LicenseTier::Free,
+            tier: LicenseTier::Basic,
             expires_at: 123,
             activation_code: "CODE".into(),
             signature: String::new(),

@@ -158,11 +158,13 @@ describe('distribution permit payload', () => {
       content: { title: 'Title', description: 'Desc' } as never,
       platforms: ['douyin'],
       videoId: 'video-1',
+      source: 'manual',
     });
     const second = await issueDistributionPermit(settings, {
       content: { description: 'Desc', title: 'Title' } as never,
       platforms: ['douyin'],
       videoId: 'video-1',
+      source: 'manual',
     });
 
     const firstPermitBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body || '{}'));
@@ -172,6 +174,7 @@ describe('distribution permit payload', () => {
       lease_token: 'lease-token',
       client_install_id: 'install-id',
       operation: 'start_distribution',
+      source: 'manual',
     });
     expect(firstPermitBody.task_hash).toMatch(/^sha256:/);
     expect(firstPermitBody.task_hash).toBe(secondPermitBody.task_hash);

@@ -14,7 +14,8 @@ aide = { version = "0.15.0", features = [
     "axum-form",
     "axum-multipart",
 ] }
-axum = { version = "0.8.4", features = ["macros", "multipart"] }
+axum = { version = "0.8.4", features = ["macros", "multipart", "ws"] }
+futures-util = "0.3"
 axum-extra = { version = "0.10.1", features = ["typed-header"] }
 chrono = { version = "0.4.41", features = ["serde"] }
 figment = { version = "0.10.19", features = ["toml", "env"] }

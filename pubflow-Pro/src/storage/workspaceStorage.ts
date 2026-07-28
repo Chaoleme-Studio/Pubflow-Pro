@@ -9,6 +9,7 @@ const DB_VERSION = 1;
 const STORE_NAME = 'handles';
 const WORKSPACE_HANDLE_KEY = 'workspace-directory';
 const DATA_FILE_NAME = 'pubflow-data.json';
+const WORKSPACE_IDENTITY_FILE_NAME = '.pubflow-workspace.json';
 
 type PermissionMode = { mode: 'read' | 'readwrite' };
 type PermissionAwareDirectoryHandle = FileSystemDirectoryHandle & {
@@ -110,6 +111,20 @@ export async function loadWorkspaceDirectory(): Promise<StoredWorkspaceHandle | 
   } catch {
     return null;
   }
+}
+
+/** 读取 Native 写入的工作区身份，用于证明插件和 Native 使用同一个目录。 */
+export async function readWorkspaceIdentity(): Promise<string | null> {
+  const workspace = await loadWorkspaceDirectory();
+  if (!workspace?.handle) return null;
+  const permission = await queryWorkspacePermission(workspace.handle);
+  if (permission !== 'granted' && permission !== 'unsupported') return null;
+  const raw = await readJsonFile(workspace.handle, WORKSPACE_IDENTITY_FILE_NAME);
+  if (!raw || typeof raw !== 'object') return null;
+  const identity = raw as Record<string, unknown>;
+  return identity.version === 1 && typeof identity.workspaceId === 'string' && identity.workspaceId
+    ? identity.workspaceId
+    : null;
 }
 
 /** 清除已保存的工作区目录句柄和设置。 */
@@ -247,6 +262,100 @@ async function writeFile(
   const writable = await fileHandle.createWritable();
   await writable.write(data);
   await writable.close();
+}
+
+export interface RemoteWorkspaceAsset {
+  assetId: string;
+  role: 'video' | 'cover' | 'music' | 'image';
+  fileName: string;
+  contentType?: string;
+  size: number;
+  sha256: string;
+  downloadUrl: string;
+}
+
+/** 将云端 Project 流式物化到已授权工作区；project.json 最后写入作为提交标志。 */
+export async function materializeRemoteProject(
+  projectManifest: WorkspaceProjectManifest,
+  assets: RemoteWorkspaceAsset[],
+  apiBaseUrl: string,
+) {
+  if (projectManifest.version !== 2 || !projectManifest.id || projectManifest.id !== projectManifest.video?.projectId) {
+    throw new Error('云端 Project 清单无效。');
+  }
+  const storedWorkspace = await loadWorkspaceDirectory();
+  if (!storedWorkspace?.handle) throw new Error('请先在 Dashboard 中选择本地工作区。');
+  const permission = await ensureReadwritePermission(storedWorkspace.handle);
+  if (permission === 'denied') throw new Error('工作区没有写入权限，请重新授权。');
+  const existing = await getProjectDirectoryById(projectManifest.id);
+  if (existing && await readProjectManifest(existing)) return;
+
+  const projectsDir = await getOrCreateDirectory(storedWorkspace.handle, 'projects');
+  const projectName = createProjectFolderName(
+    projectManifest.id,
+    projectManifest.video.title,
+    projectManifest.video.contentType,
+  );
+  const projectDir = existing || await getOrCreateDirectory(projectsDir, projectName);
+  try {
+    const assetsDir = await getOrCreateDirectory(projectDir, 'assets');
+    const directories = {
+      video: await getOrCreateDirectory(assetsDir, 'video'),
+      cover: await getOrCreateDirectory(assetsDir, 'cover'),
+      music: await getOrCreateDirectory(assetsDir, 'music'),
+      image: await getOrCreateDirectory(assetsDir, 'images'),
+    };
+    for (const asset of assets) {
+      await downloadRemoteAsset(directories[asset.role], asset, apiBaseUrl);
+    }
+    await writeFile(projectDir, 'project.json', JSON.stringify(projectManifest, null, 2));
+    await mergeDataFile({
+      projectIndex: [{
+        projectId: projectManifest.id,
+        path: `projects/${projectName}`,
+        title: projectManifest.video.title,
+        updatedAt: projectManifest.video.updatedAt || Date.now(),
+      }],
+    });
+  } catch (error) {
+    if (!existing) await projectsDir.removeEntry(projectName, { recursive: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function downloadRemoteAsset(
+  directory: FileSystemDirectoryHandle,
+  asset: RemoteWorkspaceAsset,
+  apiBaseUrl: string,
+) {
+  const safeName = asset.fileName.replace(/[\\/:*?"<>|]+/g, '-').trim();
+  if (!safeName || safeName !== asset.fileName || asset.size <= 0) throw new Error('云端素材描述无效。');
+  const url = new URL(asset.downloadUrl, `${apiBaseUrl.replace(/\/+$/, '')}/`);
+  const response = await fetch(url);
+  if (!response.ok || !response.body) throw new Error(`素材下载失败：${response.status}`);
+  const digestPromise = response.clone().arrayBuffer().then((buffer) => crypto.subtle.digest('SHA-256', buffer));
+  const fileHandle = await directory.getFileHandle(safeName, { create: true });
+  const writable = await fileHandle.createWritable();
+  const reader = response.body.getReader();
+  let received = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > asset.size) throw new Error(`素材 ${safeName} 长度超过声明值。`);
+      await writable.write(value);
+    }
+    await writable.close();
+  } catch (error) {
+    await writable.abort().catch(() => undefined);
+    throw error;
+  }
+  const actualHash = [...new Uint8Array(await digestPromise)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  if (received !== asset.size || actualHash !== asset.sha256.toLowerCase()) {
+    await directory.removeEntry(safeName).catch(() => undefined);
+    throw new Error(`素材 ${safeName} 长度或 SHA-256 校验失败。`);
+  }
 }
 
 /** 生成唯一的素材文件名，保留原始扩展名并清理非法字符。 */

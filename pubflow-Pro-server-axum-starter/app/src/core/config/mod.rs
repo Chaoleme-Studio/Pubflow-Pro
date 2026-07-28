@@ -3,6 +3,7 @@ mod database;
 mod logging;
 mod payment;
 mod redis;
+mod remote_publish;
 mod secrets;
 mod section;
 mod server;
@@ -12,6 +13,7 @@ pub use database::DatabaseConfig;
 pub use logging::LoggingConfig;
 pub use payment::{AlipayConfig, PaymentConfig};
 pub use redis::RedisConfig;
+pub use remote_publish::RemotePublishConfig;
 pub use secrets::{SecretsConfig, parse_jwt_previous_secrets};
 pub use section::ConfigSection;
 pub use server::ServerConfig;
@@ -53,6 +55,8 @@ pub struct AppConfig {
     /// 支付配置
     pub payment: PaymentConfig,
 
+    pub remote_publish: RemotePublishConfig,
+
     /// 扩展下载包本地文件系统路径（用于发布时校验 /downloads/ 下的文件）
     pub downloads_fs_path: String,
 }
@@ -67,6 +71,7 @@ impl Default for AppConfig {
             cors: CorsConfig::default(),
             redis: RedisConfig::default(),
             payment: PaymentConfig::default(),
+            remote_publish: RemotePublishConfig::default(),
             downloads_fs_path: "./downloads".to_string(),
         }
     }
@@ -79,20 +84,17 @@ impl AppConfig {
     ///
     /// 1. 代码中的默认值
     /// 2. `config/default.toml` — 所有环境共享的基准配置
-    /// 3. `config/{APP_ENV}.toml` — 当前环境专属配置（默认 `development`）
+    /// 3. `config/{environment}.toml` — 当前环境专属配置（默认 `development`）
     /// 4. `config/local.toml` — 个人本地覆盖（gitignored，不进版本库）
     /// 5. `APP_*` 环境变量
     /// 6. 敏感信息环境变量（`DATABASE_URL`、`JWT_SECRET` 等，最高优先级）
     ///
     /// # 环境选择
     ///
-    /// 通过 `APP_ENV` 环境变量指定，默认为 `development`。
-    /// 例如：`APP_ENV=production cargo run`
+    /// 按 `PUBFLOW_ENV` / `ENV` / `APP_ENV` 的顺序选择，默认为 `development`。
+    /// 例如：`ENV=production cargo run`
     pub fn load() -> Result<Self, ConfigError> {
-        load_workspace_env_files();
-
-        // 读取当前环境（默认 development）
-        let env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string());
+        let env = load_workspace_env_files();
 
         // 构建配置源（优先级从低到高）
         let builder = Config::builder()
@@ -140,6 +142,7 @@ impl AppConfig {
         self.cors = app_config.cors;
         self.redis = app_config.redis;
         self.payment = app_config.payment;
+        self.remote_publish = app_config.remote_publish;
         self.downloads_fs_path = app_config.downloads_fs_path;
 
         Ok(())
@@ -157,6 +160,7 @@ impl AppConfig {
             &mut self.cors,
             &mut self.redis,
             &mut self.payment,
+            &mut self.remote_publish,
         ];
 
         for section in sections {
@@ -204,6 +208,7 @@ impl AppConfig {
             &self.cors,
             &self.redis,
             &self.payment,
+            &self.remote_publish,
         ];
 
         for section in sections {
@@ -234,7 +239,7 @@ impl AppConfig {
     }
 }
 
-fn load_workspace_env_files() {
+fn load_workspace_env_files() -> String {
     let env = std::env::var("PUBFLOW_ENV")
         .or_else(|_| std::env::var("ENV"))
         .or_else(|_| std::env::var("APP_ENV"))
@@ -252,6 +257,7 @@ fn load_workspace_env_files() {
     // 如果用户手动放了 server/.env，这里仍然允许它覆盖内置构建配置。
     dotenvy::dotenv().ok();
     apply_embedded_env_fallbacks();
+    env
 }
 
 fn apply_embedded_env_fallbacks() {

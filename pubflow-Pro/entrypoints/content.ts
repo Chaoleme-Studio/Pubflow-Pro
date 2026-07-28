@@ -1,6 +1,7 @@
 import { detectBlocker } from '../src/content/blockerDetector';
 import { findElement, querySelectorDeep, setOverrideDocument, waitForIdle, waitForSelector } from '../src/content/dom';
 import { getPlatformContentHandler } from '../src/platforms/flows';
+import { clickFinalPublishButton, supportsDirectPublish } from '../src/platforms/finalPublisher';
 import { getPlatformByUrl, isArticlePage, isLongArticlePage, PLATFORM_MATCH_PATTERNS } from '../src/platforms';
 import type { PlatformConfig } from '../src/platforms';
 import type { ContentData, DistributionTask, RuntimeMessage, RuntimeResponse } from '../src/types';
@@ -121,7 +122,7 @@ async function initContentScript() {
           } satisfies RuntimeMessage).catch(() => undefined);
         }
 
-        void fillContent(platform, message.payload.content);
+        void fillContent(platform, message.payload.content, message.payload.autoSubmit === true);
         return Promise.resolve({ ok: true } as const);
       });
     } catch (error) {
@@ -397,7 +398,7 @@ function observePageReady(config: PlatformConfig) {
 }
 
 /** 执行实际填充流程：选择平台处理器、切换 iframe 文档、回传成功或失败状态。 */
-async function fillContent(config: PlatformConfig, content: ContentData) {
+async function fillContent(config: PlatformConfig, content: ContentData, autoSubmit: boolean) {
   try {
     const isArticle = isArticleEditorContext(config, content.contentType);
     // isArticle 用于“当前上下文是否像文章编辑器”，image 也会返回 true；
@@ -442,11 +443,22 @@ async function fillContent(config: PlatformConfig, content: ContentData) {
         throw new Error(message);
       }
 
+      if (autoSubmit && supportsDirectPublish(config.id)) {
+        console.info('[PubFlow] final publish click requested', {
+          platform: config.id,
+          href: location.href,
+        });
+        await clickFinalPublishButton(config.id, content);
+        return { ok: true } as const;
+      }
+
       await browser.runtime.sendMessage({
         type: 'CONTENT_FILLED',
         payload: {
           platformId: config.id,
-          message,
+          message: autoSubmit
+            ? `${message}当前平台暂不支持直接发布，已保留页面等待确认。`
+            : message,
         },
       } satisfies RuntimeMessage);
 

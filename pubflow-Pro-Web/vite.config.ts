@@ -40,7 +40,10 @@ function seoAssets(siteUrl: string): Plugin {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, WORKSPACE_DIR, '');
-  const apiProxyTarget = env.VITE_PUBFLOW_API_BASE_URL
+  const apiProxyTarget = process.env.VITE_PUBFLOW_API_BASE_URL
+    || process.env.PUBLIC_API_BASE_URL
+    || process.env.PUBFLOW_LICENSE_API_BASE_URL
+    || env.VITE_PUBFLOW_API_BASE_URL
     || env.PUBLIC_API_BASE_URL
     || env.PUBFLOW_LICENSE_API_BASE_URL
     || 'http://127.0.0.1:5189';
@@ -48,6 +51,7 @@ export default defineConfig(({ mode }) => {
     || env.PUBFLOW_OFFICIAL_SITE_URL
     || 'http://117.72.147.216:5188').replace(/\/+$/, '');
   const webPort = Number(env.WEB_DEV_SERVER_PORT || '5188') || 5188;
+  const nativeProxyTarget = env.PUBFLOW_AGENT_HTTP_URL || 'http://127.0.0.1:5190';
 
   return {
     plugins: [tailwindcss(), vue(), seoAssets(siteUrl)],
@@ -59,11 +63,19 @@ export default defineConfig(({ mode }) => {
     },
     ssgOptions: {
       dirStyle: 'nested',
-      includedRoutes: () => ['/', '/buy', '/downloads', '/license', '/admin', '/404'],
+      includedRoutes: () => ['/', '/buy', '/downloads', '/license', '/admin', '/publish', '/404'],
+    },
+    optimizeDeps: {
+      // Vite 7 can split this Vue 3 + vue-router 5 graph before @vue/shared is initialized.
+      exclude: ['vue', 'vue-router', 'vite-ssg'],
     },
     server: {
       port: webPort,
       proxy: {
+        '/v1/local': {
+          target: nativeProxyTarget,
+          changeOrigin: true,
+        },
         '/v1': {
           target: apiProxyTarget,
           changeOrigin: true,

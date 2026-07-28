@@ -11,6 +11,7 @@ pub struct ProductCatalogResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct PlanItem {
     pub id: String,
+    pub tier: String,
     pub name: String,
     pub price: String,
     pub unit: String,

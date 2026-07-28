@@ -2,6 +2,7 @@ import type { LicensingSettings } from '../types';
 import { defaultLicensingSettings } from '../storage/settingsStorage';
 import { activateLease } from './activation';
 import { buildDeviceProof } from './deviceProof';
+import { parseLicenseGrant } from './licenseStorage';
 
 export interface LicenseVerificationResult {
   ok: boolean;
@@ -18,6 +19,8 @@ interface VerifyLeasePayload {
   licenseExpiresAt?: string | null;
   server_time?: string;
   serverTime?: string;
+  tier?: string;
+  features?: string[];
 }
 
 interface ApiErrorPayload {
@@ -130,8 +133,10 @@ async function verifyLease(settings: LicensingSettings): Promise<LicensingSettin
   }
 
   const serverTime = parseServerTimestamp(data.server_time || data.serverTime);
+  const grant = parseLicenseGrant(data.tier, data.features);
   return {
     ...settings,
+    ...grant,
     validUntil: parseServerTimestamp(
       data.license_expires_at || data.licenseExpiresAt || data.valid_until || data.validUntil,
     ) || settings.validUntil,

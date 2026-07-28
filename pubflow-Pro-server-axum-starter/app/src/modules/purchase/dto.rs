@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CreateOrderRequest {
+    pub tier: String,
     pub plan: String,
     pub channel: String,
     pub machine_hash: Option<String>,
@@ -12,6 +13,7 @@ pub struct CreateOrderRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CreateOrderResponse {
     pub order_no: String,
+    pub tier: String,
     pub plan: String,
     pub amount_cents: i32,
     pub channel: String,

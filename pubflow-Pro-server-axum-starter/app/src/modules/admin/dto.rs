@@ -16,6 +16,7 @@ pub struct AdminLoginResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct GenerateLicenseRequest {
+    pub tier: String,
     pub plan: String,
     pub quantity: Option<u32>,
     pub max_devices: Option<i32>,
@@ -138,6 +139,7 @@ pub struct UnbindLicenseDeviceResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AdminPlanConfig {
     pub id: String,
+    pub tier: String,
     pub name: String,
     pub unit: Option<String>,
     pub note: Option<String>,
@@ -307,6 +309,7 @@ pub struct ListUserQuery {
 pub struct OrderOperationItem {
     pub id: String,
     pub order_no: String,
+    pub tier: String,
     pub plan: String,
     pub channel: String,
     pub status: String,
@@ -323,6 +326,7 @@ pub struct OrderOperationItem {
 pub struct ListOrderQuery {
     pub keyword: Option<String>,
     pub plan: Option<String>,
+    pub tier: Option<String>,
     pub machine_hash: Option<String>,
     pub status: Option<String>,
     pub paid_from: Option<String>,

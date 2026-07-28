@@ -18,6 +18,7 @@ export type PlatformTaskStatus =
   | 'waitingUser'
   | 'ready'
   | 'filling'
+  | 'publishing'
   | 'filled'
   | 'published'
   | 'skipped'
@@ -104,6 +105,15 @@ export interface DistributionTask {
   permitId?: string;
   permitExpiresAt?: number;
   permitTaskHash?: string;
+  /** 填充完成后是否直接点击平台最终发布按钮。 */
+  autoSubmit?: boolean;
+  /** 任务来源及本地 Agent 幂等关联信息。 */
+  source?: 'dashboard' | 'agent';
+  externalTaskSource?: 'native' | 'cloud';
+  externalJobId?: string;
+  projectId?: string;
+  statusSequence?: number;
+  error?: string;
 }
 
 export type PublishedPlatformStatus = Extract<
@@ -148,6 +158,7 @@ export interface VideoRecord {
   visibility?: Visibility;
   originalDeclare?: boolean;
   platformSettings?: PlatformSpecificSettings;
+  fillOptions?: ContentFillOptions;
   platforms: PlatformStatus[];
   createdAt: number;
   updatedAt: number;
@@ -212,6 +223,15 @@ export type LicenseStatus =
   | 'device_mismatch'
   | 'invalid';
 
+export type LicenseTier = 'basic' | 'plus' | 'pro';
+
+export type LicenseFeature =
+  | 'publish'
+  | 'batch'
+  | 'selector-updates'
+  | 'native-publish'
+  | 'remote-publish';
+
 export interface LicensingSettings {
   apiBaseUrl: string;
   activationCode: string;
@@ -220,6 +240,8 @@ export interface LicensingSettings {
   /** 旧字段兼容；订阅版新逻辑不再使用 Machine Hash 语义。 */
   machineHash?: string;
   leaseToken: string;
+  tier?: LicenseTier;
+  features: LicenseFeature[];
   status: LicenseStatus;
   statusMessage?: string;
   validUntil?: number;
@@ -291,6 +313,7 @@ export type RuntimeMessage =
       content: ContentData;
       platforms: PlatformId[];
       videoId?: string;
+      autoSubmit?: boolean;
     };
   }
   | {
@@ -316,6 +339,9 @@ export type RuntimeMessage =
   }
   | {
     type: 'RESUME_TASK';
+  }
+  | {
+    type: 'STOP_TASK';
   }
   | {
     type: 'GET_TASK';
@@ -353,6 +379,7 @@ export type RuntimeMessage =
       content: ContentData;
       platformId: PlatformId;
       requestId?: string;
+      autoSubmit?: boolean;
     };
   }
   | {
@@ -383,6 +410,14 @@ export type RuntimeMessage =
     payload: {
       platformId: PlatformId;
       message: string;
+    };
+  }
+  | {
+    type: 'FINAL_PUBLISH_CLICK';
+    payload: {
+      platformId: PlatformId;
+      x: number;
+      y: number;
     };
   }
   | {

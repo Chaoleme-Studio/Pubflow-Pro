@@ -17,6 +17,10 @@
 use base64::Engine;
 use ed25519_dalek::VerifyingKey;
 use pubflow_core::license::License;
+use pubflow_core::remote_protocol::{
+    decode_message as pfrp_decode, encode_auth as pfrp_encode_auth, encode_message as pfrp_encode,
+    key_from_hex as pfrp_key_from_hex, start_client_session as pfrp_start_session,
+};
 use pubflow_core::selector_protocol::{
     ActivationProtocolRequestPayload, SelectorProtocolRequestPayload, activation_code_hash,
     decode_activation_response, decode_response, encode_activation_request, encode_request,
@@ -264,6 +268,73 @@ pub fn pfap_decode_activation_response(response_base64: &str, response_key_hex: 
             "server_time": payload.server_time,
         })
         .to_string(),
+        Err(error) => pfsp_error(error.to_string()),
+    }
+}
+
+/// 构造 PFRP v1 认证帧，并返回本次连接的临时双向密钥。
+#[wasm_bindgen]
+pub fn pfrp_build_auth(server_public_key_hex: &str, auth_json: &str, timestamp_ms: i64) -> String {
+    let payload: serde_json::Value = match serde_json::from_str(auth_json) {
+        Ok(value) => value,
+        Err(error) => return pfsp_error(error.to_string()),
+    };
+    let timestamp = if timestamp_ms > 0 {
+        timestamp_ms
+    } else {
+        js_sys::Date::now() as i64
+    };
+    let session = match pfrp_start_session(server_public_key_hex, timestamp) {
+        Ok(value) => value,
+        Err(error) => return pfsp_error(error.to_string()),
+    };
+    let frame = match pfrp_encode_auth(&payload, &session) {
+        Ok(value) => value,
+        Err(error) => return pfsp_error(error.to_string()),
+    };
+    serde_json::json!({
+        "ok": true,
+        "frame_base64": base64::engine::general_purpose::STANDARD.encode(frame),
+        "outbound_key_hex": hex::encode(session.client_to_server_key()),
+        "inbound_key_hex": hex::encode(session.server_to_client_key()),
+    })
+    .to_string()
+}
+
+/// 使用 PFRP 临时方向密钥编码一条严格有序的消息。
+#[wasm_bindgen]
+pub fn pfrp_encode_message(payload_json: &str, key_hex: &str, sequence: u64) -> String {
+    let payload: serde_json::Value = match serde_json::from_str(payload_json) {
+        Ok(value) => value,
+        Err(error) => return pfsp_error(error.to_string()),
+    };
+    let key = match pfrp_key_from_hex(key_hex) {
+        Ok(value) => value,
+        Err(error) => return pfsp_error(error.to_string()),
+    };
+    match pfrp_encode(&payload, &key, sequence) {
+        Ok(frame) => serde_json::json!({
+            "ok": true,
+            "frame_base64": base64::engine::general_purpose::STANDARD.encode(frame),
+        })
+        .to_string(),
+        Err(error) => pfsp_error(error.to_string()),
+    }
+}
+
+/// 解码并校验一条 PFRP 消息的认证标签和严格序号。
+#[wasm_bindgen]
+pub fn pfrp_decode_message(frame_base64: &str, key_hex: &str, expected_sequence: u64) -> String {
+    let frame = match base64::engine::general_purpose::STANDARD.decode(frame_base64) {
+        Ok(value) => value,
+        Err(error) => return pfsp_error(error.to_string()),
+    };
+    let key = match pfrp_key_from_hex(key_hex) {
+        Ok(value) => value,
+        Err(error) => return pfsp_error(error.to_string()),
+    };
+    match pfrp_decode::<serde_json::Value>(&frame, &key, expected_sequence) {
+        Ok(payload) => serde_json::json!({ "ok": true, "payload": payload }).to_string(),
         Err(error) => pfsp_error(error.to_string()),
     }
 }

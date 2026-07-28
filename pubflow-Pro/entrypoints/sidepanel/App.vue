@@ -81,7 +81,9 @@ onUnmounted(() => {
     <section class="rounded-lg border border-slate-200 bg-slate-50 p-3">
       <div class="mb-3">
         <h2 class="text-sm font-bold text-slate-900">平台队列</h2>
-        <p class="mt-1 text-xs leading-5 text-slate-500">平台页不会自动发布。填充完成后仍由用户确认。</p>
+        <p class="mt-1 text-xs leading-5 text-slate-500">
+          {{ task?.autoSubmit ? '本次任务已启用直接发布。' : '填充完成后仍由用户确认发布。' }}
+        </p>
       </div>
       <TaskProgress compact :task="task" @updated="task = $event" @notice="notice = $event" />
       <p v-if="notice" class="mt-3 rounded-md bg-blue-50 p-3 text-xs leading-5 text-blue-800">{{ notice }}</p>

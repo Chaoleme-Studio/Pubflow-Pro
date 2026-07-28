@@ -1,9 +1,16 @@
-import type { RuntimeMessage } from '../types';
+import type { PlatformId, RuntimeMessage } from '../types';
 import type { RuntimeResponse } from '../types';
+
+export interface ElementPointOffset {
+  /** 相对元素左上角的横向像素；省略时使用元素中心。 */
+  x?: number;
+  /** 相对元素左上角的纵向像素；省略时使用元素中心。 */
+  y?: number;
+}
 
 /** 通过 CDP 发送可信点击事件，用于知乎等不响应 JS click 的 React 组件。 */
 export async function cdpClickElement(el: HTMLElement): Promise<boolean> {
-  const point = getTopFrameCenterPoint(el);
+  const point = getTopFramePoint(el);
   try {
     const response = (await browser.runtime.sendMessage({
       type: 'CDP_CLICK',
@@ -12,6 +19,29 @@ export async function cdpClickElement(el: HTMLElement): Promise<boolean> {
     return response?.ok === true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * 请求后台点击平台最终发布按钮。
+ * 后台负责可信点击、任务状态落库和继续下一个平台，页面点击后立即跳转也不会丢进度。
+ */
+export async function requestFinalPublishClick(
+  el: HTMLElement,
+  platformId: PlatformId,
+  offset?: ElementPointOffset,
+): Promise<void> {
+  const point = getTopFramePoint(el, offset);
+  const response = (await browser.runtime.sendMessage({
+    type: 'FINAL_PUBLISH_CLICK',
+    payload: {
+      platformId,
+      ...point,
+    },
+  } satisfies RuntimeMessage)) as RuntimeResponse | undefined;
+
+  if (!response?.ok) {
+    throw new Error(response?.error || '最终发布按钮点击失败');
   }
 }
 
@@ -25,7 +55,7 @@ export async function cdpFillDescriptionWithTopics(
   topics: string[],
   topicIntervalMs: number,
 ): Promise<void> {
-  const point = getTopFrameCenterPoint(el);
+  const point = getTopFramePoint(el);
   const response = (await browser.runtime.sendMessage({
     type: 'CDP_FILL_DESCRIPTION_TOPICS',
     payload: {
@@ -47,7 +77,7 @@ export async function cdpDragElement(
   deltaX: number,
   deltaY: number,
 ): Promise<boolean> {
-  const start = getTopFrameCenterPoint(el);
+  const start = getTopFramePoint(el);
   try {
     const response = (await browser.runtime.sendMessage({
       type: 'CDP_DRAG',
@@ -65,10 +95,10 @@ export async function cdpDragElement(
 }
 
 /** 将 iframe 内元素坐标换算成顶层 tab 坐标，供 CDP Input.dispatchMouseEvent 使用。 */
-function getTopFrameCenterPoint(el: HTMLElement) {
+export function getTopFramePoint(el: HTMLElement, offset?: ElementPointOffset) {
   const rect = el.getBoundingClientRect();
-  let x = rect.left + rect.width / 2;
-  let y = rect.top + rect.height / 2;
+  let x = rect.left + (offset?.x ?? rect.width / 2);
+  let y = rect.top + (offset?.y ?? rect.height / 2);
   let currentWindow: Window | null = el.ownerDocument.defaultView;
 
   while (currentWindow && currentWindow !== currentWindow.parent) {

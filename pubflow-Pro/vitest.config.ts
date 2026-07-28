@@ -9,6 +9,7 @@ export default defineConfig({
   define: {
     __PUBFLOW_DEV_WORKSPACE_PATH__: JSON.stringify(''),
     __PUBFLOW_DEFAULT_TOPIC_INTERVAL_MS__: JSON.stringify(800),
+    __PUBFLOW_DEFAULT_AGENT_WS_URL__: JSON.stringify('ws://127.0.0.1:5190/v1/extension/ws'),
     __PUBFLOW_DEFAULT_LICENSE_API_BASE_URL__: JSON.stringify(''),
     __PUBFLOW_OFFICIAL_SITE_URL__: JSON.stringify(''),
     __PUBFLOW_PROTOCOL_PUBLIC_KEY__: JSON.stringify(''),

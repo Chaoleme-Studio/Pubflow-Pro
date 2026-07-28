@@ -5,7 +5,7 @@ import SiteHeader from './components/SiteHeader.vue';
 import { useSiteSeo } from './seo';
 
 const route = useRoute();
-const isAdmin = computed(() => route.name === 'admin');
+const isStandalone = computed(() => route.name === 'admin' || route.name === 'publish-remote');
 const currentView = computed(() => {
   const routeName = typeof route.name === 'string' ? route.name : 'not-found';
   return routeName.startsWith('not-found') ? 'not-found' : routeName;
@@ -16,7 +16,7 @@ useSiteSeo();
 
 <template>
   <div class="app-shell" :class="`view-${currentView}`">
-    <SiteHeader v-if="!isAdmin" />
+    <SiteHeader v-if="!isStandalone" />
     <RouterView v-slot="{ Component }">
       <KeepAlive :max="4">
         <component :is="Component" />

@@ -3,7 +3,7 @@ import { PLATFORM_CONFIGS } from '../../../platforms';
 import { sendRuntimeMessage } from '../../../messaging';
 import type { DistributionTask, PlatformId, RuntimeResponse } from '../../../types';
 
-defineProps<{
+const props = defineProps<{
   task: DistributionTask | null;
   compact?: boolean;
 }>();
@@ -20,6 +20,7 @@ function statusText(status: string) {
     waitingUser: '等待处理/确认',
     ready: '可填充',
     filling: '填充中',
+    publishing: '发布中',
     filled: '已填充',
     published: '已发布',
     skipped: '已跳过',
@@ -44,7 +45,7 @@ async function applyAction(action: 'OPEN_PLATFORM' | 'CONTINUE_FILL' | 'SKIP_PLA
   handleResponse(response, action);
 }
 
-async function applyTaskAction(action: 'PAUSE_TASK' | 'RESUME_TASK') {
+async function applyTaskAction(action: 'PAUSE_TASK' | 'RESUME_TASK' | 'STOP_TASK') {
   const response = await sendRuntimeMessage<DistributionTask>({
     type: action,
   });
@@ -55,13 +56,21 @@ function handleResponse(response: RuntimeResponse<DistributionTask>, action: str
   if (response.ok) {
     emit('updated', response.data || null);
     if (action === 'CONTINUE_FILL') {
-      emit('notice', '已发送填充指令。插件会按拟人节奏填入，不会点击发布。');
+      emit(
+        'notice',
+        props.task?.autoSubmit
+          ? '已发送填充指令。填充完成后将直接发布。'
+          : '已发送填充指令。插件会按拟人节奏填入，不会点击发布。',
+      );
     }
     if (action === 'PAUSE_TASK') {
       emit('notice', '任务已暂停。');
     }
     if (action === 'RESUME_TASK') {
       emit('notice', '任务已继续。');
+    }
+    if (action === 'STOP_TASK') {
+      emit('notice', '当前任务已全部结束，相关平台页面已关闭。');
     }
     return;
   }
@@ -91,6 +100,7 @@ function handleResponse(response: RuntimeResponse<DistributionTask>, action: str
       :class="{
         'border-l-4 border-l-amber-500': item.status === 'ready' || item.status === 'waitingUser',
         'border-l-4 border-l-blue-600': item.status === 'filling',
+        'border-l-4 border-l-rose-600': item.status === 'publishing',
         'border-l-4 border-l-green-600': item.status === 'filled',
         'border-l-4 border-l-red-600': item.status === 'error',
         'border-l-4 border-l-slate-400': item.status === 'pending' || item.status === 'opening' || item.status === 'skipped',
@@ -160,6 +170,14 @@ function handleResponse(response: RuntimeResponse<DistributionTask>, action: str
         @click="task.platforms[task.currentIndex] && applyAction('SKIP_PLATFORM', task.platforms[task.currentIndex].platformId)"
       >
         跳过当前
+      </button>
+      <button
+        v-if="task.status === 'running' || task.status === 'paused'"
+        class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:border-red-400 hover:bg-red-100"
+        type="button"
+        @click="applyTaskAction('STOP_TASK')"
+      >
+        结束全部
       </button>
     </div>
   </div>

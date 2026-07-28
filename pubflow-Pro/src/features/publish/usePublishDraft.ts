@@ -8,7 +8,6 @@ import {
 } from '../../storage/videoTransferStorage';
 import {
   importProjectAsset,
-  createProjectId,
   loadProjectAssetFiles,
   loadProjectManifest,
   loadWorkspaceSettings,
@@ -387,7 +386,6 @@ export function usePublishDraft(params: {
     asReplica = false,
   ) {
     const reuseReplicaProject = Boolean(asReplica && draft.replicaSourceProjectId && draft.projectId);
-    const replicaProjectId = reuseReplicaProject ? draft.projectId! : createProjectId();
     const previousReplicaVideoCacheId = reuseReplicaProject ? draft.videoCacheId : '';
     const previousReplicaCoverCacheId = reuseReplicaProject ? draft.coverCacheId : '';
     const previousReplicaImageCacheIds = reuseReplicaProject ? [...(draft.imageCacheIds || [])] : [];
@@ -399,7 +397,9 @@ export function usePublishDraft(params: {
     draft.description = video.description;
     draft.topicsText = video.topics.join(' ');
     draft.selectedCampaignIds = [...(video.campaignIds || [])];
-    draft.projectId = asReplica ? replicaProjectId : video.projectId;
+    // 复刻先作为浏览器草稿保存，首次编辑、选择素材或发布时再创建工作区项目。
+    // 已经落盘的复刻项目继续复用原 ID，避免连续复刻产生重复项目。
+    draft.projectId = asReplica ? (reuseReplicaProject ? draft.projectId : '') : video.projectId;
     draft.replicaSourceProjectId = asReplica ? video.projectId : '';
     draft.videoCacheId = asReplica ? '' : video.videoCacheId || '';
     draft.coverCacheId = asReplica ? '' : video.coverCacheId || '';

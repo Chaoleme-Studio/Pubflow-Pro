@@ -1,6 +1,6 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, NaiveDate, TimeZone, Utc};
-use entity::{lease, license, license_event};
+use entity::{lease, license, license_event, remote_job};
 use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
 use p256::pkcs8::DecodePublicKey;
 use pubflow_core::selector_protocol::{
@@ -20,8 +20,10 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::error::PubFlowError;
-use crate::shared::FromState;
 use crate::shared::plan::duration_for_plan;
+use crate::shared::{
+    FEATURE_PUBLISH, FromState, features_for_tier, require_native_publish, require_remote_publish,
+};
 
 use super::dto::{
     ActivateLeaseRequest, ActivateLeaseResponse, DeactivateLeaseRequest, DeactivateLeaseResponse,
@@ -48,25 +50,6 @@ const DEVICE_KEY_ROLLOUT_YEAR: i32 = 2026;
 const DEVICE_KEY_ROLLOUT_MONTH: u32 = 7;
 const DEVICE_KEY_ROLLOUT_DAY: u32 = 4;
 const LEGACY_UNBOUND_DEVICE_PROOF_COMPAT_DAYS: i64 = 30;
-
-/// 根据 license tier 获取功能列表
-fn features_for_tier(tier: &str) -> Vec<String> {
-    match tier {
-        "pro" => vec![
-            "publish".to_string(),
-            "batch".to_string(),
-            "selector-updates".to_string(),
-        ],
-        "enterprise" => vec![
-            "publish".to_string(),
-            "batch".to_string(),
-            "selector-updates".to_string(),
-            "priority-support".to_string(),
-            "custom-selectors".to_string(),
-        ],
-        _ => vec!["publish".to_string()],
-    }
-}
 
 /// 续租宽限期（天）- lease 过期后仍可续租的时间
 const RENEWAL_GRACE_DAYS: i64 = 7;
@@ -134,6 +117,53 @@ impl FromState for LeaseService {
 }
 
 impl LeaseService {
+    /// 验证远程发布长连接。认证沿用 Lease、安装实例和一次性设备挑战，
+    /// WebSocket 自身不接受激活码或长期独立 Secret。
+    pub async fn authenticate_remote_connection(
+        &self,
+        lease_token: &str,
+        client_install_id: &str,
+        device_proof: &DeviceProof,
+    ) -> Result<(license::Model, lease::Model), crate::AppError> {
+        let now = Utc::now();
+        self.jwt_service
+            .verify_token_custom(lease_token)
+            .map_err(|_| crate::error::AuthError::InvalidToken)?;
+        let mut lease_model = lease::Entity::find()
+            .filter(lease::Column::LeaseToken.eq(lease_token))
+            .one(&self.db)
+            .await?
+            .ok_or(PubFlowError::LeaseNotFound)?;
+        if lease_model.is_revoked || lease_model.valid_until.with_timezone(&Utc) <= now {
+            return Err(PubFlowError::LeaseNotFound.into());
+        }
+        if Self::lease_install_id(&lease_model) != client_install_id {
+            return Err(PubFlowError::DeviceNotBound.into());
+        }
+        if let Some(updated) = self
+            .ensure_device_proof_for_lease(&lease_model, Some(device_proof))
+            .await?
+        {
+            lease_model = updated;
+        }
+        let license_model = license::Entity::find_by_id(lease_model.license_id)
+            .filter(license::Column::DeletedAt.is_null())
+            .one(&self.db)
+            .await?
+            .ok_or(PubFlowError::LicenseNotFound)?;
+        if license_model.is_revoked {
+            return Err(PubFlowError::LicenseRevoked.into());
+        }
+        if license_model
+            .expires_at
+            .is_some_and(|value| value.with_timezone(&Utc) <= now)
+        {
+            return Err(PubFlowError::LicenseExpired.into());
+        }
+        require_remote_publish(&license_model.tier)?;
+        Ok((license_model, lease_model))
+    }
+
     fn request_install_id(
         client_install_id: Option<String>,
         legacy_machine_hash: Option<String>,
@@ -342,6 +372,11 @@ impl LeaseService {
                 PubFlowError::SelectorProtocol("PERMIT_REQUEST_INVALID".to_string()).into(),
             );
         }
+        if !matches!(req.source.as_str(), "manual" | "native" | "cloud") {
+            return Err(
+                PubFlowError::SelectorProtocol("PERMIT_REQUEST_INVALID".to_string()).into(),
+            );
+        }
 
         self.jwt_service
             .verify_token_custom(&req.lease_token)
@@ -374,6 +409,35 @@ impl LeaseService {
             return Err(PubFlowError::LicenseExpired.into());
         }
 
+        match req.source.as_str() {
+            "manual" => {
+                let features = features_for_tier(&license_model.tier)?;
+                if !features.iter().any(|feature| feature == FEATURE_PUBLISH) {
+                    return Err(PubFlowError::InvalidLicenseTier.into());
+                }
+            }
+            "native" => require_native_publish(&license_model.tier)?,
+            "cloud" => {
+                require_remote_publish(&license_model.tier)?;
+                let job_id = req
+                    .external_job_id
+                    .as_deref()
+                    .and_then(|value| Uuid::parse_str(value).ok())
+                    .ok_or_else(|| {
+                        PubFlowError::SelectorProtocol("PERMIT_REQUEST_INVALID".to_string())
+                    })?;
+                let job = remote_job::Entity::find_by_id(job_id)
+                    .filter(remote_job::Column::LicenseId.eq(license_model.id))
+                    .one(&self.db)
+                    .await?
+                    .ok_or(PubFlowError::RemoteJobNotFound)?;
+                if job.claimed_install_id.as_deref() != Some(client_install_id.as_str()) {
+                    return Err(PubFlowError::DeviceNotBound.into());
+                }
+            }
+            _ => unreachable!(),
+        }
+
         let proof = req.device_proof.as_ref().ok_or_else(|| {
             PubFlowError::SelectorProtocol("DEVICE_CHALLENGE_REQUIRED".to_string())
         })?;
@@ -393,6 +457,8 @@ impl LeaseService {
             client_install_id,
             device_key_id,
             operation: req.operation,
+            source: req.source,
+            external_job_id: req.external_job_id,
             task_hash: req.task_hash,
             key_version: self.jwt_service.active_key_version(),
         };
@@ -953,7 +1019,7 @@ impl LeaseService {
         // 4. 生成 lease
         let valid_from = now;
         let valid_until = compute_lease_valid_until(now, license_expires_at);
-        let features = features_for_tier(&license_model.tier);
+        let features = features_for_tier(&license_model.tier)?;
         let tier = license_model.tier.clone();
         let min_ext_version = req
             .extension_version
@@ -1317,10 +1383,12 @@ impl LeaseService {
         }
 
         // 6. 更新 lease 的更新时间
-        let features: Vec<String> = serde_json::from_str(&lease_model.features).unwrap_or_default();
+        let tier = license_model.tier.clone();
+        let features = features_for_tier(&tier)?;
         let lease_type = lease_model.lease_type.clone();
-        let tier = lease_model.tier.clone();
         let mut active_lease: lease::ActiveModel = lease_model.into();
+        active_lease.tier = Set(tier.clone());
+        active_lease.features = Set(serde_json::to_string(&features)?);
         active_lease.updated_at = Set(now.into());
         let updated_lease = active_lease.update(&self.db).await?;
 
@@ -1427,7 +1495,8 @@ impl LeaseService {
         // 5. 生成新的 lease
         let new_valid_from = now;
         let new_valid_until = compute_lease_valid_until(now, license_expires_at);
-        let features: Vec<String> = serde_json::from_str(&lease_model.features).unwrap_or_default();
+        let tier = license_model.tier.clone();
+        let features = features_for_tier(&tier)?;
 
         let lease_claims = LeaseClaims {
             lease_id: lease_model.id.to_string(),
@@ -1435,7 +1504,7 @@ impl LeaseService {
             client_install_id: client_install_id.clone(),
             machine_hash: None,
             lease_type: lease_model.lease_type.clone(),
-            tier: lease_model.tier.clone(),
+            tier: tier.clone(),
             features: features.clone(),
             valid_from: new_valid_from.timestamp(),
             valid_until: new_valid_until.timestamp(),
@@ -1452,6 +1521,8 @@ impl LeaseService {
         // 6. 更新 lease 记录
         let mut active_lease: lease::ActiveModel = lease_model.into();
         active_lease.lease_token = Set(new_lease_token.clone());
+        active_lease.tier = Set(tier.clone());
+        active_lease.features = Set(serde_json::to_string(&features)?);
         active_lease.valid_from = Set(new_valid_from.into());
         active_lease.valid_until = Set(new_valid_until.into());
         active_lease.updated_at = Set(now.into());
@@ -1472,6 +1543,8 @@ impl LeaseService {
 
         Ok(RenewLeaseResponse {
             lease_token: new_lease_token,
+            tier,
+            features,
             valid_until: new_valid_until,
             license_expires_at,
             server_time: now,
@@ -1824,6 +1897,8 @@ struct PermitClaims {
     pub client_install_id: String,
     pub device_key_id: String,
     pub operation: String,
+    pub source: String,
+    pub external_job_id: Option<String>,
     pub task_hash: String,
     pub key_version: i32,
 }
@@ -2152,6 +2227,8 @@ mod tests {
             activated_at: Set(None),
             expires_at: Set(None),
             is_revoked: Set(false),
+            remote_daily_job_limit: Set(None),
+            remote_daily_byte_limit: Set(None),
             deleted_at: Set(None),
             created_at: Set(now.into()),
             updated_at: Set(now.into()),
@@ -2250,6 +2327,8 @@ mod tests {
                 client_install_id: Some(client_install_id.clone()),
                 machine_hash: None,
                 operation: "start_distribution".to_string(),
+                source: "manual".to_string(),
+                external_job_id: None,
                 task_hash: "sha256:test-task".to_string(),
                 device_proof: None,
             })
@@ -2272,6 +2351,8 @@ mod tests {
                 client_install_id: Some(client_install_id),
                 machine_hash: None,
                 operation: "start_distribution".to_string(),
+                source: "manual".to_string(),
+                external_job_id: None,
                 task_hash: "sha256:test-task".to_string(),
                 device_proof: Some(permit_proof),
             })
@@ -2306,6 +2387,8 @@ mod tests {
             activated_at: Set(None),
             expires_at: Set(None),
             is_revoked: Set(false),
+            remote_daily_job_limit: Set(None),
+            remote_daily_byte_limit: Set(None),
             deleted_at: Set(None),
             created_at: Set(now.into()),
             updated_at: Set(now.into()),
@@ -2456,6 +2539,8 @@ mod tests {
             activated_at: Set(None),
             expires_at: Set(None),
             is_revoked: Set(false),
+            remote_daily_job_limit: Set(None),
+            remote_daily_byte_limit: Set(None),
             deleted_at: Set(None),
             created_at: Set(now.into()),
             updated_at: Set(now.into()),
@@ -2630,6 +2715,8 @@ mod tests {
             activated_at: Set(Some(now.into())),
             expires_at: Set(Some((now + Duration::days(365)).into())),
             is_revoked: Set(false),
+            remote_daily_job_limit: Set(None),
+            remote_daily_byte_limit: Set(None),
             deleted_at: Set(None),
             created_at: Set(now.into()),
             updated_at: Set(now.into()),

@@ -710,6 +710,8 @@ mod tests {
             activated_at: Set(Some(now.into())),
             expires_at: Set(Some((now + chrono::Duration::days(30)).into())),
             is_revoked: Set(false),
+            remote_daily_job_limit: Set(None),
+            remote_daily_byte_limit: Set(None),
             deleted_at: Set(None),
             created_at: Set(now.into()),
             updated_at: Set(now.into()),

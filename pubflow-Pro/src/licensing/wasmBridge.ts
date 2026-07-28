@@ -22,6 +22,9 @@ export interface PubFlowWasmBridge {
   ): string;
   pfsp_decode_selector_response(responseBase64: string, responseKeyHex: string): string;
   pfsp_decrypt_selector_json(encryptedJson: string, activationCode: string): string;
+  pfrp_build_auth(serverPublicKeyHex: string, authJson: string, serverTimeMs: bigint): string;
+  pfrp_encode_message(payloadJson: string, keyHex: string, sequence: bigint): string;
+  pfrp_decode_message(frameBase64: string, keyHex: string, expectedSequence: bigint): string;
 }
 
 declare global {
@@ -67,6 +70,9 @@ function assertWasmBridge(value: Partial<PubFlowWasmBridge>): asserts value is P
     'pfsp_build_selector_request',
     'pfsp_decode_selector_response',
     'pfsp_decrypt_selector_json',
+    'pfrp_build_auth',
+    'pfrp_encode_message',
+    'pfrp_decode_message',
   ];
   const missing = requiredFunctions.filter((name) => typeof value[name] !== 'function');
   if (missing.length) {

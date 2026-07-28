@@ -27,9 +27,7 @@ import {
   defaultWorkspaceSettings,
   importProjectAsset,
   loadProjectAssetFiles,
-  videoRecordFromDraft,
 } from '../../src/storage/workspaceStorage';
-import { saveVideos } from '../../src/storage/libraryStorage';
 import type {
   AIProviderSettings,
   DistributionTask,
@@ -99,7 +97,12 @@ const {
   fetchAIModels: fetchAIModelsInternal,
 } = useSettingsAI(aiSettings);
 const topicCount = computed(() => parseTopics(draft.topicsText).length);
-const canStart = computed(() => draft.selectedPlatforms.length > 0 && hasContent(draft));
+const canStart = computed(() => (
+  draft.selectedPlatforms.length > 0
+  && hasContent(draft)
+  && (uploadTab.value !== 'video' || Boolean(draft.videoCacheId))
+  && (uploadTab.value !== 'image' || Boolean(draft.imageCacheIds?.length))
+));
 const selectedCampaignIds = computed(() =>
   Array.isArray(draft.selectedCampaignIds) ? draft.selectedCampaignIds : [],
 );
@@ -395,19 +398,8 @@ async function replicateVideo(video: VideoRecord) {
   notice.value = '正在复刻项目发布信息…';
   try {
     const restored = await replicateDraftFromVideo(video);
-    if (!restored || !draft.projectId) return;
-
-    const existingIndex = videos.value.findIndex((item) => item.projectId === draft.projectId);
-    const existing = existingIndex >= 0 ? videos.value[existingIndex] : undefined;
-    const replica = videoRecordFromDraft(draft, existing, { resetPlatformStatuses: true });
-    videos.value = existingIndex >= 0
-      ? [...videos.value.slice(0, existingIndex), replica, ...videos.value.slice(existingIndex + 1)]
-      : [replica, ...videos.value].slice(0, 100);
-    await saveVideos(videos.value);
-    await preloadVideoCovers();
-    notice.value = existing
-      ? '已用当前视频的发布信息覆盖复刻草稿，请重新选择素材。'
-      : '已创建仅包含发布信息的复刻草稿，请重新选择素材。';
+    if (!restored) return;
+    notice.value = '已复刻发布信息并保存为草稿，请重新选择素材。';
   } catch (error) {
     notice.value = error instanceof Error ? error.message : '复刻项目失败';
   } finally {
@@ -645,6 +637,7 @@ onUnmounted(() => {
             :selected-campaign-ids="selectedCampaignIds"
             :selected-campaigns="selectedCampaigns"
             :campaign-type-text="campaignTypeText"
+            :auto-submit="globalSettings.autoSubmit"
             :save-image-file="saveArticleImage"
             :load-image-url="loadArticleImageUrl"
             @update:upload-tab="setUploadTab"
@@ -662,6 +655,7 @@ onUnmounted(() => {
             @toggle-platform="togglePlatform"
             @toggle-campaign="toggleCampaign"
             @open-campaign="openCampaign"
+            @update:auto-submit="globalSettings.autoSubmit = $event"
           />
 
           <VideosView

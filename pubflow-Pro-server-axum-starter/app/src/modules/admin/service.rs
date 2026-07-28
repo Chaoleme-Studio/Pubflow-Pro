@@ -13,8 +13,8 @@ use sea_orm::{
 use uuid::Uuid;
 
 use crate::error::PubFlowError;
-use crate::shared::FromState;
 use crate::shared::plan::{device_migration_limit_for_plan, new_activation_code, normalize_plan};
+use crate::shared::{FromState, normalize_license_tier};
 use crate::{AppState, ValidationError};
 
 use super::dto::{
@@ -97,6 +97,7 @@ impl AdminService {
         audit: AdminAuditContext,
     ) -> Result<GenerateLicenseResponse, crate::AppError> {
         let plan = normalize_plan(&req.plan)?;
+        let tier = normalize_license_tier(&req.tier)?;
         let device_migration_limit = device_migration_limit_for_plan(plan)?;
         let quantity = req.quantity.unwrap_or(1).clamp(1, 100);
         let max_devices = req.max_devices.unwrap_or(1).clamp(1, 20);
@@ -111,6 +112,7 @@ impl AdminService {
             id: Set(Uuid::new_v4()),
             batch_name: Set(batch_name),
             sales_channel: Set(sales_channel.clone()),
+            tier: Set(tier.to_string()),
             plan: Set(plan.to_string()),
             quantity: Set(quantity as i32),
             max_devices: Set(max_devices),
@@ -126,11 +128,13 @@ impl AdminService {
                 id: Set(Uuid::new_v4()),
                 user_id: Set(None),
                 activation_code: Set(new_activation_code()),
-                tier: Set("pro".to_string()),
+                tier: Set(tier.to_string()),
                 plan: Set(plan.to_string()),
                 source_channel: Set(sales_channel.clone()),
                 batch_id: Set(Some(batch.id)),
                 max_devices: Set(max_devices),
+                remote_daily_job_limit: Set(None),
+                remote_daily_byte_limit: Set(None),
                 device_migration_limit: Set(device_migration_limit),
                 device_migration_count: Set(0),
                 last_migrated_at: Set(None),
@@ -159,7 +163,7 @@ impl AdminService {
             "generate_licenses",
             "success",
             Some(format!(
-                "plan:{plan}:quantity:{quantity}:channel:{sales_channel}:max_devices:{max_devices}:migration_limit:{device_migration_limit}"
+                "tier:{tier}:plan:{plan}:quantity:{quantity}:channel:{sales_channel}:max_devices:{max_devices}:migration_limit:{device_migration_limit}"
             )),
             None,
             &audit,
@@ -461,6 +465,7 @@ impl AdminService {
 
         for (index, plan) in req.plans.into_iter().enumerate() {
             let code = normalize_plan(&plan.id)?;
+            let tier = normalize_license_tier(&plan.tier)?;
             if plan.original_amount_cents <= 0 {
                 return Err(ValidationError::custom("套餐原价必须大于 0").into());
             }
@@ -472,6 +477,7 @@ impl AdminService {
             let existing = product_catalog::Entity::find()
                 .filter(product_catalog::Column::Kind.eq("plan"))
                 .filter(product_catalog::Column::Code.eq(code))
+                .filter(product_catalog::Column::Tier.eq(tier))
                 .one(&txn)
                 .await?;
             let mut active = existing
@@ -480,6 +486,7 @@ impl AdminService {
                     id: Set(Uuid::new_v4()),
                     kind: Set("plan".to_string()),
                     code: Set(code.to_string()),
+                    tier: Set(tier.to_string()),
                     created_at: Set(now.into()),
                     ..Default::default()
                 });
@@ -514,6 +521,7 @@ impl AdminService {
             let existing = product_catalog::Entity::find()
                 .filter(product_catalog::Column::Kind.eq("download"))
                 .filter(product_catalog::Column::Code.eq(&code))
+                .filter(product_catalog::Column::Tier.eq("basic"))
                 .one(&txn)
                 .await?;
             let mut active = existing
@@ -522,6 +530,7 @@ impl AdminService {
                     id: Set(Uuid::new_v4()),
                     kind: Set("download".to_string()),
                     code: Set(code.clone()),
+                    tier: Set("basic".to_string()),
                     created_at: Set(now.into()),
                     ..Default::default()
                 });
@@ -750,6 +759,8 @@ impl AdminService {
             source_channel: Set(old.source_channel.clone()),
             batch_id: Set(old.batch_id),
             max_devices: Set(old.max_devices),
+            remote_daily_job_limit: Set(old.remote_daily_job_limit),
+            remote_daily_byte_limit: Set(old.remote_daily_byte_limit),
             device_migration_limit: Set(old.device_migration_limit),
             device_migration_count: Set(old.device_migration_count),
             last_migrated_at: Set(old.last_migrated_at),
@@ -1285,6 +1296,9 @@ impl AdminService {
         if let Some(plan) = trim_opt(&query.plan) {
             stmt = stmt.filter(order::Column::Plan.eq(plan));
         }
+        if let Some(tier) = trim_opt(&query.tier) {
+            stmt = stmt.filter(order::Column::Tier.eq(tier));
+        }
         if let Some(status) = trim_opt(&query.status) {
             stmt = stmt.filter(order::Column::Status.eq(status));
         }
@@ -1340,6 +1354,7 @@ impl AdminService {
             items.push(OrderOperationItem {
                 id: row.id.to_string(),
                 order_no: row.order_no,
+                tier: row.tier,
                 plan: row.plan,
                 channel: row.channel,
                 status: row.status,
@@ -1432,6 +1447,7 @@ fn admin_product_catalog_from_rows(rows: Vec<product_catalog::Model>) -> AdminPr
         .filter(|item| item.kind == "plan")
         .map(|item| AdminPlanConfig {
             id: item.code.clone(),
+            tier: item.tier.clone(),
             name: item.name.clone(),
             unit: item.unit.clone(),
             note: item.note.clone(),
@@ -1451,7 +1467,7 @@ fn admin_product_catalog_from_rows(rows: Vec<product_catalog::Model>) -> AdminPr
         .collect();
     let downloads = rows
         .into_iter()
-        .filter(|item| item.kind == "download" && is_extension_download_config(item))
+        .filter(|item| item.kind == "download" && is_public_download_config(item))
         .map(|item| AdminDownloadConfig {
             code: item.code,
             platform: item.platform.unwrap_or_default(),
@@ -1785,14 +1801,14 @@ fn normalize_package_url(base_url: &str, name: &str) -> String {
     }
 }
 
-fn is_extension_download_config(item: &product_catalog::Model) -> bool {
+fn is_public_download_config(item: &product_catalog::Model) -> bool {
     item.platform.as_deref() == Some("extension")
         || item.code == "zip"
         || item.code == "crx"
         || item
             .file_name
             .as_deref()
-            .is_some_and(|name| name.ends_with(".zip") || name.ends_with(".crx"))
+            .is_some_and(|name| name.starts_with("pubflow-pro-native-"))
 }
 
 fn cents_to_yuan(amount_cents: i32) -> String {

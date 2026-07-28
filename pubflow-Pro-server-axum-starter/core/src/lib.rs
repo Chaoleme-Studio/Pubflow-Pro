@@ -13,6 +13,7 @@
 pub mod crypto;
 pub mod license;
 pub mod machine;
+pub mod remote_protocol;
 pub mod selector;
 pub mod selector_protocol;
 pub mod types;

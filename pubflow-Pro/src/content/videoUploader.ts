@@ -33,11 +33,17 @@ const MODAL_CONTAINER_SELECTOR = '[class*="modal"], [class*="Modal"], [class*="d
 /** 如果存在视频缓存，则自动将视频上传到平台发布页。 */
 export async function uploadVideoIfAvailable(config: PlatformConfig, content: ContentData) {
   if (!content.videoCacheId || !config.upload) {
+    if ((content.contentType || 'video') === 'video') {
+      throw new Error(`${config.name}视频任务缺少可上传的视频缓存，已停止本平台流程。`);
+    }
     return '未检测到可自动上传的视频缓存，跳过上传。';
   }
 
   const file = await loadVideoForTransfer(content.videoCacheId);
   if (!file) {
+    if ((content.contentType || 'video') === 'video') {
+      throw new Error(`${config.name}视频缓存不存在或已失效，已停止本平台流程。`);
+    }
     return '视频缓存不存在，跳过自动上传。';
   }
 

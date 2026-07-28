@@ -49,6 +49,7 @@ const props = defineProps<{
     官方链接: string;
   }>;
   campaignTypeText: (type: string) => string;
+  autoSubmit: boolean;
   saveImageFile?: (file: File, fileName: string) => Promise<string>;
   loadImageUrl?: (relativePath: string) => Promise<string>;
 }>();
@@ -69,6 +70,7 @@ const emit = defineEmits<{
   togglePlatform: [platformId: PlatformId];
   toggleCampaign: [campaignId: string];
   openCampaign: [url: string];
+  'update:autoSubmit': [value: boolean];
 }>();
 
 const visibilityOptions: Array<{ value: Visibility; label: string; icon: string }> = [
@@ -375,6 +377,22 @@ function onPlatformSettingChange(platformId: PlatformId, key: string, value: unk
               />
               <span v-else class="text-xs text-slate-400">立即发布</span>
             </div>
+          </div>
+
+          <div class="flex items-center justify-between gap-4 border-t border-slate-100 pt-3">
+            <div>
+              <div class="text-sm font-bold text-slate-700">直接发布</div>
+              <div class="mt-0.5 text-[11px] text-slate-400">填充完成后点击平台最终发布按钮</div>
+            </div>
+            <label class="relative inline-flex shrink-0 cursor-pointer items-center">
+              <input
+                class="peer sr-only"
+                type="checkbox"
+                :checked="autoSubmit"
+                @change="emit('update:autoSubmit', ($event.target as HTMLInputElement).checked)"
+              />
+              <div class="h-5 w-9 rounded-full bg-slate-200 after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:bg-white after:transition-all peer-checked:bg-rose-500 peer-checked:after:translate-x-full"></div>
+            </label>
           </div>
 
           <div class="grid gap-1.5">

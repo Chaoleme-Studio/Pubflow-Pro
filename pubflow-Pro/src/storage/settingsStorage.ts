@@ -39,6 +39,7 @@ export const defaultLicensingSettings: LicensingSettings = {
   clientInstallId: '',
   machineHash: '',
   leaseToken: '',
+  features: [],
   status: 'unconfigured',
 };
 

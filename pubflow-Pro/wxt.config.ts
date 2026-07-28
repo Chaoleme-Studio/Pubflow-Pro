@@ -20,8 +20,12 @@ const LOCAL_CONFIG = deriveLocalConfig({
   ...readLocalConfig(resolve(WORKSPACE_DIR, `.env.${ENV_NAME}`)),
   ...process.env,
 });
-const DEV_WORKSPACE_PATH = normalizeLocalPath(LOCAL_CONFIG.PUBFLOW_DEV_WORKSPACE_PATH) || '';
+const DEV_WORKSPACE_PATH = normalizeLocalPath(
+  LOCAL_CONFIG.PUBFLOW_DEV_WORKSPACE_PATH || LOCAL_CONFIG.PUBFLOW_WORKSPACE,
+) || '';
 const DEFAULT_TOPIC_INTERVAL_MS = requireIntegerConfig(LOCAL_CONFIG, 'PUBFLOW_TOPIC_INTERVAL_MS', 100, 3000);
+const AGENT_PORT = optionalIntegerConfig(LOCAL_CONFIG, 'PUBFLOW_AGENT_PORT', 5190, 1, 65_535);
+const DEFAULT_AGENT_WS_URL = `ws://127.0.0.1:${AGENT_PORT}/v1/extension/ws`;
 const CHROMIUM_PORT = Number(LOCAL_CONFIG.PUBFLOW_CHROMIUM_PORT?.trim() || '9222') || 9222;
 const CHROMIUM_PROFILE = normalizeLocalPath(LOCAL_CONFIG.PUBFLOW_CHROMIUM_PROFILE);
 const MANUAL_BROWSER = parseBooleanEnv(LOCAL_CONFIG.PUBFLOW_MANUAL_BROWSER);
@@ -73,6 +77,7 @@ export default defineConfig({
       // 仅开发环境使用，用于在设置页展示预设工作区路径。
       __PUBFLOW_DEV_WORKSPACE_PATH__: JSON.stringify(DEV_WORKSPACE_PATH),
       __PUBFLOW_DEFAULT_TOPIC_INTERVAL_MS__: JSON.stringify(DEFAULT_TOPIC_INTERVAL_MS),
+      __PUBFLOW_DEFAULT_AGENT_WS_URL__: JSON.stringify(DEFAULT_AGENT_WS_URL),
       __PUBFLOW_DEFAULT_LICENSE_API_BASE_URL__: JSON.stringify(DEFAULT_LICENSE_API_BASE_URL),
       __PUBFLOW_OFFICIAL_SITE_URL__: JSON.stringify(OFFICIAL_SITE_URL),
       __PUBFLOW_PROTOCOL_PUBLIC_KEY__: JSON.stringify(PROTOCOL_PUBLIC_KEY),
@@ -103,7 +108,8 @@ export default defineConfig({
     short_name: 'PubFlow',
     description: '打开平台发布页后先检测阻挡，由用户确认后按拟真人节奏填充标题、描述和话题。',
     version: PACKAGE_VERSION,
-    permissions: ['storage', 'unlimitedStorage', 'tabs', 'activeTab', 'sidePanel', 'scripting', 'debugger', 'notifications'],
+    minimum_chrome_version: '116',
+    permissions: ['storage', 'unlimitedStorage', 'tabs', 'activeTab', 'sidePanel', 'scripting', 'debugger', 'notifications', 'alarms'],
     // 平台页面注入 + AI 接口访问都依赖这里的 host 权限。
     host_permissions: [
       ...PLATFORM_MATCH_PATTERNS,
@@ -180,6 +186,22 @@ function requireIntegerConfig(
   const rawValue = config[key]?.trim();
   const value = Number(rawValue);
   if (!rawValue || !Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`${key} must be an integer between ${min} and ${max}`);
+  }
+  return value;
+}
+
+function optionalIntegerConfig(
+  config: Record<string, string>,
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+) {
+  const rawValue = config[key]?.trim();
+  if (!rawValue) return fallback;
+  const value = Number(rawValue);
+  if (!Number.isInteger(value) || value < min || value > max) {
     throw new Error(`${key} must be an integer between ${min} and ${max}`);
   }
   return value;

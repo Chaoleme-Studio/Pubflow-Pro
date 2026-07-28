@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::error::PubFlowError;
 use crate::product::service::ProductService;
 use crate::shared::FromState;
+use crate::shared::normalize_license_tier;
 use crate::shared::plan::{device_migration_limit_for_plan, new_activation_code, normalize_plan};
 use crate::{AppState, ValidationError};
 
@@ -46,15 +47,17 @@ impl PurchaseService {
         req: CreateOrderRequest,
     ) -> Result<CreateOrderResponse, crate::AppError> {
         let plan = normalize_plan(&req.plan)?;
+        let tier = normalize_license_tier(&req.tier)?;
         let channel = normalize_channel(&req.channel)?;
         let amount_cents = ProductService::new(self.db.clone())
-            .plan_amount_cents(plan)
+            .plan_amount_cents(plan, tier)
             .await?;
         let order_no = new_order_no();
 
         let inserted = order::ActiveModel {
             id: Set(Uuid::new_v4()),
             order_no: Set(order_no),
+            tier: Set(tier.to_string()),
             plan: Set(plan.to_string()),
             amount_cents: Set(amount_cents),
             channel: Set(channel.to_string()),
@@ -82,6 +85,7 @@ impl PurchaseService {
 
         Ok(CreateOrderResponse {
             order_no: inserted.order_no.clone(),
+            tier: inserted.tier.clone(),
             plan: inserted.plan,
             amount_cents: inserted.amount_cents,
             channel: inserted.channel.clone(),
@@ -180,11 +184,13 @@ impl PurchaseService {
             id: Set(license_id),
             user_id: Set(None),
             activation_code: Set(activation_code.clone()),
-            tier: Set("pro".to_string()),
+            tier: Set(confirmed_order.tier.clone()),
             plan: Set(confirmed_order.plan.clone()),
             source_channel: Set("official".to_string()),
             batch_id: Set(None),
             max_devices: Set(1),
+            remote_daily_job_limit: Set(None),
+            remote_daily_byte_limit: Set(None),
             device_migration_limit: Set(device_migration_limit),
             device_migration_count: Set(0),
             last_migrated_at: Set(None),

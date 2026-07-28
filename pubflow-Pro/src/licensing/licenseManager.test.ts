@@ -18,6 +18,8 @@ function settings(overrides: Partial<LicensingSettings> = {}): LicensingSettings
     activationCode: 'PF-REAL-CODE',
     clientInstallId: 'install-1',
     leaseToken: 'lease-1',
+    tier: 'pro',
+    features: ['publish', 'batch', 'selector-updates', 'native-publish', 'remote-publish'],
     status: 'active',
     ...overrides,
   };
@@ -30,6 +32,8 @@ function verifyResponse() {
       status: 'active',
       valid_until: '2030-01-01T00:00:00Z',
       server_time: '2026-07-12T12:00:00Z',
+      tier: 'pro',
+      features: ['publish', 'batch', 'selector-updates', 'native-publish', 'remote-publish'],
     },
   }), { status: 200, headers: { 'content-type': 'application/json' } });
 }
@@ -79,6 +83,7 @@ describe('license reload recovery', () => {
     expect(mergeStoredLicenseWithRuntimeLease(staleStored, renewed)).toMatchObject({
       leaseToken: 'lease-renewed',
       validUntil: 2000,
+      tier: 'pro',
     });
   });
 

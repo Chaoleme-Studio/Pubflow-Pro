@@ -29,6 +29,10 @@ const pageSeo: Record<string, { title: string; description: string }> = {
     title: 'PubFlow 管理后台',
     description: 'PubFlow 内部管理后台。',
   },
+  'publish-remote': {
+    title: 'PubFlow 远程发布',
+    description: '通过已授权的 PubFlow 插件提交远程发布任务。',
+  },
   'not-found-static': {
     title: '页面不存在 - PubFlow',
     description: '请返回 PubFlow 首页。',

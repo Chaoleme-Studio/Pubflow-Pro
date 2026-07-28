@@ -91,6 +91,8 @@ impl LicenseCenterService {
             source_channel: Set(old.source_channel.clone()),
             batch_id: Set(old.batch_id),
             max_devices: Set(old.max_devices),
+            remote_daily_job_limit: Set(old.remote_daily_job_limit),
+            remote_daily_byte_limit: Set(old.remote_daily_byte_limit),
             device_migration_limit: Set(old.device_migration_limit),
             device_migration_count: Set(old.device_migration_count),
             last_migrated_at: Set(old.last_migrated_at),

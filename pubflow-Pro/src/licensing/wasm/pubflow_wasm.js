@@ -149,6 +149,78 @@ export function pfap_decode_activation_response(response_base64, response_key_he
 }
 
 /**
+ * 构造 PFRP v1 认证帧，并返回本次连接的临时双向密钥。
+ * @param {string} server_public_key_hex
+ * @param {string} auth_json
+ * @param {bigint} timestamp_ms
+ * @returns {string}
+ */
+export function pfrp_build_auth(server_public_key_hex, auth_json, timestamp_ms) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(server_public_key_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(auth_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.pfrp_build_auth(ptr0, len0, ptr1, len1, timestamp_ms);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * 解码并校验一条 PFRP 消息的认证标签和严格序号。
+ * @param {string} frame_base64
+ * @param {string} key_hex
+ * @param {bigint} expected_sequence
+ * @returns {string}
+ */
+export function pfrp_decode_message(frame_base64, key_hex, expected_sequence) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(frame_base64, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(key_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.pfrp_decode_message(ptr0, len0, ptr1, len1, expected_sequence);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * 使用 PFRP 临时方向密钥编码一条严格有序的消息。
+ * @param {string} payload_json
+ * @param {string} key_hex
+ * @param {bigint} sequence
+ * @returns {string}
+ */
+export function pfrp_encode_message(payload_json, key_hex, sequence) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(payload_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(key_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.pfrp_encode_message(ptr0, len0, ptr1, len1, sequence);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
  * 计算激活码哈希，用于 PFSP 请求，不直接传输激活码。
  * @param {string} activation_code
  * @returns {string}

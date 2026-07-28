@@ -50,6 +50,36 @@ pub enum PubFlowError {
     #[error("请求过于频繁，请稍后重试")]
     RateLimitExceeded,
 
+    #[error("今日远程发布额度已用完")]
+    RemoteQuotaExceeded,
+
+    #[error("远程发布任务不存在")]
+    RemoteJobNotFound,
+
+    #[error("远程发布素材不存在")]
+    RemoteAssetNotFound,
+
+    #[error("远程发布任务状态不允许当前操作")]
+    InvalidRemoteJobState,
+
+    #[error("发布插件未连接，请确认浏览器和插件已启动")]
+    RemoteExtensionOffline,
+
+    #[error("发布插件通道测试超时，请检查插件连接")]
+    RemoteExtensionTimeout,
+
+    #[error("当前授权不包含 Native 本地发布")]
+    NativePublishNotIncluded,
+
+    #[error("当前授权不包含云端远程发布")]
+    RemotePublishNotIncluded,
+
+    #[error("授权层级无效")]
+    InvalidLicenseTier,
+
+    #[error("插件版本过低，请更新后重试")]
+    ExtensionUpgradeRequired,
+
     #[error("Selector 协议错误: {0}")]
     SelectorProtocol(String),
 
@@ -107,6 +137,43 @@ impl IntoResponse for PubFlowError {
                     ),
                 )
             }
+            Self::RemoteQuotaExceeded => {
+                ApiError::new(StatusCode::TOO_MANY_REQUESTS, self.to_string()).with_detail(
+                    ErrorDetail::with_message(
+                        crate::response::Domain::RATE_LIMIT,
+                        Reason::RateLimitExceeded,
+                        "REMOTE_QUOTA_EXCEEDED",
+                    ),
+                )
+            }
+            Self::RemoteJobNotFound | Self::RemoteAssetNotFound => {
+                ApiError::new(StatusCode::NOT_FOUND, self.to_string())
+                    .with_detail(ErrorDetail::new(DOMAIN, Reason::NotFound))
+            }
+            Self::InvalidRemoteJobState => ApiError::new(StatusCode::CONFLICT, self.to_string())
+                .with_detail(ErrorDetail::new(DOMAIN, Reason::Conflict)),
+            Self::RemoteExtensionOffline => {
+                ApiError::new(StatusCode::SERVICE_UNAVAILABLE, self.to_string()).with_detail(
+                    ErrorDetail::with_message(
+                        DOMAIN,
+                        Reason::ServiceUnavailable,
+                        "REMOTE_EXTENSION_OFFLINE",
+                    ),
+                )
+            }
+            Self::RemoteExtensionTimeout => {
+                ApiError::new(StatusCode::GATEWAY_TIMEOUT, self.to_string()).with_detail(
+                    ErrorDetail::with_message(
+                        DOMAIN,
+                        Reason::ServiceUnavailable,
+                        "REMOTE_EXTENSION_TIMEOUT",
+                    ),
+                )
+            }
+            Self::NativePublishNotIncluded => capability_error(self, "NATIVE_PUBLISH_NOT_INCLUDED"),
+            Self::RemotePublishNotIncluded => capability_error(self, "REMOTE_PUBLISH_NOT_INCLUDED"),
+            Self::InvalidLicenseTier => capability_error(self, "INVALID_LICENSE_TIER"),
+            Self::ExtensionUpgradeRequired => capability_error(self, "EXTENSION_UPGRADE_REQUIRED"),
             Self::SelectorProtocol(ref code) => {
                 let status = match code.as_str() {
                     "PFSP_REPLAY" => StatusCode::CONFLICT,
@@ -138,6 +205,14 @@ impl IntoResponse for PubFlowError {
 
         ApiResponse::error(api_error).into_response()
     }
+}
+
+fn capability_error(error: PubFlowError, code: &'static str) -> ApiError {
+    ApiError::new(StatusCode::FORBIDDEN, error.to_string()).with_detail(ErrorDetail::with_message(
+        DOMAIN,
+        Reason::PermissionDenied,
+        code,
+    ))
 }
 
 fn selector_protocol_public_code(code: &str) -> &str {

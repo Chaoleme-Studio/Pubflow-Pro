@@ -1,15 +1,18 @@
 import type { LicensingSettings } from '../types';
+import { parseLicenseGrant } from './licenseStorage';
 import { loadPubFlowWasmBridge } from './wasmBridge';
 
 interface ActivateLeasePayload {
   lease_token?: string;
   leaseToken?: string;
-  valid_until?: number;
-  validUntil?: number;
-  license_expires_at?: number | null;
-  licenseExpiresAt?: number | null;
-  server_time?: number;
-  serverTime?: number;
+  valid_until?: string | number;
+  validUntil?: string | number;
+  license_expires_at?: string | number | null;
+  licenseExpiresAt?: string | number | null;
+  server_time?: string | number;
+  serverTime?: string | number;
+  tier?: string;
+  features?: string[];
 }
 
 interface ProtocolVersionPayload {
@@ -133,6 +136,7 @@ export async function activateLease(settings: LicensingSettings): Promise<Licens
   if (!leaseToken) {
     throw new Error('服务端未返回授权凭证。');
   }
+  const grant = parseLicenseGrant(data.tier, data.features);
 
   return {
     ...settings,
@@ -141,10 +145,20 @@ export async function activateLease(settings: LicensingSettings): Promise<Licens
     clientInstallId,
     machineHash: '',
     leaseToken,
-    validUntil: data.license_expires_at || data.licenseExpiresAt || data.valid_until || data.validUntil,
-    serverTime: data.server_time || data.serverTime,
+    ...grant,
+    validUntil: parseServerTimestamp(
+      data.license_expires_at || data.licenseExpiresAt || data.valid_until || data.validUntil,
+    ),
+    serverTime: parseServerTimestamp(data.server_time || data.serverTime),
     serverTimeCheckedAt: Math.floor(Date.now() / 1000),
   };
+}
+
+function parseServerTimestamp(value: string | number | null | undefined) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (!value) return undefined;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? Math.floor(timestamp / 1000) : undefined;
 }
 
 export async function fetchProtocolInfo(apiBaseUrl: string): Promise<ProtocolInfo> {

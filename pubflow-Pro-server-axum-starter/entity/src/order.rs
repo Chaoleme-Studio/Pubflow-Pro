@@ -8,6 +8,7 @@ pub struct Model {
     pub id: Uuid,
     #[sea_orm(unique)]
     pub order_no: String,
+    pub tier: String,
     pub plan: String,
     pub amount_cents: i32,
     pub channel: String,

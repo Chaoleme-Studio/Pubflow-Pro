@@ -5,6 +5,8 @@
 host = "0.0.0.0"
 port = 5189
 timeout = 300
+http_rate_limit_requests_per_second = 20
+http_rate_limit_burst = 100
 
 [database]
 # url 通过环境变量 DATABASE_URL 设置（必需）
@@ -39,3 +41,16 @@ allow_headers = ["Authorization", "Content-Type", "Accept", "X-Request-ID"]
 allow_credentials = false
 expose_headers = ["Content-Type", "X-Total-Count"]
 max_age = 3600
+
+[remote_publish]
+storage_path = "./data/remote-publish"
+daily_job_limit = 3
+daily_byte_limit = 104857600
+aggregate_transfer_bytes_per_second = 196608
+max_concurrent_transfers = 4
+access_ttl_seconds = 900
+refresh_ttl_seconds = 2592000
+asset_ticket_ttl_seconds = 600
+unclaimed_retention_hours = 72
+job_retention_days = 30
+secure_cookies = true

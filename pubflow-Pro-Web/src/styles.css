@@ -938,6 +938,11 @@ h2 {
   gap: 14px;
 }
 
+.tier-switch {
+  grid-template-columns: repeat(3, 1fr);
+  margin-bottom: 14px;
+}
+
 .plan-switch button {
   text-align: left;
   color: var(--text-1);
@@ -949,6 +954,18 @@ h2 {
   transition: 180ms ease;
   position: relative;
   overflow: hidden;
+}
+
+.plan-switch.tier-switch button {
+  min-height: 52px;
+  padding: 14px 18px;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .tier-switch {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .pay-methods button {
@@ -1290,7 +1307,7 @@ h2 {
 
 .download-cards {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   width: min(1180px, calc(100vw - 44px));
   margin: 0 auto;
@@ -1373,6 +1390,63 @@ h2 {
   color: var(--text-4);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.download-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.download-platform-control {
+  position: relative;
+  flex: 0 1 190px;
+  min-width: 0;
+  max-width: 190px;
+}
+
+.download-platform-select {
+  width: 100%;
+  height: 36px;
+  padding: 0 30px 0 10px;
+  appearance: none;
+  color-scheme: dark;
+  cursor: pointer;
+  border: 1px solid rgba(54, 125, 255, 0.42);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, rgba(54, 125, 255, 0.13), rgba(54, 125, 255, 0.06)), var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 13px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.download-platform-select:hover {
+  border-color: rgba(83, 148, 255, 0.75);
+  background: linear-gradient(180deg, rgba(54, 125, 255, 0.18), rgba(54, 125, 255, 0.08)), var(--surface-1);
+}
+
+.download-platform-select:focus {
+  border-color: var(--border-brand);
+  box-shadow: 0 0 0 3px rgba(54, 125, 255, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.download-platform-select option {
+  color: var(--text-1);
+  background: #171923;
+}
+
+.download-platform-chevron {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  color: #75a7ff;
+  pointer-events: none;
+  transform: translateY(-50%);
 }
 
 .download-notes-row {
@@ -2800,6 +2874,10 @@ code {
     grid-template-columns: 1fr;
   }
 
+  .download-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .license-service-panel {
     position: static;
   }
@@ -2847,6 +2925,19 @@ code {
   .stat-grid,
   .ops-field-grid {
     grid-template-columns: 1fr;
+  }
+
+  .plan-switch.tier-switch {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .download-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .download-platform-control {
+    flex: 1;
+    max-width: none;
   }
 }
 

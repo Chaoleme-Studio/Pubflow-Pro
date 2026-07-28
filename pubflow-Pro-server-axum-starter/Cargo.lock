@@ -229,7 +229,7 @@ checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
 
 [[package]]
 name = "app"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "aide",
  "alipay_sdk_rust",
@@ -246,6 +246,7 @@ dependencies = [
  "ed25519-dalek",
  "entity",
  "figment",
+ "futures-util",
  "harsh",
  "hex",
  "indexmap 2.12.0",
@@ -617,6 +618,7 @@ checksum = "021e862c184ae977658b36c4500f7feac3221ca5da43e3f25bd04ab6c79a29b5"
 dependencies = [
  "axum-core",
  "axum-macros",
+ "base64 0.22.1",
  "bytes",
  "form_urlencoded",
  "futures-util",
@@ -637,8 +639,10 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_urlencoded",
+ "sha1",
  "sync_wrapper",
  "tokio",
+ "tokio-tungstenite",
  "tower",
  "tower-layer",
  "tower-service",
@@ -1502,7 +1506,7 @@ dependencies = [
 
 [[package]]
 name = "dev-tools"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "cargo-husky",
 ]
@@ -1637,7 +1641,7 @@ dependencies = [
 
 [[package]]
 name = "entity"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "num_enum",
  "schemars 0.9.0",
@@ -2837,7 +2841,7 @@ checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
 
 [[package]]
 name = "migration"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "async-std",
  "sea-orm-migration",
@@ -3564,7 +3568,7 @@ dependencies = [
 
 [[package]]
 name = "pubflow-core"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -3584,7 +3588,7 @@ dependencies = [
 
 [[package]]
 name = "pubflow-native"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "hex",
  "pubflow-core",
@@ -3597,7 +3601,7 @@ dependencies = [
 
 [[package]]
 name = "pubflow-wasm"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "base64 0.22.1",
  "console_error_panic_hook",
@@ -5179,6 +5183,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-tungstenite"
+version = "0.26.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a9daff607c6d2bf6c16fd681ccb7eecc83e4e2cdc1ca067ffaadfca5de7f084"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite",
+]
+
+[[package]]
 name = "tokio-util"
 version = "0.7.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5463,6 +5479,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
+name = "tungstenite"
+version = "0.26.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4793cb5e56680ecbb1d843515b23b6de9a75eb04b66643e256a396d43be33c13"
+dependencies = [
+ "bytes",
+ "data-encoding",
+ "http",
+ "httparse",
+ "log",
+ "rand 0.9.2",
+ "sha1",
+ "thiserror 2.0.12",
+ "utf-8",
+]
+
+[[package]]
 name = "typeid"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5560,6 +5593,12 @@ dependencies = [
  "idna",
  "percent-encoding",
 ]
+
+[[package]]
+name = "utf-8"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
 
 [[package]]
 name = "utf8_iter"

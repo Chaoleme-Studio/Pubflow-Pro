@@ -24,7 +24,7 @@ cargo clippy --workspace --all-targets  # 代码检查
 
 ## 环境变量
 
-复制 `.env.example` 到 `.env`，关键配置：
+仓库只维护根目录 `.env.development` 和 `.env.production`，子项目不再复制 `.env`。服务端直接 `cargo run -p app` 读取开发配置，`ENV=production cargo run -p app` 读取生产配置。关键配置：
 
 | 变量 | 说明 |
 |------|------|
@@ -36,6 +36,12 @@ cargo clippy --workspace --all-targets  # 代码检查
 | `LICENSE_SIGNING_SEED_HEX` | Ed25519 签名密钥（64 位 hex） |
 | `SELECTOR_SECRET` | Selector 加密密钥 |
 | `JWT_SECRET` | JWT 签名密钥 |
+| `REMOTE_PUBLISH_DAILY_JOB_LIMIT` | 每个 License 的默认每日任务数 |
+| `REMOTE_PUBLISH_DAILY_BYTE_LIMIT` | 每个 License 的默认每日素材字节数 |
+| `REMOTE_PUBLISH_AGGREGATE_TRANSFER_BYTES_PER_SECOND` | 全进程远程素材上传+下载共享字节速率 |
+| `REMOTE_PUBLISH_MAX_CONCURRENT_TRANSFERS` | 全进程同时素材传输数 |
+| `APP_HTTP_RATE_LIMIT_REQUESTS_PER_SECOND` | 每真实客户端 IP 的普通 HTTP 平均请求数/秒 |
+| `APP_HTTP_RATE_LIMIT_BURST` | 每真实客户端 IP 的 HTTP 突发请求数 |
 
 ## 核心 API
 

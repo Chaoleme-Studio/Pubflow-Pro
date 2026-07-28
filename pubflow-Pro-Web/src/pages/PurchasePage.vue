@@ -2,11 +2,12 @@
 import { BadgeCheck, ClipboardCopy, CreditCard, ExternalLink, RefreshCw, WalletCards } from 'lucide-vue-next';
 import QRCode from 'qrcode';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { createOrder, FALLBACK_PRODUCT_CATALOG, getOrderStatus, getProductCatalog, type PayChannel, type Plan, type PlanOption } from '../api';
+import { createOrder, FALLBACK_PRODUCT_CATALOG, getOrderStatus, getProductCatalog, type LicenseTier, type PayChannel, type Plan, type PlanOption } from '../api';
 
 const RESELLER_URL = 'https://www.aidoumi.com//links/6C406BEA';
 
 const selectedPlan = ref<Plan>('monthly');
+const selectedTier = ref<LicenseTier>('basic');
 const selectedPay = ref<PayChannel>('alipay');
 const orderNo = ref('');
 const queryToken = ref('');
@@ -17,7 +18,12 @@ const fallbackPayUrl = ref('');
 const plans = ref<PlanOption[]>([]);
 const catalogLoading = ref(true);
 const catalogError = ref('');
-const activePlan = computed(() => plans.value.find((item) => item.id === selectedPlan.value) || plans.value[0]);
+const tierOrder: LicenseTier[] = ['basic', 'plus', 'pro'];
+const availableTiers = computed(() => tierOrder.filter((tier) => plans.value.some((item) => item.tier === tier)));
+const visiblePlans = computed(() => plans.value.filter((item) => item.tier === selectedTier.value));
+const activePlan = computed(() => (
+  visiblePlans.value.find((item) => item.id === selectedPlan.value) || visiblePlans.value[0]
+));
 const nowTick = ref(Date.now());
 let countdownTimer: ReturnType<typeof setInterval> | undefined;
 const activePlanOriginalPrice = computed(() => {
@@ -54,9 +60,12 @@ onMounted(async () => {
   try {
     const catalog = await getProductCatalog();
     plans.value = catalog.plans;
-    selectedPlan.value = catalog.plans.find((item) => item.id === selectedPlan.value)?.id
-      || catalog.plans.find((item) => item.id === 'monthly')?.id
-      || catalog.plans[0]?.id
+    selectedTier.value = availableTiers.value.includes(selectedTier.value)
+      ? selectedTier.value
+      : availableTiers.value[0] || 'basic';
+    selectedPlan.value = visiblePlans.value.find((item) => item.id === selectedPlan.value)?.id
+      || visiblePlans.value.find((item) => item.id === 'monthly')?.id
+      || visiblePlans.value[0]?.id
       || 'monthly';
   } catch (error) {
     plans.value = FALLBACK_PRODUCT_CATALOG.plans;
@@ -82,7 +91,7 @@ async function startPayment(channel: PayChannel) {
   payLoading.value = true;
 
   try {
-    const order = await createOrder(selectedPlan.value, channel);
+    const order = await createOrder(selectedTier.value, selectedPlan.value, channel);
     orderNo.value = order.orderNo;
     queryToken.value = order.queryToken;
     payOpened.value = true;
@@ -157,6 +166,19 @@ function formatAmount(amountCents: number) {
     maximumFractionDigits: 2,
   });
 }
+
+function selectTier(tier: LicenseTier) {
+  selectedTier.value = tier;
+  if (!visiblePlans.value.some((item) => item.id === selectedPlan.value)) {
+    selectedPlan.value = visiblePlans.value.find((item) => item.id === 'monthly')?.id
+      || visiblePlans.value[0]?.id
+      || 'monthly';
+  }
+}
+
+function tierLabel(tier: LicenseTier) {
+  return tier === 'basic' ? 'Basic' : tier === 'plus' ? 'Plus' : 'Pro';
+}
 </script>
 
 <template>
@@ -171,9 +193,20 @@ function formatAmount(amountCents: number) {
 
     <section class="checkout-layout">
       <div class="checkout-main">
+        <div class="plan-switch tier-switch" aria-label="授权版本">
+          <button
+            v-for="tier in availableTiers"
+            :key="tier"
+            type="button"
+            :class="{ active: selectedTier === tier }"
+            @click="selectTier(tier)"
+          >
+            <span>{{ tierLabel(tier) }}</span>
+          </button>
+        </div>
         <div class="plan-switch">
           <p v-if="catalogLoading" class="inline-empty">套餐配置加载中...</p>
-          <button v-for="item in plans" :key="item.id" type="button" :class="{ active: selectedPlan === item.id }" @click="selectedPlan = item.id">
+          <button v-for="item in visiblePlans" :key="`${item.tier}-${item.id}`" type="button" :class="{ active: selectedPlan === item.id }" @click="selectedPlan = item.id">
             <span>{{ item.name }}</span>
             <strong>
               <small v-if="item.originalAmountCents && item.originalAmountCents > item.amountCents" class="price-origin">¥{{ formatAmount(item.originalAmountCents) }}</small>
@@ -216,7 +249,7 @@ function formatAmount(amountCents: number) {
 
         <template v-else>
           <span>订单已创建</span>
-          <strong>{{ activePlan ? `${activePlan.name} ¥${activePlan.price}` : '' }}</strong>
+          <strong>{{ activePlan ? `${tierLabel(activePlan.tier)} · ${activePlan.name} ¥${activePlan.price}` : '' }}</strong>
           <div v-if="activePlanOriginalPrice" class="summary-line"><span>原价</span><b class="line-through">¥{{ activePlanOriginalPrice }}</b></div>
           <div v-if="activePlanSavings" class="summary-line"><span>节省</span><b>¥{{ activePlanSavings }}</b></div>
           <div v-if="discountCountdown" class="summary-line"><span>折扣</span><b>{{ discountCountdown }}</b></div>

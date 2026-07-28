@@ -39,6 +39,7 @@ export function statusText(status: string) {
   const map: Record<string, string> = {
     pending: '未发',
     filling: '进行中',
+    publishing: '发布中',
     filled: '待确认',
     published: '已发布',
     skipped: '未选择',
@@ -55,6 +56,7 @@ export function statusClass(status: string) {
     published: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
     filled: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
     filling: 'bg-amber-50 text-amber-700 ring-amber-200',
+    publishing: 'bg-rose-50 text-rose-700 ring-rose-200',
     pending: 'bg-slate-100 text-slate-600 ring-slate-200',
     skipped: 'bg-slate-100 text-slate-500 ring-slate-200',
     error: 'bg-red-50 text-red-700 ring-red-200',

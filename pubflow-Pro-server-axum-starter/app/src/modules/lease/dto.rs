@@ -49,6 +49,10 @@ pub struct IssuePermitRequest {
     #[serde(alias = "machineHash")]
     pub machine_hash: Option<String>,
     pub operation: String,
+    /// 发布任务来源：manual / native / cloud。
+    pub source: String,
+    #[serde(alias = "externalJobId")]
+    pub external_job_id: Option<String>,
     #[serde(alias = "taskHash")]
     pub task_hash: String,
     #[serde(alias = "deviceProof")]
@@ -165,6 +169,10 @@ pub struct RenewLeaseRequest {
 pub struct RenewLeaseResponse {
     /// 新的 lease token
     pub lease_token: String,
+    /// 当前授权层级。
+    pub tier: String,
+    /// 由 License 当前层级实时计算的能力。
+    pub features: Vec<String>,
     /// 新的失效时间
     pub valid_until: DateTime<Utc>,
     /// License 固定到期时间；迁移/续租不会改变。

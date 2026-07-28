@@ -1,0 +1,31 @@
+{
+  "contentType": "video",
+  "title": "示例视频标题6666666",
+  "description": "这是一条由本地脚本发起的发布任务  1631 ",
+  "topics": [
+    "PubFlow",
+    "自动发布"
+  ],
+  "campaignIds": [],
+  "platforms": [
+    "douyin",
+    "xiaohongshu",
+    "weixinChannels",
+    "bilibili",
+    "kuaishou",
+    "weibo"
+  ],
+  "scheduledAt": null,
+  "visibility": "public",
+  "originalDeclare": false,
+  "platformSettings": {},
+  "fillOptions": {
+    "topicIntervalMs": 800
+  },
+  "assets": {
+    "videoPath": "/Users/wong/Downloads/VID_20260720_234511_BiliBili.mp4",
+    "coverPath": null,
+    "imagePaths": [],
+    "musicPath": null
+  }
+}

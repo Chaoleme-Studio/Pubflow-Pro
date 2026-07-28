@@ -53,6 +53,21 @@ export function pfap_build_activation_request(server_public_key_hex: string, act
 export function pfap_decode_activation_response(response_base64: string, response_key_hex: string): string;
 
 /**
+ * 构造 PFRP v1 认证帧，并返回本次连接的临时双向密钥。
+ */
+export function pfrp_build_auth(server_public_key_hex: string, auth_json: string, timestamp_ms: bigint): string;
+
+/**
+ * 解码并校验一条 PFRP 消息的认证标签和严格序号。
+ */
+export function pfrp_decode_message(frame_base64: string, key_hex: string, expected_sequence: bigint): string;
+
+/**
+ * 使用 PFRP 临时方向密钥编码一条严格有序的消息。
+ */
+export function pfrp_encode_message(payload_json: string, key_hex: string, sequence: bigint): string;
+
+/**
  * 计算激活码哈希，用于 PFSP 请求，不直接传输激活码。
  */
 export function pfsp_activation_code_hash(activation_code: string): string;
@@ -102,6 +117,9 @@ export interface InitOutput {
     readonly init: () => void;
     readonly pfap_build_activation_request: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: bigint) => [number, number];
     readonly pfap_decode_activation_response: (a: number, b: number, c: number, d: number) => [number, number];
+    readonly pfrp_build_auth: (a: number, b: number, c: number, d: number, e: bigint) => [number, number];
+    readonly pfrp_decode_message: (a: number, b: number, c: number, d: number, e: bigint) => [number, number];
+    readonly pfrp_encode_message: (a: number, b: number, c: number, d: number, e: bigint) => [number, number];
     readonly pfsp_activation_code_hash: (a: number, b: number) => [number, number];
     readonly pfsp_build_selector_request: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: bigint) => [number, number];
     readonly pfsp_decode_selector_response: (a: number, b: number, c: number, d: number) => [number, number];
