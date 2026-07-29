@@ -254,6 +254,10 @@ async function uploadXiaohongshuCover(config: PlatformConfig, content: ContentDa
 /** 查找小红书封面上传入口元素 */
 function findXiaohongshuCoverEntry(config: PlatformConfig) {
   return (
+    findVisibleElement([
+      '.publish-page-content-cover .default.origin',
+      '.publish-page-content-cover .cover .default',
+    ]) ||
     findVisibleElement(config.fields.cover?.selectors || []) ||
     findVisibleElement([
       '.publish-page-content-cover .default.column',
@@ -273,10 +277,9 @@ async function openXiaohongshuCoverDialog(coverElement?: HTMLElement) {
   scrollIntoView(coverElement);
   await waitForIdle(300);
 
+  // 新版页面的“修改封面”子节点只在 hover 后显示，直接点击可见封面本体即可打开弹窗。
   const clickTarget =
-    coverElement.querySelector<HTMLElement>('.operator.default, .operator, .text') ||
-    coverElement.querySelector<HTMLElement>('.default.column, .default.row') ||
-    coverElement;
+    resolveVisibleXiaohongshuCoverTarget(coverElement) || coverElement;
   await clickXiaohongshuElement(clickTarget);
 
   const startedAt = Date.now();
@@ -290,6 +293,17 @@ async function openXiaohongshuCoverDialog(coverElement?: HTMLElement) {
     await waitForIdle(250);
   }
   return null;
+}
+
+function resolveVisibleXiaohongshuCoverTarget(coverElement: HTMLElement) {
+  const candidates = [
+    coverElement.matches('.default.origin, .cover .default') ? coverElement : null,
+    coverElement.querySelector<HTMLElement>('.default.origin'),
+    coverElement.querySelector<HTMLElement>('.cover .default'),
+    coverElement.querySelector<HTMLElement>('.default.column, .default.row'),
+    coverElement.querySelector<HTMLElement>('.operator.default, .operator, .text'),
+  ];
+  return candidates.find((candidate): candidate is HTMLElement => Boolean(candidate && isVisible(candidate)));
 }
 
 /** 查找封面区域可见的悬停点击目标（如"修改封面"按钮） */

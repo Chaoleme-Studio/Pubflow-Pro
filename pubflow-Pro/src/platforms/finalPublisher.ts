@@ -1,4 +1,4 @@
-import { requestFinalPublishClick, type ElementPointOffset } from '../content/cdp';
+import { prepareFinalPublishClick, requestFinalPublishClick, type ElementPointOffset } from '../content/cdp';
 import { findDeepElement, isVisible, waitForIdle } from '../content/dom';
 import type { ContentData, PlatformId } from '../types';
 
@@ -8,24 +8,41 @@ const FINAL_BUTTON_POLL_MS = 250;
 const XHS_BUTTON_WIDTH_PX = 120;
 const XHS_BUTTON_GAP_PX = 24;
 
-interface FinalButtonSpec {
+export interface FinalButtonSpec {
   selector: string;
   texts: string[];
 }
+
+const VERIFIED_FINAL_BUTTON_SPECS = {
+  xiaohongshu: {
+    selector: 'xhs-publish-btn[is-publish="true"]',
+    texts: [],
+  },
+  weixinChannels: {
+    selector: 'button.weui-desktop-btn_primary',
+    texts: ['发表'],
+  },
+  bilibili: {
+    selector: '.submit-add',
+    texts: ['立即投稿'],
+  },
+  x: {
+    selector: '[data-testid="tweetButton"]',
+    texts: ['发帖', '预排期', '安排', 'Post', 'Schedule'],
+  },
+  youtube: {
+    selector: 'ytcp-button#done-button button, #done-button > button, button#done-button',
+    texts: ['发布', '保存', '预定', 'Publish', 'Save', 'Schedule'],
+  },
+} satisfies Partial<Record<PlatformId, FinalButtonSpec>>;
 
 const FINAL_BUTTON_SPECS: Partial<Record<PlatformId, FinalButtonSpec>> = {
   douyin: {
     selector: 'button, [role="button"]',
     texts: ['发布', '立即发布', '定时发布', '发布文章'],
   },
-  weixinChannels: {
-    selector: 'button, [role="button"]',
-    texts: ['发表', '发布'],
-  },
-  bilibili: {
-    selector: '.submit-add, button, [role="button"]',
-    texts: ['立即投稿', '发布文章', '立即发布', '发布'],
-  },
+  weixinChannels: VERIFIED_FINAL_BUTTON_SPECS.weixinChannels,
+  bilibili: VERIFIED_FINAL_BUTTON_SPECS.bilibili,
   kuaishou: {
     selector: '[class*="button-primary"], button, [role="button"]',
     texts: ['发布', '立即发布'],
@@ -38,14 +55,8 @@ const FINAL_BUTTON_SPECS: Partial<Record<PlatformId, FinalButtonSpec>> = {
     selector: '.VideoUploadForm-submitButton, [class*="submitButton"], button, [role="button"]',
     texts: ['发布视频', '发布文章', '发布', '立即发布'],
   },
-  x: {
-    selector: '[data-testid="tweetButton"], [data-testid="tweetButtonInline"]',
-    texts: ['发帖', '预排期', '安排', 'Post', 'Schedule'],
-  },
-  youtube: {
-    selector: '#done-button button, ytcp-button#done-button',
-    texts: ['发布', '保存', '预定', 'Publish', 'Save', 'Schedule'],
-  },
+  x: VERIFIED_FINAL_BUTTON_SPECS.x,
+  youtube: VERIFIED_FINAL_BUTTON_SPECS.youtube,
 };
 
 /** 当前已经过真实发布页 DOM 核对、允许直接点击最终按钮的平台。 */
@@ -53,21 +64,33 @@ export function supportsDirectPublish(platformId: PlatformId) {
   return platformId === 'xiaohongshu' || platformId in FINAL_BUTTON_SPECS;
 }
 
+/** 暴露最终按钮规则，便于对已核对的平台 DOM 契约做回归测试。 */
+export function getFinalPublishButtonSpec(platformId: PlatformId) {
+  return FINAL_BUTTON_SPECS[platformId];
+}
+
+/** 后台可实时重新定位并验证可信点击的最终按钮契约。 */
+export function getVerifiedFinalPublishButtonSpec(platformId: PlatformId): FinalButtonSpec | undefined {
+  return VERIFIED_FINAL_BUTTON_SPECS[platformId as keyof typeof VERIFIED_FINAL_BUTTON_SPECS];
+}
+
 /** 填充完成后定位并请求后台可信点击平台最终发布按钮。 */
 export async function clickFinalPublishButton(platformId: PlatformId, content: ContentData): Promise<void> {
   void content;
+  await prepareFinalPublishClick(platformId);
+
   if (platformId === 'xiaohongshu') {
     await clickXiaohongshuFinalButton();
     return;
   }
 
-  const spec = FINAL_BUTTON_SPECS[platformId];
+  const spec = getFinalPublishButtonSpec(platformId);
   if (!spec) {
     throw new Error('当前平台暂不支持直接发布，请在平台页面手动确认。');
   }
 
   const button = await waitForFinalElement(spec.selector, (element) => (
-    spec.texts.includes(normalizeText(element.textContent))
+    spec.texts.includes(finalButtonLabel(element))
   ));
   if (!button) {
     throw new Error(`没有找到${platformDisplayName(platformId)}最终发布按钮。`);
@@ -128,7 +151,7 @@ async function waitForFinalElement(
   const startedAt = Date.now();
   while (Date.now() - startedAt < FINAL_BUTTON_WAIT_TIMEOUT_MS) {
     const element = findDeepElement<HTMLElement>(selector, (candidate) => (
-      candidate instanceof HTMLElement
+      isHtmlElement(candidate)
       && isVisible(candidate)
       && !isDisabled(candidate)
       && matches(candidate)
@@ -139,9 +162,14 @@ async function waitForFinalElement(
   return undefined;
 }
 
+/** iframe 元素属于子窗口 realm，不能使用顶层窗口的 instanceof HTMLElement 判断。 */
+function isHtmlElement(element: Element): element is HTMLElement {
+  return element.nodeType === 1 && typeof (element as HTMLElement).getBoundingClientRect === 'function';
+}
+
 function isDisabled(element: HTMLElement) {
   return (
-    (element instanceof HTMLButtonElement && element.disabled)
+    (element.tagName === 'BUTTON' && Boolean((element as HTMLButtonElement).disabled))
     || element.getAttribute('aria-disabled') === 'true'
     || element.hasAttribute('disabled')
     || /(?:^|\s)(?:is-)?disabled(?:\s|$)/i.test(element.className)
@@ -150,6 +178,10 @@ function isDisabled(element: HTMLElement) {
 
 function normalizeText(value: string | null | undefined) {
   return (value || '').replace(/\s+/g, ' ').trim();
+}
+
+function finalButtonLabel(element: HTMLElement) {
+  return normalizeText(element.getAttribute('aria-label') || element.textContent);
 }
 
 function platformDisplayName(platformId: PlatformId) {

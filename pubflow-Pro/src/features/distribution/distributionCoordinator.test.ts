@@ -88,6 +88,39 @@ describe('distributionCoordinator direct publish', () => {
     expect(openPlatform).not.toHaveBeenCalled();
   });
 
+  it('在授权和打开页面前过滤当前内容类型不支持的平台', async () => {
+    let currentTask: DistributionTask | null = null;
+    const authorize = vi.fn(async () => ({
+      permitId: 'permit-article',
+      expiresAt: Date.now() + 60_000,
+      taskHash: 'hash-article',
+    }));
+    const openPlatform = vi.fn(async () => undefined);
+
+    const task = await startDistribution({
+      content: content({
+        contentType: 'article',
+        videoCacheId: undefined,
+        videoFileName: undefined,
+        articleContent: '文章正文',
+      }),
+      platforms: ['x', 'bilibili', 'youtube', 'bilibili'],
+    }, {
+      getCurrentTask: () => currentTask,
+      authorize,
+      setCurrentTask: (next) => {
+        currentTask = next;
+      },
+      persist: vi.fn(async () => undefined),
+      openPlatform,
+      clearTimers: vi.fn(),
+    });
+
+    expect(task.platforms.map((platform) => platform.platformId)).toEqual(['bilibili']);
+    expect(authorize).toHaveBeenCalledWith(task.content, ['bilibili'], undefined);
+    expect(openPlatform).toHaveBeenCalledWith('bilibili');
+  });
+
   it('结束全部会终止未完成平台并返回任务创建的标签页', () => {
     const task: DistributionTask = {
       id: 'task-stop',

@@ -114,9 +114,9 @@ assertIncludes(
 );
 
 assertMatches(
-  'entrypoints/background.ts',
-  /const supportedPlatforms = message\.payload\.platforms\.filter\(\(platformId\) =>[\s\S]*?supportsContentType\((?:PLATFORM_CONFIGS\[platformId\]|getPlatformConfig\(platformId\)), message\.payload\.content\.contentType \|\| 'video'\)/,
-  '后台 START_DISTRIBUTION 必须二次过滤当前内容类型支持的平台。',
+  'src/features/distribution/distributionCoordinator.ts',
+  /const contentType = request\.content\.contentType \|\| 'video';[\s\S]*?const supportedPlatforms = \[\.\.\.new Set\(request\.platforms\)\]\.filter\(\(platformId\) =>[\s\S]*?supportsContentType\(getPlatformConfig\(platformId\), contentType\)/,
+  '统一分发协调器必须二次过滤当前内容类型支持的平台。',
 );
 
 assertMatches(
@@ -207,6 +207,30 @@ assertMatches(
   'entrypoints/background.ts',
   /if \(message\.type === 'FILL_ERROR'\) \{[\s\S]*?await openNextPending\(\);/,
   '平台 FILL_ERROR 后必须继续打开下一个 pending 平台。',
+);
+
+assertMatches(
+  'entrypoints/background.ts',
+  /if \(message\.type === 'FINAL_PUBLISH_CLICK'\) \{[\s\S]*?catch \(error\) \{[\s\S]*?status: 'error'[\s\S]*?await openNextPending\(\);/,
+  '最终发布按钮点击失败后必须记录当前平台失败并继续下一个 pending 平台。',
+);
+
+assertMatches(
+  'entrypoints/background.ts',
+  /const visibleTop = Math\.max\(rect\.top, viewportTop\);[\s\S]*?const visibleBottom = Math\.min\(rect\.bottom, viewportBottom\);[\s\S]*?const localY = Math\.min\(Math\.max\(preferredY, visibleTop \+ 1\), visibleBottom - 1\);/,
+  '最终发布点击点必须取按钮和可视视口的交集，不能因按钮中心越界而拒绝点击可见部分。',
+);
+
+assertMatches(
+  'entrypoints/background.ts',
+  /if \(mode === 'verify'\) \{[\s\S]*?originalTarget\[probeKey\] === true[\s\S]*?const matches = \(element\) =>/,
+  '最终发布事后验证必须先读取原目标事件标记，不能因按钮点击后改文案或重渲染而假失败。',
+);
+
+assertMatches(
+  'entrypoints/background.ts',
+  /const verificationEvent = platformId === 'xiaohongshu'[\s\S]*?activation === 'keyboard' \? 'keydown' : 'click'/,
+  '最终发布必须按激活方式验证可信输入，小红书 closed Shadow DOM 不得依赖宿主 click 冒泡。',
 );
 
 assertMatches(
@@ -559,7 +583,7 @@ assertIncludes(
 
 assertMatches(
   'src/platforms/youtube/content.ts',
-  /selectYouTubeVisibilityContainer\(visibilityRoot, 'first'\);[\s\S]*?selectYouTubeRadio\('PUBLIC', '公开范围'\);[\s\S]*?waitForYouTubeVisibilitySelectionStable\(visibilityRoot, 'PUBLIC'\);[\s\S]*?selectYouTubeVisibilityContainer\(visibilityRoot, 'second'\);[\s\S]*?fillYouTubeSchedule\(visibilityRoot, content\.scheduledAt\);/,
+  /selectYouTubeVisibilityContainer\(visibilityRoot, 'first'\);[\s\S]*?selectYouTubeRadio\('PUBLIC', '公开范围'\);[\s\S]*?waitForYouTubeVisibilitySelectionStable\(visibilityRoot, 'PUBLIC'\);[\s\S]*?selectYouTubeVisibilityContainer\(visibilityRoot, 'second'\);[\s\S]*?fillYouTubeSchedule\(visibilityRoot, plan\.scheduledAt\);/,
   'YouTube 定时流程必须先稳定保存 PUBLIC，再切换互斥的安排时间容器。',
 );
 
@@ -696,8 +720,8 @@ assertIncludes(
 );
 
 assertIncludes(
-  'entrypoints/dashboard/App.vue',
-  'videoRecordFromDraft(draft, existing, { resetPlatformStatuses: true })',
+  'src/storage/workspaceStorage.ts',
+  'resetPlatformStatuses: Boolean(draft.replicaSourceProjectId)',
   '复刻草稿项目不得继承源项目或旧草稿的已发布状态。',
 );
 

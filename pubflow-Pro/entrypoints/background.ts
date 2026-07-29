@@ -7,6 +7,10 @@ import { injectDouyinArticleCover, injectDouyinCover } from '../src/platforms/do
 import { injectXiaohongshuImageDescription } from '../src/platforms/xiaohongshu/pageWorld';
 import { normalizeScheduledAt } from '../src/domain/content';
 import { normalizeTopicIntervalMs } from '../src/domain/fillSettings';
+import {
+  getVerifiedFinalPublishButtonSpec,
+  type FinalButtonSpec,
+} from '../src/platforms/finalPublisher';
 import { runWeixinChannelsPageWorldAction } from '../src/platforms/weixinChannels/pageWorld';
 import type { PageWorldAction, PageWorldPayload } from '../src/platforms/weixinChannels/pageWorld';
 import { loadLibraryData, saveLibraryData } from '../src/storage/libraryStorage';
@@ -68,7 +72,217 @@ const FILL_COMPLETION_GRACE_MS = 120000;
 const FILL_COMPLETION_MIN_TIMEOUT_MS = 180000;
 const NON_VIDEO_FILL_COMPLETION_TIMEOUT_MS = 120000;
 const CDP_CLICK_MOVE_SETTLE_MS = 120;
+const FINAL_PUBLISH_ACTIVATE_SETTLE_MS = 600;
 const FINAL_PUBLISH_CLICK_SETTLE_MS = 800;
+const FINAL_PUBLISH_TARGET_PROBE_FUNCTION = `function (platformId, rule, probeKey, mode) {
+  const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const originalTarget = this && this.nodeType === 3 ? this.parentElement : this;
+  if (mode === 'verify') {
+    const received = originalTarget && originalTarget[probeKey] === true;
+    try { delete originalTarget[probeKey]; } catch { /* ignore */ }
+    return received;
+  }
+  const matches = (element) => {
+    const text = normalize(element.textContent);
+    if (platformId === 'xiaohongshu') {
+      return element.tagName === 'XHS-PUBLISH-BTN'
+        && element.getAttribute('is-publish') === 'true'
+        && element.getAttribute('submit-disabled') !== 'true'
+        && element.getAttribute('submit-loading') !== 'true';
+    }
+    const label = normalize(element.getAttribute('aria-label') || text);
+    try {
+      return element.matches(rule.selector) && rule.texts.includes(label);
+    } catch {
+      return false;
+    }
+  };
+  let candidate = originalTarget;
+  while (candidate && candidate.nodeType === 1 && !matches(candidate)) {
+    if (candidate.parentElement) {
+      candidate = candidate.parentElement;
+    } else {
+      const root = candidate.getRootNode && candidate.getRootNode();
+      candidate = root && root.host ? root.host : null;
+    }
+  }
+  if (!candidate || !matches(candidate)) {
+    return mode === 'arm'
+      ? { ok: false, error: '点击坐标没有命中当前平台的最终发布按钮。' }
+      : false;
+  }
+  const disabled = Boolean(
+    candidate.disabled
+    || candidate.hasAttribute('disabled')
+    || candidate.getAttribute('aria-disabled') === 'true'
+    || /(?:^|\\s)(?:is-)?disabled(?:\\s|$)/i.test(String(candidate.className || ''))
+  );
+  if (disabled) {
+    return { ok: false, error: '最终发布按钮当前不可点击，请检查平台页面。' };
+  }
+
+  const view = candidate.ownerDocument && candidate.ownerDocument.defaultView;
+  if (!view) {
+    return { ok: false, error: '最终发布按钮不在当前可点击视口内，请重试。' };
+  }
+
+  const rect = candidate.getBoundingClientRect();
+  const visualViewport = view.visualViewport;
+  const viewportLeft = visualViewport ? visualViewport.offsetLeft : 0;
+  const viewportTop = visualViewport ? visualViewport.offsetTop : 0;
+  const viewportRight = viewportLeft + (visualViewport ? visualViewport.width : view.innerWidth);
+  const viewportBottom = viewportTop + (visualViewport ? visualViewport.height : view.innerHeight);
+  const visibleLeft = Math.max(rect.left, viewportLeft);
+  const visibleTop = Math.max(rect.top, viewportTop);
+  const visibleRight = Math.min(rect.right, viewportRight);
+  const visibleBottom = Math.min(rect.bottom, viewportBottom);
+  if (visibleRight - visibleLeft <= 2 || visibleBottom - visibleTop <= 2) {
+    return { ok: false, error: '最终发布按钮不在当前可点击视口内，请重试。' };
+  }
+
+  const preferredX = platformId === 'xiaohongshu'
+    ? rect.left + Math.min(
+      Math.max(
+        rect.width / 2 + (candidate.getAttribute('is-save-draft') === 'true' ? 72 : 0),
+        1,
+      ),
+      Math.max(rect.width - 1, 1),
+    )
+    : rect.left + rect.width / 2;
+  const preferredY = rect.top + rect.height / 2;
+  const localX = Math.min(Math.max(preferredX, visibleLeft + 1), visibleRight - 1);
+  const localY = Math.min(Math.max(preferredY, visibleTop + 1), visibleBottom - 1);
+
+  const activation = candidate.tagName === 'BUTTON' ? 'keyboard' : 'mouse';
+  if (activation === 'mouse') {
+    let hit = candidate.ownerDocument.elementFromPoint(localX, localY);
+    while (hit && hit !== candidate) {
+      if (hit.parentElement) {
+        hit = hit.parentElement;
+      } else {
+        const root = hit.getRootNode && hit.getRootNode();
+        hit = root && root.host ? root.host : null;
+      }
+    }
+    if (hit !== candidate) {
+      return { ok: false, error: '最终发布按钮当前被其他页面元素遮挡，请重试。' };
+    }
+  }
+
+  // 原生按钮使用键盘激活，验证 keydown 是否到达；B站等普通元素验证 click。
+  // 小红书真实按钮位于 closed Shadow DOM，宿主收不到稳定的内部 click，只能依赖精确命中校验。
+  const verificationEvent = platformId === 'xiaohongshu'
+    ? ''
+    : activation === 'keyboard' ? 'keydown' : 'click';
+  if (verificationEvent) {
+    Object.defineProperty(candidate, probeKey, {
+      configurable: true,
+      value: false,
+      writable: true,
+    });
+    candidate.addEventListener(verificationEvent, (event) => {
+      candidate[probeKey] = event.isTrusted === true;
+    }, { capture: true, once: true });
+  }
+  if (activation === 'keyboard') {
+    candidate.focus({ preventScroll: true });
+    if (candidate.ownerDocument.activeElement !== candidate) {
+      return { ok: false, error: '无法聚焦当前平台的最终发布按钮，请重试。' };
+    }
+  }
+
+  let x = localX;
+  let y = localY;
+  let currentWindow = view;
+  while (currentWindow && currentWindow !== currentWindow.parent) {
+    try {
+      const frameElement = currentWindow.frameElement;
+      if (!frameElement) break;
+      const frameRect = frameElement.getBoundingClientRect();
+      x += frameRect.left;
+      y += frameRect.top;
+      currentWindow = currentWindow.parent;
+    } catch { break; }
+  }
+  return { ok: true, activation, verifyEvent: Boolean(verificationEvent), x, y };
+}`;
+const FINAL_PUBLISH_TARGET_LOCATOR_FUNCTION = `async function (platformId, rule) {
+  if (!rule) return { ok: false, error: '当前平台没有最终按钮实时定位规则。' };
+
+  const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const isVisible = (element) => {
+    const rect = element.getBoundingClientRect();
+    const view = element.ownerDocument && element.ownerDocument.defaultView;
+    const style = view && view.getComputedStyle(element);
+    return rect.width > 0
+      && rect.height > 0
+      && style
+      && style.display !== 'none'
+      && style.visibility !== 'hidden'
+      && Number(style.opacity || '1') !== 0;
+  };
+  const isDisabled = (element) => Boolean(
+    element.disabled
+    || element.hasAttribute('disabled')
+    || element.getAttribute('aria-disabled') === 'true'
+    || /(?:^|\\s)(?:is-)?disabled(?:\\s|$)/i.test(String(element.className || ''))
+  );
+  const matches = (element) => {
+    if (platformId === 'xiaohongshu') {
+      return isVisible(element)
+        && element.getAttribute('submit-disabled') !== 'true'
+        && element.getAttribute('submit-loading') !== 'true';
+    }
+    const label = normalize(element.getAttribute('aria-label') || element.textContent);
+    return rule.texts.includes(label) && isVisible(element) && !isDisabled(element);
+  };
+
+  const findInRoot = (root, visited) => {
+    if (!root || visited.has(root)) return null;
+    visited.add(root);
+    try {
+      for (const element of root.querySelectorAll(rule.selector)) {
+        if (matches(element)) return element;
+      }
+    } catch { /* ignore invalid or inaccessible roots */ }
+
+    let descendants = [];
+    try { descendants = root.querySelectorAll('*'); } catch { return null; }
+    for (const element of descendants) {
+      if (element.shadowRoot) {
+        const shadowResult = findInRoot(element.shadowRoot, visited);
+        if (shadowResult) return shadowResult;
+      }
+      if (element.tagName === 'IFRAME') {
+        try {
+          const frameDocument = element.contentDocument;
+          if (!frameDocument) continue;
+          const frameResult = findInRoot(frameDocument, visited);
+          if (frameResult) return frameResult;
+        } catch { /* cross-origin iframe */ }
+      }
+    }
+    return null;
+  };
+
+  let target = findInRoot(document, new Set());
+  if (!target) return '没有找到当前平台可点击的最终发布按钮。';
+
+  target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' });
+  let currentWindow = target.ownerDocument && target.ownerDocument.defaultView;
+  while (currentWindow && currentWindow !== currentWindow.parent) {
+    try {
+      const frameElement = currentWindow.frameElement;
+      if (!frameElement) break;
+      frameElement.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' });
+      currentWindow = currentWindow.parent;
+    } catch { break; }
+  }
+  await new Promise((resolve) => setTimeout(resolve, 220));
+
+  target = findInRoot(document, new Set());
+  return target || '页面布局更新后最终发布按钮已失效，请重试。';
+}`;
 const pendingFillAcks = new Map<string, () => void>();
 const fillingPlatforms = new Set<PlatformId>();
 const fillCompletionTimers = new Map<PlatformId, ReturnType<typeof setTimeout>>();
@@ -487,8 +701,8 @@ async function handleMessage(
           status: 'error',
           error: message.payload.message,
         });
-        if (currentTask) currentTask.status = 'paused';
         await persistAndBroadcast();
+        await openNextPending();
         return ok(currentTask);
       }
       updatePlatform(message.payload.platformId, {
@@ -497,6 +711,24 @@ async function handleMessage(
       });
       await persistAndBroadcast();
       await openNextPending();
+      return ok(currentTask);
+    }
+
+    if (message.type === 'FINAL_PUBLISH_PREPARE') {
+      const { platformId } = message.payload;
+      if (!isMessageFromPlatformTask(platformId, sender)) {
+        return fail('最终发布请求不属于当前平台任务。');
+      }
+      if (!currentTask?.autoSubmit) {
+        return fail('当前任务没有启用直接发布。');
+      }
+      const platformTask = currentTask.platforms.find((item) => item.platformId === platformId);
+      if (!platformTask?.tabId || platformTask.status !== 'filling') {
+        return fail('当前平台不在可直接发布状态。');
+      }
+
+      await browser.tabs.update(platformTask.tabId, { active: true });
+      await new Promise((resolve) => setTimeout(resolve, FINAL_PUBLISH_ACTIVATE_SETTLE_MS));
       return ok(currentTask);
     }
 
@@ -525,8 +757,16 @@ async function handleMessage(
       await persistAndBroadcast();
 
       try {
-        await browser.tabs.update(platformTask.tabId, { active: true });
-        await cdpClick(platformTask.tabId, x, y);
+        const activeTab = await browser.tabs.get(platformTask.tabId);
+        if (!activeTab.active) {
+          throw new Error('平台发布页面失去焦点，请重试直接发布。');
+        }
+        const verifiedSpec = getVerifiedFinalPublishButtonSpec(platformId);
+        if (verifiedSpec) {
+          await cdpClickFinalPublishButton(platformTask.tabId, x, y, platformId, verifiedSpec);
+        } else {
+          await cdpClick(platformTask.tabId, x, y);
+        }
         await new Promise((resolve) => setTimeout(resolve, FINAL_PUBLISH_CLICK_SETTLE_MS));
         updatePlatform(platformId, {
           status: 'published',
@@ -542,8 +782,8 @@ async function handleMessage(
           status: 'error',
           error: error instanceof Error ? error.message : '最终发布按钮点击失败',
         });
-        if (currentTask) currentTask.status = 'paused';
         await persistAndBroadcast();
+        await openNextPending();
         return fail(error instanceof Error ? error.message : '最终发布按钮点击失败');
       }
     }
@@ -575,8 +815,8 @@ async function handleMessage(
         status: 'error',
         error: message.payload.error,
       });
-      if (currentTask) currentTask.status = 'paused';
       await persistAndBroadcast();
+      await openNextPending();
       return ok(currentTask);
     }
 
@@ -817,8 +1057,8 @@ async function continueFill(platformId: PlatformId) {
       status: 'error',
       error: lastError?.message || 'content script 未响应，请刷新页面后重试。',
     });
-    currentTask.status = 'paused';
     await persistAndBroadcast();
+    await openNextPending();
   } finally {
     fillingPlatforms.delete(platformId);
   }
@@ -875,7 +1115,7 @@ function scheduleFillCompletionTimeout(platformId: PlatformId, tabId: number | u
   fillCompletionTimers.set(platformId, timer);
 }
 
-/** 填充超时后记录失败并暂停任务，等待用户决定重试、跳过或结束全部。 */
+/** 填充超时后记录当前平台失败，并继续顺序发布队列。 */
 async function handleFillCompletionTimeout(platformId: PlatformId, tabId: number, timeoutMs: number) {
   fillCompletionTimers.delete(platformId);
   const platformTask = currentTask?.platforms.find((item) => item.platformId === platformId);
@@ -884,10 +1124,10 @@ async function handleFillCompletionTimeout(platformId: PlatformId, tabId: number
 
   updatePlatform(platformId, {
     status: 'error',
-    error: `平台超过 ${Math.round(timeoutMs / 1000)} 秒没有返回填充结果，任务已暂停。`,
+    error: `平台超过 ${Math.round(timeoutMs / 1000)} 秒没有返回填充结果，已继续下一个平台。`,
   });
-  currentTask.status = 'paused';
   await persistAndBroadcast();
+  await openNextPending();
 }
 
 /** 清理单个平台的填充超时计时器。 */
@@ -1346,6 +1586,135 @@ async function cdpClick(tabId: number, x: number, y: number): Promise<void> {
       clickCount: 1,
     });
   } finally {
+    if (attachedHere) {
+      try {
+        await chrome.debugger.detach(debuggee);
+      } catch { /* ignore */ }
+    }
+  }
+}
+
+async function locateFinalPublishTarget(
+  debuggee: { tabId: number },
+  platformId: PlatformId,
+  spec: FinalButtonSpec,
+): Promise<string> {
+  const located = await chrome.debugger.sendCommand(debuggee, 'Runtime.evaluate', {
+    expression: `(${FINAL_PUBLISH_TARGET_LOCATOR_FUNCTION})(
+      ${JSON.stringify(platformId)},
+      ${JSON.stringify(spec)}
+    )`,
+    awaitPromise: true,
+    returnByValue: false,
+  }) as {
+    result?: { objectId?: string; value?: unknown };
+    exceptionDetails?: unknown;
+  };
+  const objectId = located.result?.objectId || '';
+  if (located.exceptionDetails || !objectId) {
+    const error = typeof located.result?.value === 'string'
+      ? located.result.value
+      : '无法在当前页面实时定位最终发布按钮。';
+    throw new Error(error);
+  }
+  return objectId;
+}
+
+/**
+ * 点击最终发布按钮前先用 CDP 命中测试确认目标节点，再确认可信 click 事件确实到达按钮。
+ * 不能仅以 Input.dispatchMouseEvent 未抛错作为发布成功依据：坐标落在空白处时该命令同样会成功。
+ */
+async function cdpClickFinalPublishButton(
+  tabId: number,
+  x: number,
+  y: number,
+  platformId: PlatformId,
+  spec: FinalButtonSpec,
+): Promise<void> {
+  const debuggee = { tabId };
+  const probeKey = `__pubflowFinalClick_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  let attachedHere = false;
+  let objectId = '';
+
+  try {
+    await chrome.debugger.attach(debuggee, '1.3');
+    attachedHere = true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`无法激活平台编辑器，请先关闭该页面的开发者工具后重试：${message}`);
+  }
+
+  try {
+    // 内容脚本坐标只做消息完整性校验。后台激活标签页后重新定位目标，
+    // 避免长页面滚动、弹窗重排或按钮重渲染造成旧坐标失效。
+    objectId = await locateFinalPublishTarget(debuggee, platformId, spec);
+
+    const armed = await chrome.debugger.sendCommand(debuggee, 'Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: FINAL_PUBLISH_TARGET_PROBE_FUNCTION,
+      arguments: [{ value: platformId }, { value: spec }, { value: probeKey }, { value: 'arm' }],
+      returnByValue: true,
+    }) as {
+      result?: {
+        value?: {
+          ok?: boolean;
+          activation?: 'keyboard' | 'mouse';
+          verifyEvent?: boolean;
+          x?: number;
+          y?: number;
+          error?: string;
+        };
+      };
+    };
+    const armedValue = armed.result?.value;
+    if (!armedValue?.ok) {
+      throw new Error(armedValue?.error || '点击坐标没有命中最终发布按钮。');
+    }
+    x = armedValue.x!;
+    y = armedValue.y!;
+
+    if (armedValue.activation === 'keyboard') {
+      // Space 是原生 button 的标准键盘激活键；CDP 会在 keyUp 后生成可信 click。
+      await dispatchCdpKey(debuggee, ' ', 'Space', 32);
+    } else {
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x,
+        y,
+        button: 'none',
+      });
+      await new Promise((resolve) => setTimeout(resolve, CDP_CLICK_MOVE_SETTLE_MS));
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x,
+        y,
+        button: 'left',
+        clickCount: 1,
+      });
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x,
+        y,
+        button: 'left',
+        clickCount: 1,
+      });
+    }
+
+    if (armedValue.verifyEvent) {
+      const verified = await chrome.debugger.sendCommand(debuggee, 'Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: FINAL_PUBLISH_TARGET_PROBE_FUNCTION,
+        arguments: [{ value: platformId }, { value: spec }, { value: probeKey }, { value: 'verify' }],
+        returnByValue: true,
+      }) as { result?: { value?: boolean } };
+      if (verified.result?.value !== true) {
+        throw new Error('浏览器可信输入事件没有到达最终发布按钮，请重试。');
+      }
+    }
+  } finally {
+    if (objectId) {
+      await chrome.debugger.sendCommand(debuggee, 'Runtime.releaseObject', { objectId }).catch(() => undefined);
+    }
     if (attachedHere) {
       try {
         await chrome.debugger.detach(debuggee);

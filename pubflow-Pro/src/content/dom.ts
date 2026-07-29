@@ -234,7 +234,7 @@ export async function waitForElement<T extends Element = HTMLElement>(
 /** 判断元素是否在布局中可见，过滤掉隐藏 input、关闭弹窗里的旧节点。 */
 export function isVisible(element: Element): boolean {
   const rect = element.getBoundingClientRect();
-  const style = window.getComputedStyle(element);
+  const style = element.ownerDocument.defaultView?.getComputedStyle(element) || window.getComputedStyle(element);
   return (
     rect.width > 0 &&
     rect.height > 0 &&

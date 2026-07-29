@@ -504,7 +504,9 @@ export async function writeProjectManifest(draft: ContentDraft, persistArticleCo
   if (!project) return null;
 
   const existing = await readProjectManifest(project.projectDir);
-  const video = videoRecordFromDraft(draft, existing?.video);
+  const video = videoRecordFromDraft(draft, existing?.video, {
+    resetPlatformStatuses: Boolean(draft.replicaSourceProjectId),
+  });
   const articleContent =
     typeof persistArticleContent === 'string'
       ? persistArticleContent

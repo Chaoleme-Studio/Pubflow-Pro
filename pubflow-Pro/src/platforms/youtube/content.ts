@@ -320,7 +320,10 @@ async function fillYouTubeVisibilityAndSchedule(content: ContentData) {
     if (plan.scheduledAt <= Date.now()) {
       throw new Error('YouTube 定时发布时间必须晚于当前时间。');
     }
-    // “保存或发布”和“安排时间”是互斥容器。定时发布本身固定为公开，只操作第二个容器。
+    // 两个容器互斥：先稳定保存公开状态，再切换到安排时间，避免 Polymer 重渲染丢失可见性。
+    await selectYouTubeVisibilityContainer(visibilityRoot, 'first');
+    await selectYouTubeRadio('PUBLIC', '公开范围');
+    await waitForYouTubeVisibilitySelectionStable(visibilityRoot, 'PUBLIC');
     await selectYouTubeVisibilityContainer(visibilityRoot, 'second');
     await fillYouTubeSchedule(visibilityRoot, plan.scheduledAt);
     const visibilityOverride = content.visibility && content.visibility !== 'public'

@@ -413,6 +413,12 @@ export type RuntimeMessage =
     };
   }
   | {
+    type: 'FINAL_PUBLISH_PREPARE';
+    payload: {
+      platformId: PlatformId;
+    };
+  }
+  | {
     type: 'FINAL_PUBLISH_CLICK';
     payload: {
       platformId: PlatformId;

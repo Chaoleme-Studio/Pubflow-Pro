@@ -8,6 +8,18 @@ export interface ElementPointOffset {
   y?: number;
 }
 
+/** 先让后台激活目标标签页；内容脚本随后再定位按钮，避免使用非活动标签页的旧坐标。 */
+export async function prepareFinalPublishClick(platformId: PlatformId): Promise<void> {
+  const response = (await browser.runtime.sendMessage({
+    type: 'FINAL_PUBLISH_PREPARE',
+    payload: { platformId },
+  } satisfies RuntimeMessage)) as RuntimeResponse | undefined;
+
+  if (!response?.ok) {
+    throw new Error(response?.error || '无法激活平台发布页面');
+  }
+}
+
 /** 通过 CDP 发送可信点击事件，用于知乎等不响应 JS click 的 React 组件。 */
 export async function cdpClickElement(el: HTMLElement): Promise<boolean> {
   const point = getTopFramePoint(el);
@@ -103,7 +115,7 @@ export function getTopFramePoint(el: HTMLElement, offset?: ElementPointOffset) {
 
   while (currentWindow && currentWindow !== currentWindow.parent) {
     const frameElement = currentWindow.frameElement;
-    if (!(frameElement instanceof HTMLElement)) break;
+    if (!frameElement || frameElement.nodeType !== 1) break;
     const frameRect = frameElement.getBoundingClientRect();
     x += frameRect.left;
     y += frameRect.top;

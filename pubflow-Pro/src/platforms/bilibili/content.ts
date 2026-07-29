@@ -184,7 +184,7 @@ async function openBilibiliCoverEditor(coverElement?: HTMLElement) {
   await waitForIdle(300);
 
   const clickTarget =
-    coverElement.querySelector<HTMLElement>('.cover-img, .edit-text, [class*="cover-img"]') ||
+    coverElement.querySelector<HTMLElement>('.cover-empty, .cover-empty-pill, .cover-img, .edit-text, [class*="cover-img"]') ||
     coverElement;
   await clickBilibiliElement(clickTarget);
 
@@ -200,6 +200,11 @@ async function openBilibiliCoverEditor(coverElement?: HTMLElement) {
 /** 查找 B站视频页封面入口，配置选择器失效时使用常见 cover class 兜底。 */
 function findBilibiliCoverEntry(fields: PlatformConfig['fields']) {
   return (
+    findVisibleElement([
+      '.cover-main .cover-empty',
+      '.cover-module-main .cover-empty',
+      '.cover-main .cover-slot',
+    ]) ||
     findVisibleElement(fields.cover?.selectors || []) ||
     findVisibleElement([
       '.cover-img',
