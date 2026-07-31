@@ -1059,9 +1059,24 @@ export async function runWeixinChannelsPageWorldAction(
     /** 查找封面编辑入口元素 */
     function findCoverEntry(entrySelector: string): HTMLElement | null {
       const editButton = queryDeep(`${entrySelector} .edit-btn`) as HTMLElement | null;
-      if (editButton && isVisible(editButton)) return editButton;
+      if (editButton) {
+        const rect = editButton.getBoundingClientRect();
+        const style = window.getComputedStyle(editButton);
+        // 新版页面的编辑按钮只在 hover 后改变 opacity，节点本身已经可以安全触发。
+        if (rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden') {
+          return editButton;
+        }
+      }
       const entry = queryDeep(entrySelector) as HTMLElement | null;
       return entry && isVisible(entry) ? entry : null;
+    }
+
+    /** 封面入口偶尔会把点击传给视频预览层，只停止本次点击后新启动的视频。 */
+    function pauseVideosStartedByCoverClick(previouslyPlaying: Set<HTMLVideoElement>) {
+      const videos = queryDeepAll('video') as HTMLVideoElement[];
+      for (const video of videos) {
+        if (!previouslyPlaying.has(video) && !video.paused) video.pause();
+      }
     }
 
     /** 在对话框中查找封面图片上传 input */
@@ -1461,9 +1476,13 @@ export async function runWeixinChannelsPageWorldAction(
 
       entry.scrollIntoView({ block: 'center', inline: 'nearest' });
       await sleep(250);
+      const previouslyPlaying = new Set(
+        (queryDeepAll('video') as HTMLVideoElement[]).filter((video) => !video.paused),
+      );
       clickElement(entry);
 
       let dialog = await waitForDialog(expectedTitle, 1800);
+      pauseVideosStartedByCoverClick(previouslyPlaying);
       if (dialog) return dialog;
 
       const directEdit = await waitForMaterialPopover(2500);
@@ -1477,8 +1496,12 @@ export async function runWeixinChannelsPageWorldAction(
       if (fallbackEntry && fallbackEntry !== entry) {
         fallbackEntry.scrollIntoView({ block: 'center', inline: 'nearest' });
         await sleep(250);
+        const fallbackPreviouslyPlaying = new Set(
+          (queryDeepAll('video') as HTMLVideoElement[]).filter((video) => !video.paused),
+        );
         clickElement(fallbackEntry);
         dialog = await waitForDialog(expectedTitle, 1800);
+        pauseVideosStartedByCoverClick(fallbackPreviouslyPlaying);
         if (dialog) return dialog;
 
         const fallbackDirectEdit = await waitForMaterialPopover(2500);
@@ -1527,10 +1550,14 @@ export async function runWeixinChannelsPageWorldAction(
         if (!fallbackPreviewReady) return false;
       }
 
+      // 预览出现后 Vue 仍会重绘确认区，等待一帧稳定窗口并重新获取弹窗，避免点击旧按钮节点。
+      await sleep(600);
       const currentDialog = findActiveCoverDialog(expectedTitle) || dialog;
       const confirmButton = findScopedButton(currentDialog, ['确认']);
       if (!confirmButton) return false;
 
+      confirmButton.scrollIntoView({ block: 'center', inline: 'nearest' });
+      await sleep(150);
       clickElement(confirmButton);
       return waitForDialogClosed(expectedTitle, 10000);
     }

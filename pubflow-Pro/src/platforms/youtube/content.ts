@@ -115,6 +115,8 @@ async function waitForYouTubeUploadAction() {
 
 async function uploadYouTubeCover(content: ContentData) {
   if (!content.coverCacheId) return '未选择封面，YouTube 将自动生成视频缩略图。';
+  if (isYouTubeShortsThumbnailFlow(getYouTubeUploadDialogText())) return '';
+
   const file = await loadFileForTransfer(content.coverCacheId);
   if (!file) return '封面缓存不存在，跳过 YouTube 自定义封面。';
 
@@ -124,16 +126,18 @@ async function uploadYouTubeCover(content: ContentData) {
     'ytcp-thumbnail-uploader input[type="file"][accept*="image"]',
   ], 8_000);
   if (!(input instanceof HTMLInputElement)) {
-    throw new Error('未找到 YouTube 自定义缩略图输入框，请确认频道已完成手机号验证并开通自定义缩略图。');
+    if (isYouTubeShortsThumbnailFlow(getYouTubeUploadDialogText())) return '';
+    return 'YouTube 当前页面未显示自定义缩略图入口，已跳过封面上传。';
   }
 
   const beforePreview = getYouTubeCustomThumbnailSignatures();
   assignFilesToInput(input, [file]);
   const startedAt = Date.now();
   while (Date.now() - startedAt < YOUTUBE_COVER_CONFIRM_TIMEOUT_MS) {
-    const dialogText = document.querySelector('ytcp-uploads-dialog')?.textContent || '';
+    const dialogText = getYouTubeUploadDialogText();
+    if (isYouTubeShortsThumbnailFlow(dialogText)) return '';
     if (/验证.*(?:手机|电话号码)|verify.*(?:phone|number)|自定义缩略图.*(?:不可用|未启用)/i.test(dialogText)) {
-      throw new Error('YouTube 账号尚未完成手机号验证，当前不能上传自定义缩略图。');
+      return 'YouTube 当前页面不支持自定义缩略图，已跳过封面上传。';
     }
     const currentPreview = getYouTubeCustomThumbnailSignatures();
     if (currentPreview.some((signature) => !beforePreview.includes(signature))) {
@@ -141,7 +145,17 @@ async function uploadYouTubeCover(content: ContentData) {
     }
     await waitForIdle(500);
   }
-  throw new Error('YouTube 已接收封面文件，但没有出现自定义缩略图预览；请确认账号已绑定手机号并开通自定义缩略图权限。');
+  return 'YouTube 封面预览未确认，已继续填写，请在发布前检查缩略图。';
+}
+
+function getYouTubeUploadDialogText() {
+  return document.querySelector('ytcp-uploads-dialog')?.textContent || '';
+}
+
+export function isYouTubeShortsThumbnailFlow(dialogText: string) {
+  const normalizedText = dialogText.replace(/\s+/g, ' ');
+  return /(?:移动版\s*YouTube\s*应用.*(?:缩略图|视频帧)|(?:缩略图|视频帧).*移动版\s*YouTube\s*应用)/i.test(normalizedText)
+    || /(?:YouTube\s+mobile\s+app.*(?:thumbnail|frame)|(?:thumbnail|frame).*YouTube\s+mobile\s+app)/i.test(normalizedText);
 }
 
 function getYouTubeCustomThumbnailSignatures() {

@@ -554,7 +554,7 @@ assertIncludes(
 assertMatches(
   'src/platforms/youtube/content.ts',
   /const coverMessage = await uploadYouTubeCover\(content\);[\s\S]*?await fillYouTubePlatformSettings\(content\);/,
-  'YouTube 缩略图上传必须先于可选平台设置，避免个性化设置失败阻断封面。',
+  'YouTube 长视频缩略图上传必须先于可选平台设置。',
 );
 
 assertIncludes(
@@ -608,13 +608,37 @@ assertNotIncludes(
 assertIncludes(
   'src/platforms/youtube/content.ts',
   "'ytcp-thumbnail-uploader input#file-loader[type=\"file\"]'",
-  'YouTube 自定义封面必须优先使用实测缩略图 input。',
+  'YouTube 长视频必须支持上传自定义缩略图。',
+);
+
+assertMatches(
+  'src/platforms/youtube/content.ts',
+  /isYouTubeShortsThumbnailFlow\(getYouTubeUploadDialogText\(\)\)[\s\S]*?return '';/,
+  'YouTube Shorts 没有网页端自定义缩略图入口时必须静默跳过。',
+);
+
+assertNotIncludes(
+  'src/platforms/youtube/content.ts',
+  '请确认频道已完成手机号验证并开通自定义缩略图',
+  '找不到 YouTube 缩略图入口时不能直接误判为账号权限问题。',
+);
+
+assertMatches(
+  'src/platforms/weixinChannels/pageWorld.ts',
+  /function findCoverEntry[\s\S]*?queryDeep\(`\$\{entrySelector\} \.edit-btn`\)[\s\S]*?style\.visibility !== 'hidden'/,
+  '视频号封面入口必须优先点击 hover 编辑按钮，避免点击封面容器触发视频播放。',
+);
+
+assertMatches(
+  'src/platforms/weixinChannels/pageWorld.ts',
+  /await sleep\(600\);[\s\S]*?const currentDialog = findActiveCoverDialog[\s\S]*?const confirmButton = findScopedButton/,
+  '视频号封面预览完成后必须等待确认区稳定并重新获取按钮。',
 );
 
 assertIncludes(
-  'src/platforms/youtube/content.ts',
-  'YouTube 已接收封面文件，但没有出现自定义缩略图预览',
-  'YouTube 封面未出现预览时不能提前报告上传成功。',
+  'src/platforms/weixinChannels/pageWorld.ts',
+  'pauseVideosStartedByCoverClick(previouslyPlaying);',
+  '视频号封面入口误触启动视频时必须恢复为暂停状态。',
 );
 
 assertIncludes(
