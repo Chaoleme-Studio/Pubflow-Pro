@@ -387,6 +387,7 @@ async fn seed_account(db: &DatabaseConnection, account: &DemoAccount) -> Result<
         plan: Set(account.plan.to_string()),
         source_channel: Set("official".to_string()),
         batch_id: Set(None),
+        note: Set(None),
         max_devices: Set(1),
         remote_daily_job_limit: Set(None),
         remote_daily_byte_limit: Set(None),

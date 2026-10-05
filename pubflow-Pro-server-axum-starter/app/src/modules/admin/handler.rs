@@ -9,14 +9,16 @@ use crate::{ApiResponse, AppError, AppState, shared::FromState};
 
 use super::dto::{
     AdminAppVersionItem, AdminAppVersionListResponse, AdminAppVersionQuery, AdminLoginRequest,
-    AdminLoginResponse, AdminProductCatalogConfig, CreateAppVersionRequest,
-    DeleteAppVersionResponse, DeleteLicenseRequest, DeleteLicenseResponse, FreezeLicenseRequest,
-    FreezeLicenseResponse, GenerateLicenseRequest, GenerateLicenseResponse, LicenseListResponse,
+    AdminLoginResponse, AdminProductCatalogConfig, BulkLicenseActionRequest,
+    BulkLicenseActionResponse, CreateAppVersionRequest, DeleteAppVersionResponse,
+    DeleteLicenseRequest, DeleteLicenseResponse, FreezeLicenseRequest, FreezeLicenseResponse,
+    GenerateLicenseRequest, GenerateLicenseResponse, LicenseBatchListResponse, LicenseListResponse,
     ListLicenseQuery, ListOrderQuery, ListUserQuery, OrderOperationItem, ReplaceLicenseRequest,
     ReplaceLicenseResponse, RevokeLicenseRequest, RevokeLicenseResponse,
     UnbindLicenseDeviceRequest, UnbindLicenseDeviceResponse, UnfreezeLicenseRequest,
     UnfreezeLicenseResponse, UpdateAppVersionRequest, UpdateLicenseLimitsRequest,
-    UpdateLicenseLimitsResponse, UserOperationItem,
+    UpdateLicenseLimitsResponse, UpdateLicenseNoteRequest, UpdateLicenseNoteResponse,
+    UserOperationItem,
 };
 use super::service::AdminService;
 
@@ -107,6 +109,25 @@ pub fn delete_license_docs(op: TransformOperation) -> TransformOperation {
     op.description("软删除 License")
         .tag("PubFlow Admin")
         .response::<200, ApiResponse<DeleteLicenseResponse>>()
+}
+
+pub async fn bulk_license_action(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<BulkLicenseActionRequest>,
+) -> Result<ApiResponse<BulkLicenseActionResponse>, AppError> {
+    let service = AdminService::from_state(&state);
+    Ok(ApiResponse::success(
+        service
+            .bulk_license_action(req, service.audit_context(admin_source_ip(&headers)))
+            .await?,
+    ))
+}
+
+pub fn bulk_license_action_docs(op: TransformOperation) -> TransformOperation {
+    op.description("批量吊销或删除 License")
+        .tag("PubFlow Admin")
+        .response::<200, ApiResponse<BulkLicenseActionResponse>>()
 }
 
 pub async fn freeze_license(
@@ -324,6 +345,40 @@ pub fn update_license_limits_docs(op: TransformOperation) -> TransformOperation 
     op.description("调整 License 设备限制")
         .tag("PubFlow Admin")
         .response::<200, ApiResponse<UpdateLicenseLimitsResponse>>()
+}
+
+pub async fn update_license_note(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<UpdateLicenseNoteRequest>,
+) -> Result<ApiResponse<UpdateLicenseNoteResponse>, AppError> {
+    let service = AdminService::from_state(&state);
+    Ok(ApiResponse::success(
+        service
+            .update_license_note(req, service.audit_context(admin_source_ip(&headers)))
+            .await?,
+    ))
+}
+
+pub fn update_license_note_docs(op: TransformOperation) -> TransformOperation {
+    op.description("更新 License 运营备注")
+        .tag("PubFlow Admin")
+        .response::<200, ApiResponse<UpdateLicenseNoteResponse>>()
+}
+
+pub async fn list_license_batches(
+    State(state): State<Arc<AppState>>,
+) -> Result<ApiResponse<LicenseBatchListResponse>, AppError> {
+    let service = AdminService::from_state(&state);
+    Ok(ApiResponse::success(LicenseBatchListResponse {
+        items: service.list_license_batches().await?,
+    }))
+}
+
+pub fn list_license_batches_docs(op: TransformOperation) -> TransformOperation {
+    op.description("查询最近的 License 批次")
+        .tag("PubFlow Admin")
+        .response::<200, ApiResponse<LicenseBatchListResponse>>()
 }
 
 pub async fn list_licenses(

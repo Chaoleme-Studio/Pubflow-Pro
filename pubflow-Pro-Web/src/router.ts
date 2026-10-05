@@ -1,5 +1,22 @@
 import type { RouteRecordRaw } from 'vue-router';
 
+const adminSections = [
+  'overview',
+  'products',
+  'versions',
+  'users',
+  'licenses',
+  'leases',
+  'selectors',
+] as const;
+
+const adminRoutes: RouteRecordRaw[] = adminSections.map((section) => ({
+  path: `/admin/${section}`,
+  name: `admin-${section}`,
+  component: () => import('./pages/AdminRoute.vue'),
+  meta: { standalone: true, adminView: section },
+}));
+
 export const routes: RouteRecordRaw[] = [
   {
     path: '/',
@@ -24,8 +41,9 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/admin',
     name: 'admin',
-    component: () => import('./pages/AdminRoute.vue'),
+    redirect: { name: 'admin-overview' },
   },
+  ...adminRoutes,
   {
     path: '/publish',
     name: 'publish-remote',

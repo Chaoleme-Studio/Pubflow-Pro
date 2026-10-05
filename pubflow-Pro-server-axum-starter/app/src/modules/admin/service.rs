@@ -20,13 +20,15 @@ use crate::{AppState, ValidationError};
 use super::dto::{
     AdminAppVersionItem, AdminAppVersionListResponse, AdminAppVersionQuery, AdminDownloadConfig,
     AdminLoginRequest, AdminLoginResponse, AdminPlanConfig, AdminProductCatalogConfig,
-    CreateAppVersionRequest, DeleteAppVersionResponse, DeleteLicenseRequest, DeleteLicenseResponse,
-    FreezeLicenseRequest, FreezeLicenseResponse, GenerateLicenseRequest, GenerateLicenseResponse,
+    BulkLicenseActionRequest, BulkLicenseActionResponse, CreateAppVersionRequest,
+    DeleteAppVersionResponse, DeleteLicenseRequest, DeleteLicenseResponse, FreezeLicenseRequest,
+    FreezeLicenseResponse, GenerateLicenseRequest, GenerateLicenseResponse, LicenseBatchItem,
     LicenseItem, LicenseSummary, ListLicenseQuery, ListOrderQuery, ListUserQuery,
     OrderOperationItem, ReplaceLicenseRequest, ReplaceLicenseResponse, RevokeLicenseRequest,
     RevokeLicenseResponse, UnbindLicenseDeviceRequest, UnbindLicenseDeviceResponse,
     UnfreezeLicenseRequest, UnfreezeLicenseResponse, UpdateAppVersionRequest,
-    UpdateLicenseLimitsRequest, UpdateLicenseLimitsResponse, UserOperationItem,
+    UpdateLicenseLimitsRequest, UpdateLicenseLimitsResponse, UpdateLicenseNoteRequest,
+    UpdateLicenseNoteResponse, UserOperationItem,
 };
 
 pub struct AdminService {
@@ -106,6 +108,13 @@ impl AdminService {
             trim_string(req.sales_channel).unwrap_or_else(|| "third_party".to_string());
         let batch_name = trim_string(req.batch_name)
             .unwrap_or_else(|| format!("{}-{}", sales_channel, now.format("%Y%m%d%H%M%S")));
+        let note = trim_string(req.note);
+        if note
+            .as_ref()
+            .is_some_and(|value| value.chars().count() > 500)
+        {
+            return Err(ValidationError::custom("卡密备注不能超过 500 个字符").into());
+        }
 
         let txn = self.db.begin().await?;
         let batch = license_batch::ActiveModel {
@@ -132,6 +141,7 @@ impl AdminService {
                 plan: Set(plan.to_string()),
                 source_channel: Set(sales_channel.clone()),
                 batch_id: Set(Some(batch.id)),
+                note: Set(note.clone()),
                 max_devices: Set(max_devices),
                 remote_daily_job_limit: Set(None),
                 remote_daily_byte_limit: Set(None),
@@ -271,6 +281,108 @@ impl AdminService {
         txn.commit().await?;
         Ok(DeleteLicenseResponse {
             deleted: true,
+            revoked_leases: revoked.rows_affected,
+        })
+    }
+
+    pub async fn bulk_license_action(
+        &self,
+        req: BulkLicenseActionRequest,
+        audit: AdminAuditContext,
+    ) -> Result<BulkLicenseActionResponse, crate::AppError> {
+        let action = req.action.trim().to_ascii_lowercase();
+        if action != "revoke" && action != "delete" {
+            return Err(ValidationError::custom("批量操作仅支持 revoke 或 delete").into());
+        }
+
+        let codes: BTreeSet<String> = req
+            .activation_codes
+            .into_iter()
+            .map(|code| code.trim().to_string())
+            .filter(|code| !code.is_empty())
+            .collect();
+        if codes.len() > 200 {
+            return Err(ValidationError::custom("单次最多处理 200 张卡密").into());
+        }
+
+        let batch_id = trim_string(req.batch_id)
+            .map(|value| {
+                Uuid::parse_str(&value).map_err(|_| ValidationError::custom("批次 ID 格式不正确"))
+            })
+            .transpose()?;
+        if batch_id.is_none() && codes.is_empty() {
+            return Err(ValidationError::custom("请选择卡密或指定批次").into());
+        }
+
+        let now = Utc::now();
+        let reason = trim_string(req.reason).unwrap_or_else(|| {
+            if action == "delete" {
+                "后台批量删除卡密".to_string()
+            } else {
+                "后台批量吊销卡密".to_string()
+            }
+        });
+        let txn = self.db.begin().await?;
+        let mut query = license::Entity::find().filter(license::Column::DeletedAt.is_null());
+        query = if let Some(batch_id) = batch_id {
+            query.filter(license::Column::BatchId.eq(batch_id))
+        } else {
+            query.filter(license::Column::ActivationCode.is_in(codes))
+        };
+        let rows = query.all(&txn).await?;
+        if rows.is_empty() {
+            return Err(ValidationError::custom("没有找到可处理的卡密").into());
+        }
+
+        let license_ids: Vec<Uuid> = rows.iter().map(|row| row.id).collect();
+        let mut update = license::ActiveModel {
+            is_revoked: Set(true),
+            updated_at: Set(now.into()),
+            ..Default::default()
+        };
+        if action == "delete" {
+            update.deleted_at = Set(Some(now.into()));
+        }
+        license::Entity::update_many()
+            .filter(license::Column::Id.is_in(license_ids.clone()))
+            .set(update)
+            .exec(&txn)
+            .await?;
+
+        let revoked = lease::Entity::update_many()
+            .filter(lease::Column::LicenseId.is_in(license_ids))
+            .filter(lease::Column::IsRevoked.eq(false))
+            .set(lease::ActiveModel {
+                is_revoked: Set(true),
+                updated_at: Set(now.into()),
+                ..Default::default()
+            })
+            .exec(&txn)
+            .await?;
+
+        let event_type = if action == "delete" {
+            "admin_bulk_delete"
+        } else {
+            "admin_bulk_revoke"
+        };
+        for row in &rows {
+            insert_admin_license_event(
+                &txn,
+                row.id,
+                Some(row.activation_code.clone()),
+                event_type,
+                "success",
+                Some(reason.clone()),
+                row.expires_at,
+                &audit,
+                Some(row.id.to_string()),
+            )
+            .await?;
+        }
+
+        txn.commit().await?;
+        Ok(BulkLicenseActionResponse {
+            affected: rows.len() as u64,
             revoked_leases: revoked.rows_affected,
         })
     }
@@ -758,6 +870,7 @@ impl AdminService {
             plan: Set(old.plan.clone()),
             source_channel: Set(old.source_channel.clone()),
             batch_id: Set(old.batch_id),
+            note: Set(old.note.clone()),
             max_devices: Set(old.max_devices),
             remote_daily_job_limit: Set(old.remote_daily_job_limit),
             remote_daily_byte_limit: Set(old.remote_daily_byte_limit),
@@ -868,6 +981,79 @@ impl AdminService {
         })
     }
 
+    pub async fn update_license_note(
+        &self,
+        req: UpdateLicenseNoteRequest,
+        audit: AdminAuditContext,
+    ) -> Result<UpdateLicenseNoteResponse, crate::AppError> {
+        let note = trim_string(req.note);
+        if note
+            .as_ref()
+            .is_some_and(|value| value.chars().count() > 500)
+        {
+            return Err(ValidationError::custom("卡密备注不能超过 500 个字符").into());
+        }
+
+        let now = Utc::now();
+        let txn = self.db.begin().await?;
+        let row = license::Entity::find()
+            .filter(license::Column::ActivationCode.eq(req.activation_code.trim()))
+            .filter(license::Column::DeletedAt.is_null())
+            .one(&txn)
+            .await?
+            .ok_or(PubFlowError::LicenseNotFound)?;
+
+        let mut active: license::ActiveModel = row.into();
+        active.note = Set(note.clone());
+        active.updated_at = Set(now.into());
+        let updated = active.update(&txn).await?;
+
+        insert_admin_license_event(
+            &txn,
+            updated.id,
+            Some(updated.activation_code.clone()),
+            "update_note",
+            "success",
+            Some(
+                if note.is_some() {
+                    "更新卡密备注"
+                } else {
+                    "清空卡密备注"
+                }
+                .to_string(),
+            ),
+            updated.expires_at,
+            &audit,
+            Some(updated.id.to_string()),
+        )
+        .await?;
+
+        txn.commit().await?;
+        Ok(UpdateLicenseNoteResponse {
+            item: to_license_item(updated, Vec::new(), Vec::new(), None, None),
+        })
+    }
+
+    pub async fn list_license_batches(&self) -> Result<Vec<LicenseBatchItem>, crate::AppError> {
+        let rows = license_batch::Entity::find()
+            .order_by_desc(license_batch::Column::CreatedAt)
+            .limit(200)
+            .all(&self.db)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| LicenseBatchItem {
+                id: row.id.to_string(),
+                batch_name: row.batch_name,
+                sales_channel: row.sales_channel,
+                tier: row.tier,
+                plan: row.plan,
+                quantity: row.quantity,
+                created_at: row.created_at.with_timezone(&Utc),
+            })
+            .collect())
+    }
+
     pub async fn list_licenses(
         &self,
         query: ListLicenseQuery,
@@ -880,7 +1066,8 @@ impl AdminService {
             stmt = stmt.filter(
                 Condition::any()
                     .add(license::Column::ActivationCode.contains(keyword.clone()))
-                    .add(license::Column::Tier.contains(keyword)),
+                    .add(license::Column::Tier.contains(keyword.clone()))
+                    .add(license::Column::Note.contains(keyword)),
             );
         }
         if let Some(code) = trim_opt(&query.activation_code) {
@@ -895,6 +1082,17 @@ impl AdminService {
         if let Some(is_revoked) = query.is_revoked {
             stmt = stmt.filter(license::Column::IsRevoked.eq(is_revoked));
         }
+        if let Some(status) = trim_opt(&query.status) {
+            stmt = apply_license_status_filter(stmt, &status);
+        }
+        if let Some(batch_id) = trim_opt(&query.batch_id) {
+            let batch_id = Uuid::parse_str(&batch_id)
+                .map_err(|_| ValidationError::custom("批次 ID 格式不正确"))?;
+            stmt = stmt.filter(license::Column::BatchId.eq(batch_id));
+        }
+        if let Some(source_channel) = trim_opt(&query.source_channel) {
+            stmt = stmt.filter(license::Column::SourceChannel.eq(source_channel));
+        }
         if let Some(from) = parse_date_start(query.created_from.as_deref())? {
             stmt = stmt.filter(license::Column::CreatedAt.gte(from));
         }
@@ -908,7 +1106,9 @@ impl AdminService {
             stmt = stmt.filter(license::Column::ExpiresAt.lte(to));
         }
 
-        let paginator = stmt.paginate(&self.db, page_size);
+        let paginator = stmt
+            .order_by_desc(license::Column::CreatedAt)
+            .paginate(&self.db, page_size);
         let total = paginator.num_items().await?;
         let rows = paginator.fetch_page(page - 1).await?;
 
@@ -1019,7 +1219,8 @@ impl AdminService {
             stmt = stmt.filter(
                 Condition::any()
                     .add(license::Column::ActivationCode.contains(keyword.clone()))
-                    .add(license::Column::Tier.contains(keyword)),
+                    .add(license::Column::Tier.contains(keyword.clone()))
+                    .add(license::Column::Note.contains(keyword)),
             );
         }
         if let Some(code) = trim_opt(&query.activation_code) {
@@ -1033,6 +1234,17 @@ impl AdminService {
         }
         if let Some(is_revoked) = query.is_revoked {
             stmt = stmt.filter(license::Column::IsRevoked.eq(is_revoked));
+        }
+        if let Some(status) = trim_opt(&query.status) {
+            stmt = apply_license_status_filter(stmt, &status);
+        }
+        if let Some(batch_id) = trim_opt(&query.batch_id) {
+            let batch_id = Uuid::parse_str(&batch_id)
+                .map_err(|_| ValidationError::custom("批次 ID 格式不正确"))?;
+            stmt = stmt.filter(license::Column::BatchId.eq(batch_id));
+        }
+        if let Some(source_channel) = trim_opt(&query.source_channel) {
+            stmt = stmt.filter(license::Column::SourceChannel.eq(source_channel));
         }
         if let Some(from) = parse_date_start(query.created_from.as_deref())? {
             stmt = stmt.filter(license::Column::CreatedAt.gte(from));
@@ -1423,6 +1635,7 @@ fn to_license_item(
         source_channel: row.source_channel,
         batch_id: row.batch_id.map(|id| id.to_string()),
         batch_name: related_batch.map(|batch| batch.batch_name),
+        note: row.note,
         user_id: row.user_id,
         max_devices: row.max_devices,
         device_migration_limit: row.device_migration_limit,
@@ -1614,6 +1827,30 @@ fn license_status(row: &license::Model) -> String {
         Some(expires_at) if expires_at.with_timezone(&Utc) < Utc::now() => "expired".to_string(),
         Some(_) => "active".to_string(),
         None => "pending".to_string(),
+    }
+}
+
+fn apply_license_status_filter(
+    stmt: sea_orm::Select<license::Entity>,
+    status: &str,
+) -> sea_orm::Select<license::Entity> {
+    match status {
+        "pending" => stmt
+            .filter(license::Column::IsRevoked.eq(false))
+            .filter(license::Column::ActivatedAt.is_null()),
+        "active" => stmt
+            .filter(license::Column::IsRevoked.eq(false))
+            .filter(license::Column::ActivatedAt.is_not_null())
+            .filter(
+                Condition::any()
+                    .add(license::Column::ExpiresAt.is_null())
+                    .add(license::Column::ExpiresAt.gte(Utc::now())),
+            ),
+        "expired" => stmt
+            .filter(license::Column::IsRevoked.eq(false))
+            .filter(license::Column::ExpiresAt.lt(Utc::now())),
+        "revoked" => stmt.filter(license::Column::IsRevoked.eq(true)),
+        _ => stmt,
     }
 }
 

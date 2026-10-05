@@ -43,14 +43,6 @@ export const defaultLicensingSettings: LicensingSettings = {
   status: 'unconfigured',
 };
 
-const LOCAL_LICENSE_API_BASE_URLS = new Set([
-  'http://124.222.232.50:30009',
-  'http://127.0.0.1:3001',
-  'http://localhost:3001',
-  'http://127.0.0.1:5189',
-  'http://localhost:5189',
-]);
-
 export const defaultAISettings: AIProviderSettings = {
   enabled: false,
   activeProviderId: 'deepseek',
@@ -267,15 +259,14 @@ function resolveLicensingApiBaseUrl(apiBaseUrl: string): string {
   return storedApiBaseUrl || defaultApiBaseUrl;
 }
 
-function shouldUseDefaultLicensingApiBaseUrl(storedApiBaseUrl: string, defaultApiBaseUrl: string): boolean {
-  return Boolean(
-    defaultApiBaseUrl &&
-    !LOCAL_LICENSE_API_BASE_URLS.has(defaultApiBaseUrl) &&
-    LOCAL_LICENSE_API_BASE_URLS.has(storedApiBaseUrl),
-  );
+export function shouldUseDefaultLicensingApiBaseUrl(
+  storedApiBaseUrl: string,
+  defaultApiBaseUrl: string,
+): boolean {
+  return Boolean(storedApiBaseUrl && defaultApiBaseUrl && storedApiBaseUrl !== defaultApiBaseUrl);
 }
 
-function hasLegacyLicensingApiBaseUrl(settings: unknown): boolean {
+function hasNonDefaultLicensingApiBaseUrl(settings: unknown): boolean {
   const licensing = (settings || {}) as Partial<LicensingSettings>;
   return shouldUseDefaultLicensingApiBaseUrl(
     normalizeApiBaseUrl(licensing.apiBaseUrl),
@@ -357,7 +348,7 @@ async function migratePlaintextSecretsIfNeeded(settings: {
     hasServerSecret(source.serverConfig) ||
     hasLicensingSecrets(source.licensingSettings) ||
     hasAISecrets(source.aiSettings) ||
-    hasLegacyLicensingApiBaseUrl(source.licensingSettings),
+    hasNonDefaultLicensingApiBaseUrl(source.licensingSettings),
   );
   if (!needsMigration) {
     return;

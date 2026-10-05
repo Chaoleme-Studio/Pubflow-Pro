@@ -5,7 +5,7 @@ import SiteHeader from './components/SiteHeader.vue';
 import { useSiteSeo } from './seo';
 
 const route = useRoute();
-const isStandalone = computed(() => route.name === 'admin' || route.name === 'publish-remote');
+const isStandalone = computed(() => Boolean(route.meta.standalone) || route.name === 'publish-remote');
 const currentView = computed(() => {
   const routeName = typeof route.name === 'string' ? route.name : 'not-found';
   return routeName.startsWith('not-found') ? 'not-found' : routeName;

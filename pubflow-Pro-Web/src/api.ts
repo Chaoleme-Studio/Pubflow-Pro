@@ -53,6 +53,10 @@ export interface AdminFilters {
   expiresFrom?: string;
   expiresTo?: string;
   status?: string;
+  batchId?: string;
+  sourceChannel?: string;
+  createdFrom?: string;
+  createdTo?: string;
   page?: number;
   pageSize?: number;
 }
@@ -66,6 +70,7 @@ export interface AdminLicenseItem {
   sourceChannel: string;
   batchId?: string;
   batchName?: string;
+  note?: string;
   userId?: number;
   maxDevices: number;
   deviceMigrationLimit: number;
@@ -194,6 +199,13 @@ export interface AdminOrderItem {
   expiresAt?: string;
 }
 
+export interface OrderListResult {
+  items: AdminOrderItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface GenerateLicenseParams {
   tier: LicenseTier;
   plan: Plan;
@@ -201,6 +213,17 @@ export interface GenerateLicenseParams {
   maxDevices?: number;
   batchName?: string;
   salesChannel?: string;
+  note?: string;
+}
+
+export interface AdminLicenseBatchItem {
+  id: string;
+  batchName: string;
+  salesChannel: string;
+  tier: LicenseTier;
+  plan: Plan;
+  quantity: number;
+  createdAt: string;
 }
 
 export interface LicenseSummary {
@@ -220,6 +243,18 @@ export interface LicenseListResult {
 
 export interface GenerateLicenseResult {
   items: AdminLicenseItem[];
+}
+
+export interface BulkLicenseActionParams {
+  action: 'revoke' | 'delete';
+  activationCodes?: string[];
+  batchId?: string;
+  reason?: string;
+}
+
+export interface BulkLicenseActionResult {
+  affected: number;
+  revokedLeases: number;
 }
 
 export interface AdminLeaseItem {
@@ -703,6 +738,35 @@ export async function deleteAdminLicense(
   };
 }
 
+export async function bulkAdminLicenseAction(
+  token: string,
+  params: BulkLicenseActionParams,
+): Promise<BulkLicenseActionResult> {
+  const response = await fetchWithTimeout('/v1/admin/licenses/bulk', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      action: params.action,
+      activation_codes: params.activationCodes ?? [],
+      batch_id: params.batchId,
+      reason: params.reason,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('登录已过期，请重新登录');
+    throw new Error(apiErrorMessage(payload, params.action === 'delete' ? '批量删除卡密失败' : '批量吊销卡密失败'));
+  }
+  const data = (payload?.data ?? payload) as Record<string, unknown>;
+  return {
+    affected: Number(data.affected ?? 0),
+    revokedLeases: Number(data.revoked_leases ?? data.revokedLeases ?? 0),
+  };
+}
+
 export async function freezeAdminLicense(
   token: string,
   activationCode: string,
@@ -818,6 +882,28 @@ export async function updateLicenseLimits(
   if (!response.ok) {
     if (response.status === 401) throw new Error('登录已过期，请重新登录');
     throw new Error('调整设备限制失败');
+  }
+  const data = ((payload?.data ?? payload) as Record<string, unknown>).item as Record<string, unknown> | undefined;
+  return normalizeLicenseItem(data ?? {});
+}
+
+export async function updateLicenseNote(
+  token: string,
+  activationCode: string,
+  note?: string,
+): Promise<AdminLicenseItem> {
+  const response = await fetchWithTimeout('/v1/admin/licenses/note', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ activation_code: activationCode, note }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('登录已过期，请重新登录');
+    throw new Error(apiErrorMessage(payload, '保存卡密备注失败'));
   }
   const data = ((payload?.data ?? payload) as Record<string, unknown>).item as Record<string, unknown> | undefined;
   return normalizeLicenseItem(data ?? {});
@@ -976,9 +1062,31 @@ export async function listAdminLicenses(token: string, filters: AdminFilters): P
   };
 }
 
-export async function listAdminOrders(token: string, filters: AdminFilters): Promise<AdminOrderItem[]> {
+export async function listAdminLicenseBatches(token: string): Promise<AdminLicenseBatchItem[]> {
+  const response = await fetchWithTimeout('/v1/admin/licenses/batches', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('登录已过期，请重新登录');
+    throw new Error('批次列表加载失败');
+  }
+  return normalizeList(payload).map((item) => ({
+    id: String(item.id ?? ''),
+    batchName: String(item.batch_name ?? item.batchName ?? ''),
+    salesChannel: String(item.sales_channel ?? item.salesChannel ?? ''),
+    tier: requireLicenseTier(item.tier),
+    plan: normalizePlan(item.plan) ?? 'monthly',
+    quantity: Number(item.quantity ?? 0),
+    createdAt: String(item.created_at ?? item.createdAt ?? ''),
+  }));
+}
+
+export async function listAdminOrders(token: string, filters: AdminFilters): Promise<OrderListResult> {
   const payload = await adminGet('/v1/admin/orders', token, filters);
-  return normalizeList(payload).map((item: Record<string, unknown>) => ({
+  const body = payload as Record<string, unknown>;
+  const data = (body?.data ?? body) as Record<string, unknown>;
+  const items = normalizeList(payload).map((item: Record<string, unknown>) => ({
     id: String(item.id ?? ''),
     orderNo: String(item.order_no ?? item.orderNo ?? ''),
     tier: requireLicenseTier(item.tier),
@@ -993,6 +1101,12 @@ export async function listAdminOrders(token: string, filters: AdminFilters): Pro
     updatedAt: String(item.updated_at ?? item.updatedAt ?? ''),
     expiresAt: stringOrUndefined(item.expires_at ?? item.expiresAt),
   }));
+  return {
+    items,
+    total: Number(data.total ?? data.total_items ?? items.length),
+    page: Number(data.page ?? data.page_index ?? 1),
+    pageSize: Number(data.page_size ?? data.pageSize ?? filters.pageSize ?? 20),
+  };
 }
 
 export async function getSelectorVersion(token: string): Promise<SelectorVersionItem | undefined> {
@@ -1050,6 +1164,10 @@ async function adminGet(path: string, token: string, filters: AdminFilters): Pro
   addParam(params, 'client_install_id', filters.clientInstallId);
   addParam(params, 'machine_hash', filters.machineHash);
   addParam(params, 'status', filters.status === 'all' ? '' : filters.status);
+  addParam(params, 'batch_id', filters.batchId === 'all' ? '' : filters.batchId);
+  addParam(params, 'source_channel', filters.sourceChannel === 'all' ? '' : filters.sourceChannel);
+  addParam(params, 'created_from', filters.createdFrom);
+  addParam(params, 'created_to', filters.createdTo);
   addParam(params, 'paid_from', filters.paidFrom);
   addParam(params, 'paid_to', filters.paidTo);
   addParam(params, 'expires_from', filters.expiresFrom);
@@ -1154,6 +1272,7 @@ export async function generateLicenses(
       max_devices: params.maxDevices ?? 1,
       batch_name: params.batchName,
       sales_channel: params.salesChannel,
+      note: params.note,
     }),
   });
   const payload = await response.json().catch(() => ({}));
@@ -1219,6 +1338,7 @@ function normalizeLicenseItem(item: Record<string, unknown>): AdminLicenseItem {
     sourceChannel: String(item.source_channel ?? item.sourceChannel ?? ''),
     batchId: stringOrUndefined(item.batch_id ?? item.batchId),
     batchName: stringOrUndefined(item.batch_name ?? item.batchName),
+    note: stringOrUndefined(item.note),
     userId: numberOrUndefined(item.user_id ?? item.userId),
     maxDevices: Number(item.max_devices ?? item.maxDevices ?? 1),
     deviceMigrationLimit: Number(item.device_migration_limit ?? item.deviceMigrationLimit ?? 5),

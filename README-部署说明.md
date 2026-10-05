@@ -8,24 +8,25 @@
 | --- | ---: | --- |
 | 京东云生产机 | `5189` | Rust 后端服务 |
 | 京东云生产机 | `5188` | Nginx，对外提供 Web 并反代 API |
-| 京东云生产机 | `80/443` | 域名和 HTTPS 备案通过后统一切换，当前尚未启用 |
+| 京东云生产机 | `80` | PubFlow 域名入口，转发到 `5188` |
+| 京东云生产机 | `443` | HTTPS，当前尚未启用 |
 
 公网入口：
 
 ```text
-http://117.72.147.216:5188/
+http://www.pubflow.chaoleme.cn/
 ```
 
 API 公网入口：
 
 ```text
-http://117.72.147.216:5189/v1/product/catalog
+http://www.pubflow.chaoleme.cn/v1/product/catalog
 ```
 
 Nginx 配置逻辑是：
 
 ```text
-浏览器 -> 117.72.147.216:5188 -> 京东云 Nginx
+浏览器 -> www.pubflow.chaoleme.cn:80 -> 京东云 Nginx -> 127.0.0.1:5188
 京东云 Nginx /           -> /home/wong/Desktop/Application/PubFlow/web
 京东云 Nginx /v1/...       -> 127.0.0.1:5189/v1/...
 京东云 Nginx /static/...  -> 127.0.0.1:5189/static/...
@@ -48,7 +49,7 @@ Web 后台不需要配置后端地址。前端代码请求的是同源相对路�
 PUBLIC_API_BASE_URL=http://127.0.0.1:5189
 
 # .env.production
-PUBLIC_API_BASE_URL=http://117.72.147.216:5189
+PUBLIC_API_BASE_URL=http://www.pubflow.chaoleme.cn
 ```
 
 这个值是构建期写入插件包的。打完包以后再改 `.env` 不会影响已经生成的 ZIP/CRX，必须重新打包。
@@ -94,7 +95,8 @@ ENV=production ./scripts/build-web.sh
 
 Web 静态产物位于 `dist/web/html/`，将其同步到京东云 `/home/wong/Desktop/Application/PubFlow/web/`后，检查并重载 Nginx。首页 SSG 输出、`robots.txt` 、`sitemap.xml` 和静态 404 页都会包含在该目录中。
 
-Nginx 配置模板为 [`deploy/nginx/pubflow-pro.conf`](./deploy/nginx/pubflow-pro.conf)；上线前执行：
+Nginx 配置模板为 [`deploy/nginx/pubflow-pro.conf`](./deploy/nginx/pubflow-pro.conf)
+和 [`deploy/nginx/pubflow-domain.conf`](./deploy/nginx/pubflow-domain.conf)；上线前执行：
 
 ```bash
 nginx -t && systemctl reload nginx
@@ -116,11 +118,11 @@ dist/extension/pubflow-extension.zip
 
 ## 常见判断
 
-如果 `http://117.72.147.216:5188/` 没反应，先分别检查：
+如果生产域名没反应，先分别检查：
 
 ```bash
-curl -I http://117.72.147.216:5188/
-curl http://117.72.147.216:5189/v1/product/catalog
+curl -I http://www.pubflow.chaoleme.cn/
+curl http://www.pubflow.chaoleme.cn/v1/product/catalog
 ```
 
 如果第一个正常、第二个失败，多半是后端或 Nginx 反代问题。

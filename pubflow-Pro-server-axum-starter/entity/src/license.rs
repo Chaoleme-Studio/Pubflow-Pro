@@ -13,6 +13,7 @@ pub struct Model {
     pub plan: String,
     pub source_channel: String,
     pub batch_id: Option<Uuid>,
+    pub note: Option<String>,
     pub max_devices: i32,
     pub remote_daily_job_limit: Option<i32>,
     pub remote_daily_byte_limit: Option<i64>,

@@ -22,6 +22,7 @@ pub struct GenerateLicenseRequest {
     pub max_devices: Option<i32>,
     pub batch_name: Option<String>,
     pub sales_channel: Option<String>,
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -34,6 +35,7 @@ pub struct LicenseItem {
     pub source_channel: String,
     pub batch_id: Option<String>,
     pub batch_name: Option<String>,
+    pub note: Option<String>,
     pub user_id: Option<i32>,
     pub max_devices: i32,
     pub device_migration_limit: i32,
@@ -74,6 +76,22 @@ pub struct GenerateLicenseResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LicenseBatchItem {
+    pub id: String,
+    pub batch_name: String,
+    pub sales_channel: String,
+    pub tier: String,
+    pub plan: String,
+    pub quantity: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LicenseBatchListResponse {
+    pub items: Vec<LicenseBatchItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RevokeLicenseRequest {
     pub activation_code: String,
     pub reason: Option<String>,
@@ -93,6 +111,21 @@ pub struct DeleteLicenseRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DeleteLicenseResponse {
     pub deleted: bool,
+    pub revoked_leases: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct BulkLicenseActionRequest {
+    pub action: String,
+    #[serde(default)]
+    pub activation_codes: Vec<String>,
+    pub batch_id: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct BulkLicenseActionResponse {
+    pub affected: u64,
     pub revoked_leases: u64,
 }
 
@@ -254,6 +287,17 @@ pub struct UpdateLicenseLimitsResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateLicenseNoteRequest {
+    pub activation_code: String,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateLicenseNoteResponse {
+    pub item: LicenseItem,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ListLicenseQuery {
     pub keyword: Option<String>,
     pub activation_code: Option<String>,
@@ -262,6 +306,9 @@ pub struct ListLicenseQuery {
     pub client_install_id: Option<String>,
     pub machine_hash: Option<String>,
     pub is_revoked: Option<bool>,
+    pub status: Option<String>,
+    pub batch_id: Option<String>,
+    pub source_channel: Option<String>,
     pub created_from: Option<String>,
     pub created_to: Option<String>,
     pub paid_from: Option<String>,

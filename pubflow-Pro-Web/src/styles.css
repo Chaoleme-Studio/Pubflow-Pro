@@ -40,6 +40,7 @@
   --radius: 16px;
   --radius-sm: 10px;
   --radius-lg: 24px;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 
   color: var(--text-1);
   background: var(--bg-1);
@@ -47,6 +48,16 @@
   font-synthesis: none;
   text-rendering: geometricPrecision;
   -webkit-font-smoothing: antialiased;
+}
+
+.sr-only {
+  width: 1px;
+  height: 1px;
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 * {
@@ -3286,4 +3297,556 @@ code {
 
 .legend-dot.verifications {
   background: var(--accent-green);
+}
+
+/* Admin console: compact, stable operational layout. */
+.admin-page {
+  min-height: 100vh;
+  padding: 0;
+  gap: 0;
+  background: #080a10;
+}
+
+.admin-sidebar,
+.admin-workspace {
+  border-radius: 0;
+  backdrop-filter: none;
+}
+
+.admin-sidebar {
+  width: 214px;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 10px;
+  border-width: 0 1px 0 0;
+  background: #0d1017;
+}
+
+.admin-brand {
+  height: 44px;
+  margin: 0 8px 14px;
+  font-size: 14px;
+}
+
+.admin-sidebar > a,
+.admin-sidebar > button {
+  width: 100%;
+  height: 38px;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 3px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-3);
+  background: transparent;
+  text-decoration: none;
+  white-space: nowrap;
+  font-size: 13px;
+  text-align: left;
+  transition: color 160ms ease, background-color 160ms ease, transform 140ms var(--ease-out);
+}
+
+.admin-sidebar > a:hover,
+.admin-sidebar > button:hover {
+  color: var(--text-1);
+  background: rgba(255, 255, 255, .05);
+}
+
+.admin-sidebar > a.active {
+  color: #e9f2ff;
+  background: rgba(54, 125, 255, .16);
+}
+
+.admin-sidebar > a:active,
+.admin-sidebar > button:active {
+  transform: scale(.98);
+}
+
+.admin-sidebar .sidebar-logout {
+  margin-top: auto;
+}
+
+.admin-workspace {
+  width: calc(100% - 214px);
+  min-width: 0;
+  min-height: 100vh;
+  padding: 22px clamp(18px, 2.4vw, 36px) 36px;
+  border: 0;
+  background: #080a10;
+}
+
+.admin-topbar {
+  min-height: 54px;
+  margin-bottom: 18px;
+}
+
+.admin-topbar h1 {
+  margin-top: 2px;
+  font-size: 24px;
+  letter-spacing: 0;
+}
+
+.admin-topbar span {
+  font-size: 12px;
+}
+
+.admin-page .primary-button:hover,
+.admin-page .secondary-button:hover {
+  transform: none;
+}
+
+.admin-page .primary-button:active,
+.admin-page .secondary-button:active,
+.admin-page .mini-action:active {
+  transform: scale(.97);
+}
+
+.admin-table-view {
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.operations-head {
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.operations-head strong {
+  margin-top: 3px;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.operations-head > div:first-child > span {
+  font-size: 12px;
+}
+
+.license-operations-head {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  align-items: center;
+}
+
+.license-list-toolbar,
+.license-selection-actions,
+.license-bulk-toolbar,
+.license-bulk-toolbar > div,
+.lease-filter-panel,
+.lease-custom-dates {
+  display: flex;
+  align-items: center;
+}
+
+.license-list-toolbar {
+  min-height: 46px;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 0 0;
+}
+
+.license-selection-actions {
+  min-width: 0;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.license-selection-actions .active {
+  border-color: var(--border-brand);
+  color: var(--brand-400);
+  background: rgba(54, 125, 255, .1);
+}
+
+.license-view-switch,
+.lease-range-switch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  padding: 3px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, .2);
+}
+
+.license-view-switch button {
+  width: 32px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-4);
+  background: transparent;
+}
+
+.license-view-switch button.active {
+  color: var(--text-1);
+  background: var(--surface-3);
+}
+
+.license-bulk-toolbar {
+  min-height: 48px;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 7px 9px 7px 12px;
+  border: 1px solid var(--border-brand);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  background: rgba(54, 125, 255, .08);
+}
+
+.license-bulk-toolbar > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.license-bulk-toolbar > span {
+  margin-right: auto;
+  color: var(--text-4);
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.license-bulk-toolbar > div { gap: 7px; flex: 0 0 auto; }
+
+.danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 92, 138, .32);
+  border-radius: var(--radius-sm);
+  color: #ffb7c7;
+  background: rgba(255, 92, 138, .1);
+}
+
+.danger-button:disabled { cursor: not-allowed; opacity: .45; }
+
+.license-clear-selection {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  background: var(--surface-2);
+}
+
+.bulk-license-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 209, 102, .2);
+  border-radius: var(--radius-sm);
+  color: #ffe1a3;
+  background: rgba(255, 209, 102, .08);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.lease-filter-panel {
+  min-height: 48px;
+  gap: 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+}
+
+.lease-range-switch button {
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-3);
+  background: transparent;
+  font-size: 12px;
+}
+
+.lease-range-switch button.active {
+  color: var(--text-1);
+  background: var(--surface-3);
+}
+
+.lease-custom-dates {
+  min-width: 0;
+  gap: 7px;
+}
+
+.lease-custom-dates input {
+  width: 148px;
+  height: 34px;
+}
+
+.lease-custom-dates span {
+  color: var(--text-4);
+  font-size: 12px;
+}
+
+.lease-filter-panel > .secondary-button { margin-left: auto; flex: 0 0 auto; }
+
+.license-view-switch button,
+.license-bulk-toolbar button,
+.lease-filter-panel button {
+  transition: transform 140ms cubic-bezier(.23, 1, .32, 1), background-color 160ms ease, border-color 160ms ease;
+}
+
+.license-view-switch button:active,
+.license-bulk-toolbar button:active:not(:disabled),
+.lease-filter-panel button:active:not(:disabled) { transform: scale(.97); }
+
+.ops-kpis {
+  grid-template-columns: repeat(4, minmax(68px, 1fr));
+  gap: 4px;
+}
+
+.ops-kpis span {
+  min-height: 42px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .035);
+}
+
+.ops-kpis b {
+  font-size: 14px;
+}
+
+.stat-tile,
+.ops-board,
+.selector-upload,
+.selector-list,
+.review-lane > div {
+  border-radius: 8px;
+}
+
+.modal-content:focus {
+  outline: none;
+}
+
+.admin-form-stack {
+  display: grid;
+  gap: 9px;
+}
+
+.admin-form-stack label,
+.admin-form-stack label > span {
+  display: block;
+}
+
+.admin-form-stack label > span {
+  margin-bottom: 7px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.admin-form-stack small {
+  color: var(--text-4);
+  text-align: right;
+}
+
+.dialog-error {
+  margin: 0;
+  color: #ff9db4;
+  font-size: 13px;
+}
+
+.modal-content {
+  max-width: 620px;
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  border-radius: 8px;
+}
+
+.modal-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 18px 20px;
+}
+
+.modal-body label:has(textarea),
+.modal-body .modal-hint,
+.modal-body .generate-result,
+.modal-body .inline-toggle {
+  grid-column: 1 / -1;
+}
+
+.modal-header,
+.modal-footer {
+  padding-left: 20px;
+  padding-right: 20px;
+}
+
+@media (max-width: 1180px) {
+  .admin-sidebar {
+    width: 188px;
+  }
+
+  .admin-workspace {
+    width: calc(100% - 188px);
+  }
+
+  .license-operations-head {
+    grid-template-columns: minmax(220px, 1fr) auto;
+  }
+
+  .license-operations-head .ops-kpis {
+    order: 3;
+    grid-column: 1 / -1;
+    width: min(100%, 460px);
+  }
+}
+
+@media (max-width: 920px) {
+  .admin-page {
+    flex-direction: column;
+  }
+
+  .admin-sidebar {
+    width: 100%;
+    height: 58px;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    flex-direction: row;
+    align-items: center;
+    gap: 3px;
+    padding: 8px;
+    overflow-x: auto;
+    border-width: 0 0 1px;
+  }
+
+  .admin-brand {
+    height: 40px;
+    flex: 0 0 auto;
+    margin: 0 8px 0 0;
+  }
+
+  .admin-sidebar > a,
+  .admin-sidebar > button {
+    width: auto;
+    flex: 0 0 auto;
+    margin: 0;
+  }
+
+  .admin-sidebar .sidebar-logout {
+    margin: 0 0 0 auto;
+  }
+
+  .admin-workspace {
+    width: 100%;
+    min-height: calc(100vh - 58px);
+  }
+
+  .admin-topbar {
+    align-items: center;
+    flex-direction: row;
+  }
+}
+
+@media (max-width: 700px) {
+  .admin-workspace {
+    padding: 16px 12px 28px;
+  }
+
+  .admin-brand {
+    font-size: 0;
+  }
+
+  .admin-brand img {
+    margin-right: 0;
+  }
+
+  .admin-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .license-operations-head {
+    grid-template-columns: 1fr;
+  }
+
+  .license-operations-head .ops-kpis {
+    order: initial;
+    grid-column: auto;
+    width: 100%;
+  }
+
+  .license-operations-head .admin-actions {
+    width: 100%;
+  }
+
+  .license-operations-head .admin-actions > * {
+    flex: 1;
+  }
+
+  .operations-head:not(.license-operations-head) {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .operations-head:not(.license-operations-head) .ops-kpis {
+    width: 100%;
+  }
+
+  .license-list-toolbar,
+  .license-bulk-toolbar,
+  .lease-filter-panel {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .license-selection-actions,
+  .license-bulk-toolbar > strong {
+    width: calc(100% - 78px);
+  }
+
+  .license-view-switch { margin-left: auto; }
+
+  .license-bulk-toolbar > span { display: none; }
+  .license-bulk-toolbar > div { width: 100%; }
+  .license-bulk-toolbar > div .secondary-button,
+  .license-bulk-toolbar > div .danger-button { flex: 1; }
+
+  .lease-custom-dates {
+    width: 100%;
+    order: 3;
+  }
+
+  .lease-custom-dates input { min-width: 0; flex: 1; }
+
+  .modal-body {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-body label:has(textarea),
+  .modal-body .modal-hint,
+  .modal-body .generate-result,
+  .modal-body .inline-toggle {
+    grid-column: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-page *,
+  .admin-page *::before,
+  .admin-page *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
 }

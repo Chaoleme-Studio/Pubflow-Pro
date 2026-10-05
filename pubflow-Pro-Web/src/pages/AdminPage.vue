@@ -6,6 +6,7 @@ import {
   Download,
   GitBranch,
   KeyRound,
+  LayoutGrid,
   Layers3,
   ListChecks,
   LogIn,
@@ -13,14 +14,17 @@ import {
   PackageOpen,
   RadioTower,
   RefreshCw,
-  Search,
+  TableProperties,
+  Trash2,
   UsersRound,
   WalletCards,
   X,
 } from 'lucide-vue-next';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { RouterLink, useRoute } from 'vue-router';
 import {
   adminLogin,
+  bulkAdminLicenseAction,
   createAdminAppVersion,
   deleteAdminAppVersion,
   deleteAdminLicense,
@@ -30,6 +34,7 @@ import {
   getAdminProductCatalog,
   getSelectorVersion,
   listAdminAppVersions,
+  listAdminLicenseBatches,
   listAdminLeases,
   listAdminLicenses,
   listAdminOrders,
@@ -40,10 +45,12 @@ import {
   unfreezeAdminLicense,
   updateAdminAppVersion,
   updateLicenseLimits,
+  updateLicenseNote,
   uploadSelector,
   type AdminDownloadConfig,
   type AppVersionItem,
   type AdminLeaseItem,
+  type AdminLicenseBatchItem,
   type AdminLicenseItem,
   type AdminOrderItem,
   type AdminPlanConfig,
@@ -55,11 +62,26 @@ import {
   type SelectorVersionItem,
 } from '../api';
 import AdminOverviewChart from '../components/admin/AdminOverviewChart.vue';
-import { eventLabel, formatDateTime, inDateRange, planLabel, shortHash, sourceLabel, statusLabel, tierLabel, toDateOnly, yuan } from '../utils/format';
+import AdminDialog from '../components/admin/AdminDialog.vue';
+import AdminLeaseTable from '../components/admin/AdminLeaseTable.vue';
+import AdminLicenseFilters from '../components/admin/AdminLicenseFilters.vue';
+import AdminLicenseGrid from '../components/admin/AdminLicenseGrid.vue';
+import AdminLicenseTable from '../components/admin/AdminLicenseTable.vue';
+import AdminOrderFilters from '../components/admin/AdminOrderFilters.vue';
+import AdminOrderTable from '../components/admin/AdminOrderTable.vue';
+import AdminPagination from '../components/admin/AdminPagination.vue';
+import { emptyLicenseFilters, type LicenseFilters } from '../components/admin/licenseTypes';
+import { emptyOrderFilters, type OrderFilters } from '../components/admin/orderTypes';
+import { formatDateTime, inDateRange, planLabel, sourceLabel, statusLabel, tierLabel, toDateOnly, yuan } from '../utils/format';
 
 type AdminView = 'overview' | 'products' | 'versions' | 'users' | 'licenses' | 'leases' | 'selectors';
+const ADMIN_VIEWS: AdminView[] = ['overview', 'products', 'versions', 'users', 'licenses', 'leases', 'selectors'];
 
-const adminView = ref<AdminView>('overview');
+const route = useRoute();
+const adminView = computed<AdminView>(() => {
+  const value = route.meta.adminView;
+  return typeof value === 'string' && ADMIN_VIEWS.includes(value as AdminView) ? value as AdminView : 'overview';
+});
 const adminToken = ref(sessionStorage.getItem('pubflow_admin_token') || '');
 const adminLoggedIn = ref(Boolean(adminToken.value));
 const adminAccount = ref('');
@@ -72,9 +94,10 @@ const adminDataError = ref('');
 const adminLoading = ref(false);
 const orderPage = ref(1);
 const orderPageSize = ref(10);
-const selectedLicense = ref('');
+const orderTotal = ref(0);
 const remoteOrders = ref<AdminOrderItem[]>([]);
 const remoteLicenses = ref<AdminLicenseItem[]>([]);
+const licenseBatches = ref<AdminLicenseBatchItem[]>([]);
 const remoteLeases = ref<AdminLeaseItem[]>([]);
 const dauStats = ref<DauStat[]>([]);
 const selectorVersion = ref<SelectorVersionItem>();
@@ -147,13 +170,23 @@ const generateQuantity = ref(10);
 const generateMaxDevices = ref(1);
 const generateBatchName = ref('');
 const generateSalesChannel = ref('third_party');
+const generateNote = ref('');
 const generateLoading = ref(false);
 const generateResult = ref('');
 const showGenerateDialog = ref(false);
 const showReplaceDialog = ref(false);
 const showLimitsDialog = ref(false);
+const showNoteDialog = ref(false);
+const licenseViewMode = ref<'grid' | 'table'>(localStorage.getItem('pubflow_admin_license_view') === 'grid' ? 'grid' : 'table');
+const selectedLicenseCodes = ref<Set<string>>(new Set());
+const selectedLicenseBatchId = ref('');
+const showBulkLicenseDialog = ref(false);
+const bulkLicenseAction = ref<'revoke' | 'delete'>('revoke');
+const bulkLicenseReason = ref('');
+const bulkDeleteConfirmation = ref('');
+const bulkLicenseBusy = ref(false);
+const bulkLicenseError = ref('');
 const modalContentRef = ref<HTMLDivElement>();
-const licenseViewMode = ref<'card' | 'table'>('card');
 const actionLicense = ref<AdminLicenseItem>();
 const replaceReason = ref('');
 const replaceRevokeOld = ref(true);
@@ -161,6 +194,9 @@ const replaceResult = ref('');
 const limitsMaxDevices = ref(1);
 const limitsMigrationLimit = ref(5);
 const limitsReason = ref('');
+const noteDraft = ref('');
+const noteSaving = ref(false);
+const noteMessage = ref('');
 
 watch(showGenerateDialog, (open) => {
   if (open) nextTick(() => modalContentRef.value?.focus());
@@ -170,27 +206,21 @@ watch(adminView, () => {
   if (adminLoggedIn.value) void refreshCurrentView();
 });
 
-const emptyFilters = () => ({
-  keyword: '',
-  tier: 'all',
-  plan: 'all',
-  status: 'all',
-  paidFrom: '',
-  paidTo: '',
-  expiresFrom: '',
-  expiresTo: '',
-});
-const orderFilters = ref(emptyFilters());
-const licenseFilters = ref(emptyFilters());
+const orderFilters = ref<OrderFilters>(emptyOrderFilters());
+const licenseFilters = ref<LicenseFilters>(emptyLicenseFilters());
+
+watch(licenseViewMode, (value) => localStorage.setItem('pubflow_admin_license_view', value));
+watch([licensePage, licensePageSize], () => clearLicenseSelection());
+watch(licenseFilters, () => clearLicenseSelection(), { deep: true });
 
 const adminTabs = [
-  { key: 'overview', label: '总览', icon: Activity },
-  { key: 'products', label: '商品配置', icon: PackageOpen },
-  { key: 'versions', label: '版本管理', icon: GitBranch },
-  { key: 'users', label: '订单管理', icon: WalletCards },
-  { key: 'licenses', label: '卡密管理', icon: KeyRound },
-  { key: 'leases', label: '授权记录', icon: ListChecks },
-  { key: 'selectors', label: 'Selector 状态', icon: DatabaseZap },
+  { key: 'overview', label: '总览', icon: Activity, routeName: 'admin-overview' },
+  { key: 'products', label: '商品配置', icon: PackageOpen, routeName: 'admin-products' },
+  { key: 'versions', label: '版本管理', icon: GitBranch, routeName: 'admin-versions' },
+  { key: 'users', label: '订单管理', icon: WalletCards, routeName: 'admin-users' },
+  { key: 'licenses', label: '卡密管理', icon: KeyRound, routeName: 'admin-licenses' },
+  { key: 'leases', label: '授权记录', icon: ListChecks, routeName: 'admin-leases' },
+  { key: 'selectors', label: 'Selector 状态', icon: DatabaseZap, routeName: 'admin-selectors' },
 ] as const;
 
 const adminViewTitles: Record<AdminView, string> = {
@@ -266,23 +296,6 @@ const DEFAULT_DOWNLOAD_PACKAGES: AdminDownloadConfig[] = [
   },
 ];
 
-const normalizedOrders = computed(() => {
-  return remoteOrders.value.map((item) => ({
-    id: item.id,
-    orderNo: item.orderNo,
-    plan: item.plan || 'monthly',
-    tier: item.tier,
-    status: item.status,
-    source: item.channel || '-',
-    activationCode: item.activationCode || '-',
-    paidAt: toDateOnly(item.paidAt),
-    expiresAt: item.expiresAt ? toDateOnly(item.expiresAt) : '未激活',
-    createdAt: formatDateTime(item.createdAt),
-    updatedAt: formatDateTime(item.updatedAt),
-    amountCents: item.amountCents || 0,
-  }));
-});
-
 const normalizedLicenses = computed(() => {
   return remoteLicenses.value.map((item) => ({
     id: item.id,
@@ -303,43 +316,33 @@ const normalizedLicenses = computed(() => {
     channel: item.orderChannel || '-',
     sourceChannel: item.sourceChannel || '-',
     batchName: item.batchName || '-',
+    note: item.note || '',
     amountCents: item.amountCents || 0,
     clientInstallIds: item.clientInstallIds,
   }));
 });
 
 const filteredOrders = computed(() => {
-  return normalizedOrders.value.filter((item) => {
+  return remoteOrders.value.filter((item) => {
     const keyword = orderFilters.value.keyword.trim().toLowerCase();
-    const inKeyword = !keyword || `${item.orderNo} ${item.source} ${item.status} ${item.activationCode}`.toLowerCase().includes(keyword);
+    const inKeyword = !keyword || `${item.orderNo} ${item.channel} ${item.status} ${item.activationCode || ''}`.toLowerCase().includes(keyword);
     const inPlan = orderFilters.value.plan === 'all' || item.plan === orderFilters.value.plan;
     const inTier = orderFilters.value.tier === 'all' || item.tier === orderFilters.value.tier;
     const inStatus = orderFilters.value.status === 'all' || item.status === orderFilters.value.status;
-    const inPaidRange = inDateRange(item.paidAt, orderFilters.value.paidFrom, orderFilters.value.paidTo);
-    const inExpireRange = item.expiresAt === '未激活'
+    const paidAt = toDateOnly(item.paidAt);
+    const expiresAt = item.expiresAt ? toDateOnly(item.expiresAt) : '未激活';
+    const inPaidRange = inDateRange(paidAt, orderFilters.value.paidFrom, orderFilters.value.paidTo);
+    const inExpireRange = expiresAt === '未激活'
       ? !(orderFilters.value.expiresFrom || orderFilters.value.expiresTo)
-      : inDateRange(item.expiresAt, orderFilters.value.expiresFrom, orderFilters.value.expiresTo);
+      : inDateRange(expiresAt, orderFilters.value.expiresFrom, orderFilters.value.expiresTo);
     return inKeyword && inTier && inPlan && inStatus && inPaidRange && inExpireRange;
   });
 });
 
-const filteredLicenses = computed(() => {
-  return normalizedLicenses.value.filter((item) => {
-    const keyword = licenseFilters.value.keyword.trim().toLowerCase();
-    const inKeyword = !keyword || `${item.code} ${item.user} ${item.plan} ${item.status} ${item.orderNo}`.toLowerCase().includes(keyword);
-    const inPlan = licenseFilters.value.plan === 'all' || item.plan === licenseFilters.value.plan;
-    const inTier = licenseFilters.value.tier === 'all' || item.tier === licenseFilters.value.tier;
-    const inStatus = licenseFilters.value.status === 'all' || item.status === licenseFilters.value.status;
-    const inPaidRange = inDateRange(item.paidAt, licenseFilters.value.paidFrom, licenseFilters.value.paidTo);
-    const inExpireRange = item.expiresAt === '未激活'
-      ? !(licenseFilters.value.expiresFrom || licenseFilters.value.expiresTo)
-      : inDateRange(item.expiresAt, licenseFilters.value.expiresFrom, licenseFilters.value.expiresTo);
-    return inKeyword && inTier && inPlan && inStatus && inPaidRange && inExpireRange;
-  });
-});
+const filteredLicenses = computed(() => normalizedLicenses.value);
 
 const orderSummary = computed(() => ({
-  total: filteredOrders.value.length,
+  total: orderTotal.value,
   yearly: filteredOrders.value.filter((item) => item.plan === 'yearly').length,
   monthly: filteredOrders.value.filter((item) => item.plan === 'monthly').length,
   revenue: filteredOrders.value.reduce((sum, item) => sum + item.amountCents, 0),
@@ -362,13 +365,15 @@ const dauYTicks = computed(() => {
   if (ticks[ticks.length - 1] < m) ticks.push(ticks[ticks.length - 1] + step);
   return ticks;
 });
-const orderTotalPages = computed(() => Math.max(1, Math.ceil(filteredOrders.value.length / orderPageSize.value)));
-const paginatedOrders = computed(() => {
-  const safePage = Math.min(orderPage.value, orderTotalPages.value);
-  const start = (safePage - 1) * orderPageSize.value;
-  return filteredOrders.value.slice(start, start + orderPageSize.value);
-});
+const paginatedOrders = computed(() => filteredOrders.value);
 const licenseTotalPages = computed(() => Math.max(1, Math.ceil(licenseTotal.value / licensePageSize.value)));
+const selectedLicenseBatch = computed(() => licenseBatches.value.find((batch) => batch.id === selectedLicenseBatchId.value));
+const bulkLicenseSelectedCount = computed(() => selectedLicenseBatch.value?.quantity ?? selectedLicenseCodes.value.size);
+const visibleSelectedLicenseCodes = computed(() => selectedLicenseBatchId.value
+  ? new Set(remoteLicenses.value.map((item) => item.activationCode))
+  : selectedLicenseCodes.value);
+const allCurrentLicensesSelected = computed(() => remoteLicenses.value.length > 0
+  && remoteLicenses.value.every((item) => visibleSelectedLicenseCodes.value.has(item.activationCode)));
 const leaseTotalPages = computed(() => Math.max(1, Math.ceil(remoteLeases.value.length / leasePageSize.value)));
 const paginatedLeases = computed(() => {
   const safePage = Math.min(leasePage.value, leaseTotalPages.value);
@@ -449,6 +454,7 @@ async function handleGenerateLicenses() {
       maxDevices: generateMaxDevices.value,
       batchName: generateBatchName.value.trim() || undefined,
       salesChannel: generateSalesChannel.value.trim() || undefined,
+      note: generateNote.value.trim() || undefined,
     });
     generateResult.value = `成功生成 ${result.items.length} 个激活码`;
     showGenerateDialog.value = false;
@@ -463,12 +469,16 @@ async function handleGenerateLicenses() {
 async function refreshLicensesOnly() {
   if (!adminToken.value) return;
   adminDataError.value = '';
-  const licenseResult = await listAdminLicenses(adminToken.value, {
-    ...licenseFilters.value,
-    page: licensePage.value,
-    pageSize: licensePageSize.value,
-  });
+  const [licenseResult, batches] = await Promise.all([
+    listAdminLicenses(adminToken.value, {
+      ...licenseFilters.value,
+      page: licensePage.value,
+      pageSize: licensePageSize.value,
+    }),
+    listAdminLicenseBatches(adminToken.value),
+  ]);
   remoteLicenses.value = licenseResult.items;
+  licenseBatches.value = batches;
   licenseTotal.value = licenseResult.total;
   licenseSummaryData.value = licenseResult.summary;
 }
@@ -482,8 +492,8 @@ async function refreshAdminData() {
     applyOverviewTimeRange();
     applyLeaseTimeRange();
 
-    const [users, licenseResult, selector, products, versions] = await Promise.all([
-      listAdminOrders(adminToken.value, orderFilters.value),
+    const [orderResult, licenseResult, selector, products, versions, batches] = await Promise.all([
+      listAdminOrders(adminToken.value, { ...orderFilters.value, page: 1, pageSize: 100 }),
       listAdminLicenses(adminToken.value, { ...licenseFilters.value, page: licensePage.value, pageSize: licensePageSize.value }),
       getSelectorVersion(adminToken.value),
       getAdminProductCatalog(adminToken.value).catch((error) => {
@@ -491,13 +501,16 @@ async function refreshAdminData() {
         return productConfig.value;
       }),
       refreshAppVersions(),
+      listAdminLicenseBatches(adminToken.value),
       refreshLeases(),
       refreshDauStats(),
     ]);
-    remoteOrders.value = users;
+    remoteOrders.value = orderResult.items;
+    orderTotal.value = orderResult.total;
     remoteLicenses.value = licenseResult.items;
     licenseTotal.value = licenseResult.total;
     licenseSummaryData.value = licenseResult.summary;
+    licenseBatches.value = batches;
     selectorVersion.value = selector;
     productConfig.value = products;
     ensureTierPlans();
@@ -530,7 +543,13 @@ async function refreshCurrentView() {
     } else if (adminView.value === 'selectors') {
       selectorVersion.value = await getSelectorVersion(adminToken.value);
     } else if (adminView.value === 'users') {
-      remoteOrders.value = await listAdminOrders(adminToken.value, orderFilters.value);
+      const result = await listAdminOrders(adminToken.value, {
+        ...orderFilters.value,
+        page: orderPage.value,
+        pageSize: orderPageSize.value,
+      });
+      remoteOrders.value = result.items;
+      orderTotal.value = result.total;
     } else {
       await refreshAdminData();
     }
@@ -829,6 +848,33 @@ function openLimitsDialog(item: AdminLicenseItem) {
   showLimitsDialog.value = true;
 }
 
+function openNoteDialog(item: AdminLicenseItem) {
+  actionLicense.value = item;
+  noteDraft.value = item.note || '';
+  noteMessage.value = '';
+  showNoteDialog.value = true;
+}
+
+async function submitLicenseNote() {
+  if (!adminToken.value || !actionLicense.value) return;
+  noteSaving.value = true;
+  noteMessage.value = '';
+  try {
+    await updateLicenseNote(
+      adminToken.value,
+      actionLicense.value.activationCode,
+      noteDraft.value.trim() || undefined,
+    );
+    showNoteDialog.value = false;
+    generateResult.value = noteDraft.value.trim() ? '卡密备注已保存' : '卡密备注已清空';
+    await refreshLicensesOnly();
+  } catch (error) {
+    noteMessage.value = error instanceof Error ? error.message : '保存备注失败';
+  } finally {
+    noteSaving.value = false;
+  }
+}
+
 async function submitLicenseLimits() {
   if (!adminToken.value || !actionLicense.value) return;
   try {
@@ -852,10 +898,6 @@ function planPrice(plan: AdminPlanConfig) {
 
 function downloadTitle(item: AdminDownloadConfig) {
   return `${item.name || item.code} ${item.fileName ? `· ${item.fileName}` : ''}`;
-}
-
-function rawLicenseByCode(code: string) {
-  return remoteLicenses.value.find((raw) => raw.activationCode === code);
 }
 
 async function refreshLeases() {
@@ -907,13 +949,93 @@ function applyLeaseTimeRange() {
 }
 
 function resetOrderFilters() {
-  orderFilters.value = emptyFilters();
+  orderFilters.value = emptyOrderFilters();
   orderPage.value = 1;
   void refreshCurrentView();
 }
 
+function applyOrderFilters() {
+  orderPage.value = 1;
+  void refreshCurrentView();
+}
+
+function clearLicenseSelection() {
+  selectedLicenseCodes.value = new Set();
+  selectedLicenseBatchId.value = '';
+}
+
+function toggleLicenseSelection(item: AdminLicenseItem) {
+  const next = selectedLicenseBatchId.value
+    ? new Set(remoteLicenses.value.map((license) => license.activationCode))
+    : new Set(selectedLicenseCodes.value);
+  selectedLicenseBatchId.value = '';
+  if (next.has(item.activationCode)) next.delete(item.activationCode);
+  else next.add(item.activationCode);
+  selectedLicenseCodes.value = next;
+}
+
+function toggleCurrentLicensePage() {
+  if (selectedLicenseBatchId.value) {
+    clearLicenseSelection();
+    return;
+  }
+  const next = new Set(selectedLicenseCodes.value);
+  if (allCurrentLicensesSelected.value) {
+    remoteLicenses.value.forEach((item) => next.delete(item.activationCode));
+  } else {
+    remoteLicenses.value.forEach((item) => next.add(item.activationCode));
+  }
+  selectedLicenseCodes.value = next;
+}
+
+function selectFilteredLicenseBatch() {
+  if (licenseFilters.value.batchId === 'all') return;
+  selectedLicenseCodes.value = new Set();
+  selectedLicenseBatchId.value = licenseFilters.value.batchId;
+}
+
+function openBulkLicenseDialog(action: 'revoke' | 'delete') {
+  if (bulkLicenseSelectedCount.value === 0) return;
+  bulkLicenseAction.value = action;
+  bulkLicenseReason.value = '';
+  bulkDeleteConfirmation.value = '';
+  bulkLicenseError.value = '';
+  showBulkLicenseDialog.value = true;
+}
+
+async function submitBulkLicenseAction() {
+  if (!adminToken.value || bulkLicenseSelectedCount.value === 0) return;
+  if (bulkLicenseAction.value === 'delete' && bulkDeleteConfirmation.value.trim() !== '确认删除') {
+    bulkLicenseError.value = '请输入“确认删除”后再继续';
+    return;
+  }
+  bulkLicenseBusy.value = true;
+  bulkLicenseError.value = '';
+  try {
+    const result = await bulkAdminLicenseAction(adminToken.value, {
+      action: bulkLicenseAction.value,
+      activationCodes: selectedLicenseBatchId.value ? undefined : [...selectedLicenseCodes.value],
+      batchId: selectedLicenseBatchId.value || undefined,
+      reason: bulkLicenseReason.value.trim() || undefined,
+    });
+    showBulkLicenseDialog.value = false;
+    clearLicenseSelection();
+    generateResult.value = `已${bulkLicenseAction.value === 'delete' ? '删除' : '吊销'} ${result.affected} 张卡密，失效 ${result.revokedLeases} 条授权`;
+    await refreshLicensesOnly();
+  } catch (error) {
+    bulkLicenseError.value = error instanceof Error ? error.message : '批量操作失败';
+  } finally {
+    bulkLicenseBusy.value = false;
+  }
+}
+
 function resetLicenseFilters() {
-  licenseFilters.value = emptyFilters();
+  licenseFilters.value = emptyLicenseFilters();
+  licensePage.value = 1;
+  void refreshLicensesOnly();
+}
+
+function applyLicenseFilters() {
   licensePage.value = 1;
   void refreshLicensesOnly();
 }
@@ -927,9 +1049,9 @@ function csvEscape(value: string): string {
 
 function exportLicenses() {
   if (filteredLicenses.value.length === 0) return;
-  const header = '激活码,版本,套餐,状态,用户,授权到期,订单号,来源渠道,批次\n';
+  const header = '激活码,备注,版本,套餐,状态,激活时间,授权到期,订单号,来源渠道,批次\n';
   const rows = filteredLicenses.value.map((item) =>
-    [item.code, tierLabel(item.tier), planLabel(item.plan), statusLabel(item.status), item.user, item.expiresAt, item.orderNo, sourceLabel(item.sourceChannel), item.batchName].map(csvEscape).join(',')
+    [item.code, item.note, tierLabel(item.tier), planLabel(item.plan), statusLabel(item.status), item.activatedAt, item.expiresAt, item.orderNo, sourceLabel(item.sourceChannel), item.batchName].map(csvEscape).join(',')
   ).join('\n');
   const bom = '﻿';
   const blob = new Blob([bom + header + rows], { type: 'text/csv;charset=utf-8;' });
@@ -1006,10 +1128,10 @@ if (adminLoggedIn.value) {
         <img src="/icon.svg" alt="" aria-hidden="true" />
         PubFlow Ops
       </div>
-      <button v-for="item in adminTabs" :key="item.key" type="button" :class="{ active: adminView === item.key }" @click="adminView = item.key">
+      <RouterLink v-for="item in adminTabs" :key="item.key" :to="{ name: item.routeName }" :class="{ active: adminView === item.key }">
         <component :is="item.icon" :size="18" />
         {{ item.label }}
-      </button>
+      </RouterLink>
       <button class="sidebar-logout" type="button" @click="logoutAdmin">
         <LogOut :size="18" />
         退出登录
@@ -1027,7 +1149,7 @@ if (adminLoggedIn.value) {
             <RefreshCw :size="16" />
             {{ adminLoading ? '同步中' : '同步' }}
           </button>
-          <button class="primary-button compact" type="button" @click="adminView = 'licenses'">生成 License</button>
+          <RouterLink v-if="adminView !== 'licenses'" class="primary-button compact" :to="{ name: 'admin-licenses' }">卡密管理</RouterLink>
         </div>
       </header>
       <p v-if="adminDataError" class="admin-data-error">{{ adminDataError }}</p>
@@ -1086,17 +1208,17 @@ if (adminLoggedIn.value) {
           <div>
             <span>待激活卡密</span>
             <strong>{{ licenseSummary.pending }} 个卡密尚未被插件激活</strong>
-            <button class="mini-action" type="button" @click="adminView = 'licenses'">查看授权</button>
+            <RouterLink class="mini-action" :to="{ name: 'admin-licenses' }">查看授权</RouterLink>
           </div>
           <div>
             <span>已激活</span>
             <strong>{{ licenseSummary.active }} 个授权已被用户激活</strong>
-            <button class="mini-action" type="button" @click="adminView = 'licenses'">查看授权</button>
+            <RouterLink class="mini-action" :to="{ name: 'admin-licenses' }">查看授权</RouterLink>
           </div>
           <div>
             <span>版本治理</span>
             <strong>{{ latestAppVersion ? `插件 v${latestAppVersion.version}` : '暂无插件版本' }}</strong>
-            <button class="mini-action" type="button" @click="adminView = 'versions'">进入版本库</button>
+            <RouterLink class="mini-action" :to="{ name: 'admin-versions' }">进入版本库</RouterLink>
           </div>
         </div>
       </section>
@@ -1299,93 +1421,27 @@ if (adminLoggedIn.value) {
           </div>
           <div class="ops-kpis">
             <span><b>{{ orderSummary.total }}</b>筛选结果</span>
-            <span><b>{{ orderSummary.yearly }}</b>年卡</span>
-            <span><b>{{ orderSummary.monthly }}</b>月卡</span>
-            <span><b>{{ yuan(orderSummary.revenue) }}</b>收入</span>
+            <span><b>{{ orderSummary.yearly }}</b>当前页年卡</span>
+            <span><b>{{ orderSummary.monthly }}</b>当前页月卡</span>
+            <span><b>{{ yuan(orderSummary.revenue) }}</b>当前页收入</span>
           </div>
         </div>
-        <div class="advanced-filters">
-          <label class="filter-wide">
-            <span>模糊搜索</span>
-            <div class="filter-input">
-              <Search :size="16" />
-              <input v-model="orderFilters.keyword" placeholder="订单号、支付渠道、状态、授权码" />
-            </div>
-          </label>
-          <label>
-            <span>版本层级</span>
-            <select v-model="orderFilters.tier">
-              <option value="all">全部版本</option>
-              <option value="basic">Basic</option>
-              <option value="plus">Plus</option>
-              <option value="pro">Pro</option>
-            </select>
-          </label>
-          <label>
-            <span>套餐类型</span>
-            <select v-model="orderFilters.plan">
-              <option value="all">全部套餐</option>
-              <option value="monthly">月卡</option>
-              <option value="yearly">年卡</option>
-            </select>
-          </label>
-          <label>
-            <span>订单状态</span>
-            <select v-model="orderFilters.status">
-              <option value="all">全部状态</option>
-              <option value="pending">待支付</option>
-              <option value="paid">已支付</option>
-              <option value="amount_mismatch">金额异常</option>
-            </select>
-          </label>
-          <label><span>购买开始</span><input v-model="orderFilters.paidFrom" type="date" /></label>
-          <label><span>购买结束</span><input v-model="orderFilters.paidTo" type="date" /></label>
-          <label><span>授权到期开始</span><input v-model="orderFilters.expiresFrom" type="date" /></label>
-          <label><span>授权到期结束</span><input v-model="orderFilters.expiresTo" type="date" /></label>
-          <div class="filter-actions">
-            <button class="secondary-button compact" type="button" @click="resetOrderFilters">重置</button>
-            <button class="primary-button compact" type="button" @click="orderPage = 1; refreshCurrentView()">查询</button>
-          </div>
-        </div>
-        <table>
-          <thead><tr><th>订单号</th><th>套餐</th><th>支付渠道</th><th>支付时间</th><th>授权到期</th><th>授权码</th><th>状态</th><th>金额</th></tr></thead>
-          <tbody>
-            <tr v-if="paginatedOrders.length === 0"><td colspan="8" class="table-empty">暂无匹配订单，请检查筛选条件或数据库初始化数据。</td></tr>
-            <tr v-for="item in paginatedOrders" :key="item.id">
-              <td><strong>{{ item.orderNo }}</strong></td>
-              <td>{{ tierLabel(item.tier) }} · {{ planLabel(item.plan) }}</td>
-              <td>{{ sourceLabel(item.source) }}</td>
-              <td>{{ item.paidAt || '-' }}</td>
-              <td>{{ item.expiresAt || '-' }}</td>
-              <td><code class="hash-code">{{ shortHash(item.activationCode) }}</code></td>
-              <td><mark :class="`status-${item.status}`">{{ statusLabel(item.status) }}</mark></td>
-              <td>{{ yuan(item.amountCents) }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="pagination-bar">
-          <span>共 {{ filteredOrders.length }} 条，第 {{ Math.min(orderPage, orderTotalPages) }} / {{ orderTotalPages }} 页</span>
-          <div>
-            <label class="page-size-select">
-              每页
-              <select v-model.number="orderPageSize" @change="orderPage = 1">
-                <option :value="10">10</option>
-                <option :value="20">20</option>
-                <option :value="50">50</option>
-                <option :value="100">100</option>
-              </select>
-            </label>
-            <button type="button" :disabled="orderPage <= 1" @click="orderPage -= 1">上一页</button>
-            <button type="button" :disabled="orderPage >= orderTotalPages" @click="orderPage += 1">下一页</button>
-          </div>
-        </div>
+        <AdminOrderFilters v-model="orderFilters" :loading="adminLoading" @apply="applyOrderFilters" @reset="resetOrderFilters" />
+        <AdminOrderTable :items="paginatedOrders" :loading="adminLoading" />
+        <AdminPagination
+          v-model:page="orderPage"
+          v-model:page-size="orderPageSize"
+          :total="orderTotal"
+          :loading="adminLoading"
+          @change="refreshCurrentView"
+        />
       </section>
 
       <section v-else-if="adminView === 'licenses'" class="admin-table-view">
-        <div class="operations-head">
-          <div>
+        <div class="operations-head license-operations-head">
+          <div class="operations-title">
             <span>卡密管理</span>
-            <strong>给三方平台补货的激活码；未激活前没有到期时间</strong>
+            <strong>跟踪每一张卡密从发放到激活</strong>
           </div>
           <div class="ops-kpis">
             <span><b>{{ licenseSummary.total }}</b>总计</span>
@@ -1394,129 +1450,88 @@ if (adminLoggedIn.value) {
             <span><b>{{ yuan(licenseSummary.revenue) }}</b>收入</span>
           </div>
           <div class="admin-actions">
-            <button class="secondary-button compact" type="button" :class="{ active: licenseViewMode === 'card' }" @click="licenseViewMode = 'card'">卡片</button>
-            <button class="secondary-button compact" type="button" :class="{ active: licenseViewMode === 'table' }" @click="licenseViewMode = 'table'">表格</button>
             <button class="secondary-button compact" type="button" @click="exportLicenses">
               <Download :size="14" />
               导出 CSV
             </button>
-            <button class="primary-button compact" type="button" @click="showGenerateDialog = true">批量生成激活码</button>
+            <button class="primary-button compact" type="button" @click="showGenerateDialog = true">生成卡密</button>
           </div>
         </div>
         <p v-if="generateResult" class="generate-result">{{ generateResult }}</p>
-        <div class="advanced-filters">
-          <label class="filter-wide">
-            <span>模糊搜索</span>
-            <div class="filter-input">
-              <Search :size="16" />
-              <input v-model="licenseFilters.keyword" placeholder="激活码、订单号" />
-            </div>
-          </label>
-          <label>
-            <span>版本层级</span>
-            <select v-model="licenseFilters.tier">
-              <option value="all">全部版本</option>
-              <option value="basic">Basic</option>
-              <option value="plus">Plus</option>
-              <option value="pro">Pro</option>
-            </select>
-          </label>
-          <label>
-            <span>套餐类型</span>
-            <select v-model="licenseFilters.plan">
-              <option value="all">全部套餐</option>
-              <option value="monthly">月卡</option>
-              <option value="yearly">年卡</option>
-            </select>
-          </label>
-          <label>
-            <span>授权状态</span>
-            <select v-model="licenseFilters.status">
-              <option value="all">全部状态</option>
-              <option value="pending">待激活</option>
-              <option value="active">已激活</option>
-              <option value="revoked">已吊销</option>
-            </select>
-          </label>
-          <label><span>授权到期开始</span><input v-model="licenseFilters.expiresFrom" type="date" /></label>
-          <label><span>授权到期结束</span><input v-model="licenseFilters.expiresTo" type="date" /></label>
-          <div class="filter-actions">
-            <button class="secondary-button compact" type="button" @click="resetLicenseFilters">重置</button>
-            <button class="primary-button compact" type="button" @click="licensePage = 1; refreshLicensesOnly()">查询</button>
+        <AdminLicenseFilters
+          v-model="licenseFilters"
+          :batches="licenseBatches"
+          :loading="adminLoading"
+          @apply="applyLicenseFilters"
+          @reset="resetLicenseFilters"
+        />
+        <div class="license-list-toolbar">
+          <div class="license-selection-actions">
+            <button class="secondary-button compact" type="button" :disabled="remoteLicenses.length === 0" @click="toggleCurrentLicensePage">
+              {{ allCurrentLicensesSelected || selectedLicenseBatchId ? '取消当前选择' : '选择当前页' }}
+            </button>
+            <button
+              v-if="licenseFilters.batchId !== 'all'"
+              class="secondary-button compact"
+              type="button"
+              :class="{ active: selectedLicenseBatchId === licenseFilters.batchId }"
+              @click="selectFilteredLicenseBatch"
+            >
+              选择整个批次
+            </button>
+          </div>
+          <div class="license-view-switch" aria-label="卡密查看方式">
+            <button type="button" title="网格查看" :class="{ active: licenseViewMode === 'grid' }" @click="licenseViewMode = 'grid'"><LayoutGrid :size="16" /></button>
+            <button type="button" title="表格查看" :class="{ active: licenseViewMode === 'table' }" @click="licenseViewMode = 'table'"><TableProperties :size="16" /></button>
           </div>
         </div>
-
-        <!-- 卡片视图 -->
-        <div v-if="licenseViewMode === 'card'" class="license-grid">
-          <div v-for="item in filteredLicenses" :key="item.code" class="license-card" :class="{ selected: selectedLicense === item.code }" tabindex="0" role="button" :aria-label="`激活码 ${item.code}`" @click="selectedLicense = item.code" @keydown.enter="selectedLicense = item.code" @keydown.space.prevent="selectedLicense = item.code">
-            <div class="license-card-top">
-              <span :class="`status-${item.status}`">{{ statusLabel(item.status) }}</span>
-              <strong>{{ tierLabel(item.tier) }} · {{ planLabel(item.plan) }}</strong>
-            </div>
-            <code class="license-card-code">{{ item.code }}</code>
-            <div class="license-card-meta">
-              <span>渠道 {{ sourceLabel(item.sourceChannel) }}</span>
-              <span>批次 {{ item.batchName }}</span>
-              <span>迁移 {{ item.deviceMigrationCount }}/{{ item.deviceMigrationLimit }}</span>
-              <span>到期 {{ item.expiresAt }}</span>
-              <span>创建 {{ item.createdAt }}</span>
-            </div>
-            <div class="license-card-actions">
-              <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && openReplaceDialog(rawLicenseByCode(item.code)!)">补发</button>
-              <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && openLimitsDialog(rawLicenseByCode(item.code)!)">额度</button>
-              <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && freezeLicense(rawLicenseByCode(item.code)!)">冻结</button>
-              <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && unfreezeLicense(rawLicenseByCode(item.code)!)">解冻</button>
-              <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && unbindLicenseDevice(rawLicenseByCode(item.code)!)">解绑设备</button>
-              <button class="secondary-button compact danger-action" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && revokeLicense(rawLicenseByCode(item.code)!)">吊销</button>
-              <button class="secondary-button compact danger-action" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && deleteLicense(rawLicenseByCode(item.code)!)">删除</button>
-            </div>
-          </div>
-          <div v-if="filteredLicenses.length === 0" class="list-empty">暂无匹配卡密</div>
-        </div>
-
-        <!-- 表格视图 -->
-        <table v-else>
-          <thead><tr><th>激活码</th><th>套餐</th><th>渠道</th><th>批次</th><th>状态</th><th>迁移</th><th>授权到期</th><th>创建时间</th><th>订单号</th><th>操作</th></tr></thead>
-          <tbody>
-            <tr v-if="filteredLicenses.length === 0"><td colspan="10" class="table-empty">暂无匹配卡密</td></tr>
-            <tr v-for="item in filteredLicenses" :key="item.code" :class="{ selected: selectedLicense === item.code }" tabindex="0" @click="selectedLicense = item.code" @keydown.enter="selectedLicense = item.code">
-              <td><code class="hash-code">{{ item.code }}</code></td>
-              <td>{{ tierLabel(item.tier) }} · {{ planLabel(item.plan) }}</td>
-              <td>{{ sourceLabel(item.sourceChannel) }}</td>
-              <td>{{ item.batchName }}</td>
-              <td><mark :class="`status-${item.status}`">{{ statusLabel(item.status) }}</mark></td>
-              <td>{{ item.deviceMigrationCount }}/{{ item.deviceMigrationLimit }}</td>
-              <td>{{ item.expiresAt }}</td>
-              <td>{{ item.createdAt }}</td>
-              <td>{{ item.orderNo }}</td>
-              <td class="table-actions">
-                <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && openReplaceDialog(rawLicenseByCode(item.code)!)">补发</button>
-                <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && openLimitsDialog(rawLicenseByCode(item.code)!)">额度</button>
-                <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && freezeLicense(rawLicenseByCode(item.code)!)">冻结</button>
-                <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && unfreezeLicense(rawLicenseByCode(item.code)!)">解冻</button>
-                <button class="secondary-button compact" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && unbindLicenseDevice(rawLicenseByCode(item.code)!)">解绑设备</button>
-                <button class="secondary-button compact danger-action" type="button" :disabled="!rawLicenseByCode(item.code) || item.status === 'revoked'" @click.stop="rawLicenseByCode(item.code) && revokeLicense(rawLicenseByCode(item.code)!)">吊销</button>
-                <button class="secondary-button compact danger-action" type="button" :disabled="!rawLicenseByCode(item.code)" @click.stop="rawLicenseByCode(item.code) && deleteLicense(rawLicenseByCode(item.code)!)">删除</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="pagination-bar">
-          <span>共 {{ licenseTotal }} 条，第 {{ Math.min(licensePage, licenseTotalPages) }} / {{ licenseTotalPages }} 页</span>
+        <div v-if="bulkLicenseSelectedCount > 0" class="license-bulk-toolbar">
+          <strong>{{ selectedLicenseBatch ? `已选整个批次：${selectedLicenseBatch.batchName}` : `已选 ${bulkLicenseSelectedCount} 张卡密` }}</strong>
+          <span v-if="selectedLicenseBatch">预计 {{ selectedLicenseBatch.quantity }} 张</span>
           <div>
-            <label class="page-size-select">
-              每页
-              <select v-model.number="licensePageSize" @change="licensePage = 1; refreshLicensesOnly()">
-                <option :value="10">10</option>
-                <option :value="20">20</option>
-                <option :value="50">50</option>
-                <option :value="100">100</option>
-              </select>
-            </label>
-            <button type="button" :disabled="licensePage <= 1" @click="licensePage -= 1; refreshLicensesOnly()">上一页</button>
-            <button type="button" :disabled="licensePage >= licenseTotalPages" @click="licensePage += 1; refreshLicensesOnly()">下一页</button>
+            <button class="secondary-button compact" type="button" @click="openBulkLicenseDialog('revoke')">批量吊销</button>
+            <button class="danger-button compact" type="button" @click="openBulkLicenseDialog('delete')"><Trash2 :size="14" />批量删除</button>
+            <button class="license-clear-selection" type="button" title="清除选择" @click="clearLicenseSelection"><X :size="16" /></button>
           </div>
         </div>
+        <AdminLicenseTable
+          v-if="licenseViewMode === 'table'"
+          :items="remoteLicenses"
+          :selected-codes="visibleSelectedLicenseCodes"
+          :loading="adminLoading"
+          @toggle="toggleLicenseSelection"
+          @toggle-page="toggleCurrentLicensePage"
+          @note="openNoteDialog"
+          @replace="openReplaceDialog"
+          @limits="openLimitsDialog"
+          @freeze="freezeLicense"
+          @unfreeze="unfreezeLicense"
+          @unbind="unbindLicenseDevice"
+          @revoke="revokeLicense"
+          @delete="deleteLicense"
+        />
+        <AdminLicenseGrid
+          v-else
+          :items="remoteLicenses"
+          :selected-codes="visibleSelectedLicenseCodes"
+          :loading="adminLoading"
+          @toggle="toggleLicenseSelection"
+          @note="openNoteDialog"
+          @replace="openReplaceDialog"
+          @limits="openLimitsDialog"
+          @freeze="freezeLicense"
+          @unfreeze="unfreezeLicense"
+          @unbind="unbindLicenseDevice"
+          @revoke="revokeLicense"
+          @delete="deleteLicense"
+        />
+        <AdminPagination
+          v-model:page="licensePage"
+          v-model:page-size="licensePageSize"
+          :total="licenseTotal"
+          :loading="adminLoading"
+          @change="refreshLicensesOnly"
+        />
       </section>
 
       <section v-else-if="adminView === 'leases'" class="admin-table-view">
@@ -1531,57 +1546,29 @@ if (adminLoggedIn.value) {
             <span><b>{{ leaseFailedCount }}</b>失败</span>
           </div>
         </div>
-        <div class="advanced-filters lease-filters">
-          <div class="time-filter-bar">
+        <div class="lease-filter-panel">
+          <div class="lease-range-switch">
             <button v-for="r in (['week', 'month', 'custom'] as const)" :key="r" type="button" :class="{ active: leaseTimeRange === r }" @click="leaseTimeRange = r; applyLeaseTimeRange(); refreshLeases()">
               {{ r === 'week' ? '近7天' : r === 'month' ? '近30天' : '自定义' }}
             </button>
-            <template v-if="leaseTimeRange === 'custom'">
+          </div>
+          <div v-if="leaseTimeRange === 'custom'" class="lease-custom-dates">
               <input v-model="leaseDateFrom" type="date" @change="refreshLeases()" />
               <span>至</span>
               <input v-model="leaseDateTo" type="date" @change="refreshLeases()" />
-            </template>
           </div>
           <button class="secondary-button compact" type="button" @click="refreshLeases">
             <RefreshCw :size="14" />
             刷新
           </button>
         </div>
-        <table>
-          <thead><tr><th>时间</th><th>激活码</th><th>事件</th><th>结果</th><th>操作者</th><th>目标</th><th>IP 地址</th><th>安装实例</th><th>平台</th><th>授权到期</th><th>原因</th></tr></thead>
-          <tbody>
-            <tr v-if="paginatedLeases.length === 0"><td colspan="11" class="table-empty">暂无授权记录。</td></tr>
-            <tr v-for="item in paginatedLeases" :key="item.id">
-              <td>{{ formatDateTime(item.createdAt) }}</td>
-              <td><code class="hash-code">{{ shortHash(item.activationCode) }}</code></td>
-              <td>{{ eventLabel(item.eventType) }}</td>
-              <td><mark :class="`status-${item.status}`">{{ statusLabel(item.status) }}</mark></td>
-              <td>{{ item.operator || '-' }}</td>
-              <td><code class="hash-code">{{ item.targetId ? shortHash(item.targetId) : '-' }}</code></td>
-              <td><code>{{ item.ipAddress || '-' }}</code></td>
-              <td><code class="hash-code">{{ shortHash(item.clientInstallId) }}</code></td>
-              <td>{{ item.platform || '-' }}</td>
-              <td>{{ item.expiresAt ? formatDateTime(item.expiresAt) : '-' }}</td>
-              <td>{{ item.reason || '-' }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="pagination-bar">
-          <span>共 {{ remoteLeases.length }} 条，第 {{ Math.min(leasePage, leaseTotalPages) }} / {{ leaseTotalPages }} 页</span>
-          <div>
-            <label class="page-size-select">
-              每页
-              <select v-model.number="leasePageSize" @change="leasePage = 1">
-                <option :value="10">10</option>
-                <option :value="20">20</option>
-                <option :value="50">50</option>
-                <option :value="100">100</option>
-              </select>
-            </label>
-            <button type="button" :disabled="leasePage <= 1" @click="leasePage -= 1">上一页</button>
-            <button type="button" :disabled="leasePage >= leaseTotalPages" @click="leasePage += 1">下一页</button>
-          </div>
-        </div>
+        <AdminLeaseTable :items="paginatedLeases" :loading="adminLoading" />
+        <AdminPagination
+          v-model:page="leasePage"
+          v-model:page-size="leasePageSize"
+          :total="remoteLeases.length"
+          :loading="adminLoading"
+        />
       </section>
 
       <section v-else class="selector-vault">
@@ -1687,6 +1674,10 @@ if (adminLoggedIn.value) {
             <span>批次名称</span>
             <input v-model="generateBatchName" placeholder="例如 dy-20260609-100" />
           </label>
+          <label>
+            <span>卡密备注</span>
+            <textarea v-model="generateNote" maxlength="500" rows="3" placeholder="例如：赠送给张先生，用于小红书项目"></textarea>
+          </label>
           <p class="modal-hint">生成后卡密处于未激活状态，不会产生到期时间；插件首次激活时才开始计时。</p>
         </div>
         <div class="modal-footer">
@@ -1697,6 +1688,65 @@ if (adminLoggedIn.value) {
         </div>
       </div>
     </div>
+
+    <AdminDialog
+      :open="showNoteDialog"
+      title="编辑卡密备注"
+      :description="actionLicense?.activationCode"
+      :busy="noteSaving"
+      @close="showNoteDialog = false"
+    >
+      <div class="admin-form-stack">
+        <label>
+          <span>备注内容</span>
+          <textarea v-model="noteDraft" maxlength="500" rows="5" placeholder="记录赠送对象、联系方式或用途"></textarea>
+        </label>
+        <small>{{ noteDraft.length }}/500，清空后保存即可删除备注。</small>
+        <p v-if="noteMessage" class="dialog-error">{{ noteMessage }}</p>
+      </div>
+      <template #footer>
+        <button class="secondary-button compact" type="button" :disabled="noteSaving" @click="showNoteDialog = false">取消</button>
+        <button class="primary-button compact" type="button" :disabled="noteSaving" @click="submitLicenseNote">
+          {{ noteSaving ? '保存中' : '保存备注' }}
+        </button>
+      </template>
+    </AdminDialog>
+
+    <AdminDialog
+      :open="showBulkLicenseDialog"
+      :title="bulkLicenseAction === 'delete' ? '批量删除卡密' : '批量吊销卡密'"
+      :description="selectedLicenseBatch ? `将处理整个批次：${selectedLicenseBatch.batchName}` : `将处理已选的 ${bulkLicenseSelectedCount} 张卡密`"
+      :busy="bulkLicenseBusy"
+      @close="showBulkLicenseDialog = false"
+    >
+      <div class="admin-form-stack">
+        <p class="bulk-license-warning">
+          {{ bulkLicenseAction === 'delete'
+            ? '删除后卡密不再出现在管理列表，关联的有效授权也会立即失效。'
+            : '吊销后卡密不能再激活，关联的有效授权会立即失效。' }}
+        </p>
+        <label>
+          <span>操作原因</span>
+          <textarea v-model="bulkLicenseReason" rows="3" :placeholder="bulkLicenseAction === 'delete' ? '例如：误生成批次' : '例如：卡密泄露'" />
+        </label>
+        <label v-if="bulkLicenseAction === 'delete'">
+          <span>输入“确认删除”继续</span>
+          <input v-model="bulkDeleteConfirmation" autocomplete="off" placeholder="确认删除" />
+        </label>
+        <p v-if="bulkLicenseError" class="dialog-error">{{ bulkLicenseError }}</p>
+      </div>
+      <template #footer>
+        <button class="secondary-button compact" type="button" :disabled="bulkLicenseBusy" @click="showBulkLicenseDialog = false">取消</button>
+        <button
+          :class="bulkLicenseAction === 'delete' ? 'danger-button compact' : 'primary-button compact'"
+          type="button"
+          :disabled="bulkLicenseBusy || (bulkLicenseAction === 'delete' && bulkDeleteConfirmation.trim() !== '确认删除')"
+          @click="submitBulkLicenseAction"
+        >
+          {{ bulkLicenseBusy ? '处理中' : bulkLicenseAction === 'delete' ? '确认批量删除' : '确认批量吊销' }}
+        </button>
+      </template>
+    </AdminDialog>
 
     <div
       v-if="showReplaceDialog"

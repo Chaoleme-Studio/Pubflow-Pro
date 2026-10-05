@@ -703,6 +703,7 @@ mod tests {
             plan: Set("monthly".to_string()),
             source_channel: Set("test".to_string()),
             batch_id: Set(None),
+            note: Set(None),
             max_devices: Set(1),
             device_migration_limit: Set(3),
             device_migration_count: Set(0),

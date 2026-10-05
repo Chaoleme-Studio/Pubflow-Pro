@@ -90,6 +90,7 @@ impl LicenseCenterService {
             plan: Set(old.plan.clone()),
             source_channel: Set(old.source_channel.clone()),
             batch_id: Set(old.batch_id),
+            note: Set(old.note.clone()),
             max_devices: Set(old.max_devices),
             remote_daily_job_limit: Set(old.remote_daily_job_limit),
             remote_daily_byte_limit: Set(old.remote_daily_byte_limit),

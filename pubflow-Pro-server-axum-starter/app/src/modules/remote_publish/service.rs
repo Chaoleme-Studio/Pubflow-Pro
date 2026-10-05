@@ -949,7 +949,7 @@ mod tests {
             r#"CREATE TABLE licenses (
                 id TEXT PRIMARY KEY, user_id INTEGER, activation_code TEXT NOT NULL UNIQUE,
                 tier TEXT NOT NULL, plan TEXT NOT NULL, source_channel TEXT NOT NULL,
-                batch_id TEXT, max_devices INTEGER NOT NULL,
+                batch_id TEXT, note TEXT, max_devices INTEGER NOT NULL,
                 remote_daily_job_limit INTEGER, remote_daily_byte_limit INTEGER,
                 device_migration_limit INTEGER NOT NULL, device_migration_count INTEGER NOT NULL,
                 last_migrated_at TEXT, activated_at TEXT, expires_at TEXT,
@@ -1005,6 +1005,7 @@ mod tests {
             plan: Set("monthly".to_string()),
             source_channel: Set("test".to_string()),
             batch_id: Set(None),
+            note: Set(None),
             max_devices: Set(1),
             remote_daily_job_limit: Set(None),
             remote_daily_byte_limit: Set(None),

@@ -40,6 +40,13 @@ pub fn routes(state: Arc<AppState>) -> ApiRouter {
             post_with(handler::delete_license, handler::delete_license_docs),
         )
         .api_route(
+            "/licenses/bulk",
+            post_with(
+                handler::bulk_license_action,
+                handler::bulk_license_action_docs,
+            ),
+        )
+        .api_route(
             "/licenses/freeze",
             post_with(handler::freeze_license, handler::freeze_license_docs),
         )
@@ -63,6 +70,20 @@ pub fn routes(state: Arc<AppState>) -> ApiRouter {
             post_with(
                 handler::update_license_limits,
                 handler::update_license_limits_docs,
+            ),
+        )
+        .api_route(
+            "/licenses/note",
+            post_with(
+                handler::update_license_note,
+                handler::update_license_note_docs,
+            ),
+        )
+        .api_route(
+            "/licenses/batches",
+            get_with(
+                handler::list_license_batches,
+                handler::list_license_batches_docs,
             ),
         )
         .api_route(
