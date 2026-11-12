@@ -103,8 +103,6 @@ export interface DistributionTask {
   status: 'idle' | 'running' | 'paused' | 'completed' | 'error';
   createdAt: number;
   permitId?: string;
-  permitExpiresAt?: number;
-  permitTaskHash?: string;
   /** 填充完成后是否直接点击平台最终发布按钮。 */
   autoSubmit?: boolean;
   /** 任务来源及本地 Agent 幂等关联信息。 */

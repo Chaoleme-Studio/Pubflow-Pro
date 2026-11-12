@@ -11,7 +11,7 @@ import {
 } from '../storage/workspaceStorage';
 import { agentTaskStatus, type AgentJobDetail, type AgentJobSummary } from './protocol';
 
-export const CLOUD_AGENT_ALARM_NAME = 'pubflow-cloud-agent-watchdog';
+const CLOUD_AGENT_ALARM_NAME = 'pubflow-cloud-agent-watchdog';
 const HEARTBEAT_INTERVAL_MS = 20_000;
 const RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 

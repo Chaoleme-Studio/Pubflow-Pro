@@ -194,15 +194,6 @@ export async function saveVideos(videos: VideoRecord[]) {
   await browser.storage.local.set({ [STORAGE_KEYS.videos]: videos });
 }
 
-/** 保存发布记录，并同步更新相关视频在工作区中的项目数据。 */
-export async function saveRecords(records: PublishRecord[]) {
-  const persisted = await loadPersistedLibraryPairs();
-  for (const video of persisted.videos) {
-    await writeProjectData(video, recordsForVideo(records, video));
-  }
-  await browser.storage.local.set({ [STORAGE_KEYS.records]: records });
-}
-
 /** 删除指定项目及其关联发布记录，同时清理工作区项目目录。 */
 export async function deleteVideoRecord(projectId: string) {
   const persisted = await loadPersistedLibraryPairs();
@@ -231,9 +222,4 @@ export async function clearLibraryData() {
     STORAGE_KEYS.currentTask,
     STORAGE_KEYS.draft,
   ]);
-}
-
-/** 导出 chrome.storage.local 中的所有数据，用于备份。 */
-export async function exportAllStoredData() {
-  return browser.storage.local.get(null);
 }

@@ -25,6 +25,7 @@ import {
 import { verifyLicense } from '../src/licensing/licenseManager';
 import { issueDistributionPermit } from '../src/licensing/permitManager';
 import { checkExtensionUpdate } from '../src/licensing/updateChecker';
+import { LOCAL_MODE } from '../src/licensing/localMode';
 import { AgentClient } from '../src/agent/agentClient';
 import { CloudAgentClient } from '../src/agent/cloudAgentClient';
 import { InboundTaskCoordinator } from '../src/agent/inboundTaskCoordinator';
@@ -314,7 +315,9 @@ inboundTaskCoordinator.setSources(agentClient, cloudAgentClient);
 
 export default defineBackground(() => {
   restoreTaskPromise = restoreTask();
-  void checkExtensionUpdate(__PUBFLOW_DEFAULT_LICENSE_API_BASE_URL__, __PUBFLOW_OFFICIAL_SITE_URL__);
+  if (!LOCAL_MODE) {
+    void checkExtensionUpdate(__PUBFLOW_DEFAULT_LICENSE_API_BASE_URL__, __PUBFLOW_OFFICIAL_SITE_URL__);
+  }
   // 必须先恢复 currentTask，避免 Service Worker 重启后把同一 Agent job 再领取并启动一次。
   void restoreTaskPromise.finally(() => syncAgentConnections());
 
@@ -607,7 +610,6 @@ async function handleMessage(
       // TODO(auth-ux): 当前产品优先保证一轮发布过程顺滑，授权/permit 只在 START_DISTRIBUTION 入口校验。
       // 后续如果风险升高，可以恢复这里的过程校验，但应做成低频缓存校验，避免每个平台打开都请求服务器。
       // const license = await requireActiveLicense();
-      // await refreshRemotePlatformPolicyForLicense(license.settings);
       await openPlatform(message.payload.platformId);
       return ok(currentTask);
     }
@@ -618,7 +620,6 @@ async function handleMessage(
       // TODO(auth-ux): 当前产品优先保证一轮发布过程顺滑，授权/permit 只在 START_DISTRIBUTION 入口校验。
       // 后续如果风险升高，可以恢复这里的过程校验，但应做成低频缓存校验，避免每个填充步骤都请求服务器。
       // const license = await requireActiveLicense();
-      // await refreshRemotePlatformPolicyForLicense(license.settings);
       await continueFill(message.payload.platformId);
       return ok(currentTask);
     }
@@ -1308,10 +1309,6 @@ async function verifyLicenseOnStartup() {
     const result = await verifyLicense(licensingSettings);
     licensingSettings = result.settings;
     await saveLicensingSettings(licensingSettings);
-    // TODO(remote-selector): 远程 selector 策略暂时废弃，启动时不再联网刷新平台策略。
-    // if (result.ok) {
-    //   await refreshRemotePlatformPolicyForLicense(result.settings);
-    // }
   } catch (error) {
     console.warn('[PubFlow] 启动授权验证失败', error);
   }
@@ -1346,17 +1343,6 @@ async function verifyCurrentLicense(input?: LicensingSettings) {
   await saveLicensingSettings(licensingSettings);
   await syncAgentConnections();
   return result;
-}
-
-/** @deprecated 远程 selector 策略暂时废弃；当前 selector 全部以内置 src/platforms 为准。 */
-async function refreshRemotePlatformPolicyForLicense(settings: LicensingSettings) {
-  void settings;
-  // TODO(remote-selector): 如果后续恢复云端策略，必须后台异步刷新并允许本地 selector 兜底，
-  // 不能在发布开始、打开平台、继续填充这些用户主链路上阻塞。
-  // const applied = await refreshRemotePlatformConfigs(settings);
-  // if (!applied) {
-  //   throw new Error('远程平台策略未包含当前支持平台，请联系支持更新策略配置。');
-  // }
 }
 
 async function requireActiveLicense() {

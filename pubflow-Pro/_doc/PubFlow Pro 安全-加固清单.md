@@ -115,10 +115,10 @@
 ## 4. P2 - 长期运营能力
 
 - [x] 远程签名配置（暂时废弃 / 未来预留）。
-  - [x] 扩展保留 `remoteSelectorManager.ts` 和 PFSP 信任链代码，作为后续恢复云端策略的过渡点。
+  - [x] 已删除 `remoteSelectorManager.ts` 及扩展侧 PFSP 远程 selector 调用链。
   - [x] 当前发布主链路不再刷新、应用或依赖远程 selector policy。
   - [x] selector 以插件本地 `src/platforms/*/selectors.ts` 为准，避免云端配置带来的延迟、失败点和用户感知卡顿。
-  - [x] `background`、`content` 和 `src/platforms/index.ts` 中的远程 selector 入口已注释/降级为 no-op，并标注 TODO。
+  - [x] `background`、`content` 和 `src/platforms/index.ts` 中的远程 selector 入口已全部删除。
   - Deferred：后续如恢复远程 selector，只能作为后台异步更新或灾备策略，必须保证本地 selector 可无感兜底，不能阻塞开始发布、打开平台或继续填充。
 
 - [x] 密钥轮换。

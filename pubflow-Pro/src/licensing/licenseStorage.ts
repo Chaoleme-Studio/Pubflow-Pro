@@ -1,13 +1,15 @@
 import type { LicenseFeature, LicenseTier, LicensingSettings } from '../types';
 import { defaultLicensingSettings } from '../storage/settingsStorage';
 import { loadSettings, saveSettings } from '../storage/settingsStorage';
+import { createLocalLicensingSettings, LOCAL_MODE, LOCAL_MODE_FEATURES } from './localMode';
 
 export async function loadLicensingSettings(): Promise<LicensingSettings> {
   const stored = await loadSettings();
-  return {
+  const merged = {
     ...defaultLicensingSettings,
     ...stored.licensingSettings,
   };
+  return LOCAL_MODE ? createLocalLicensingSettings(merged) : merged;
 }
 
 export async function saveLicensingSettings(settings: LicensingSettings) {
@@ -19,6 +21,7 @@ export async function saveLicensingSettings(settings: LicensingSettings) {
 }
 
 export function hasLicenseCredentials(settings: LicensingSettings) {
+  if (LOCAL_MODE) return true;
   return Boolean(
     settings.apiBaseUrl &&
     (settings.activationCode || (settings.leaseToken && settings.clientInstallId)),
@@ -54,6 +57,7 @@ export function hasLicenseFeature(
   settings: LicensingSettings | null | undefined,
   feature: LicenseFeature,
 ) {
+  if (LOCAL_MODE) return LOCAL_MODE_FEATURES.includes(feature);
   return settings?.status === 'active' && settings.features.includes(feature);
 }
 

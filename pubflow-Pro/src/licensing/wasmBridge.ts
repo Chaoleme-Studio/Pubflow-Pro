@@ -10,18 +10,6 @@ export interface PubFlowWasmBridge {
     serverTimeMs: bigint,
   ): string;
   pfap_decode_activation_response(responseBase64: string, responseKeyHex: string): string;
-  pfsp_activation_code_hash(activationCode: string): string;
-  pfsp_build_selector_request(
-    serverPublicKeyHex: string,
-    leaseToken: string,
-    clientInstallId: string,
-    activationCodeHash: string,
-    selectorVersionKnown: number,
-    extensionVersion: string,
-    serverTimeMs: bigint,
-  ): string;
-  pfsp_decode_selector_response(responseBase64: string, responseKeyHex: string): string;
-  pfsp_decrypt_selector_json(encryptedJson: string, activationCode: string): string;
   pfrp_build_auth(serverPublicKeyHex: string, authJson: string, serverTimeMs: bigint): string;
   pfrp_encode_message(payloadJson: string, keyHex: string, sequence: bigint): string;
   pfrp_decode_message(frameBase64: string, keyHex: string, expectedSequence: bigint): string;
@@ -66,10 +54,6 @@ function assertWasmBridge(value: Partial<PubFlowWasmBridge>): asserts value is P
   const requiredFunctions: Array<keyof PubFlowWasmBridge> = [
     'pfap_build_activation_request',
     'pfap_decode_activation_response',
-    'pfsp_activation_code_hash',
-    'pfsp_build_selector_request',
-    'pfsp_decode_selector_response',
-    'pfsp_decrypt_selector_json',
     'pfrp_build_auth',
     'pfrp_encode_message',
     'pfrp_decode_message',

@@ -16,27 +16,6 @@ const md = new MarkdownIt({
   linkify: true,
 });
 
-export interface ArticleImage {
-  alt: string;
-  src: string;
-  isBase64: boolean;
-}
-
-/** 从 Markdown 中提取所有图片信息。 */
-export function extractImages(markdown: string): ArticleImage[] {
-  const images: ArticleImage[] = [];
-  const regex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-  let match;
-  while ((match = regex.exec(markdown)) !== null) {
-    images.push({
-      alt: match[1],
-      src: match[2],
-      isBase64: match[2].startsWith('data:'),
-    });
-  }
-  return images;
-}
-
 /** 从 Markdown 中提取 base64 图片并转为 File 对象，返回替换占位符后的 Markdown。 */
 export async function extractBase64ImagesAsFiles(markdown: string): Promise<{ cleanedMarkdown: string; files: File[] }> {
   const files: File[] = [];
@@ -78,12 +57,6 @@ function dataUrlToFile(dataUrl: string, fileName: string): File | null {
   } catch {
     return null;
   }
-}
-
-/** 从 Markdown 中提取标题（第一个 # 标题）。 */
-export function extractTitle(markdown: string): string {
-  const match = markdown.match(/^#\s+(.+)$/m);
-  return match ? match[1].trim() : '';
 }
 
 /** 将 Markdown 转换为 HTML。 */

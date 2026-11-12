@@ -1037,8 +1037,3 @@ export async function mergeDataFile(partial: Partial<Omit<PubFlowDataFile, 'vers
     projectIndex: projectIndex.sort((a, b) => b.updatedAt - a.updatedAt),
   });
 }
-
-/** 检查当前是否已有可用的工作区目录。 */
-export async function isWorkspaceAvailable(): Promise<boolean> {
-  return getWorkspaceHandle().then((h) => h !== null);
-}

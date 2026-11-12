@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 import type { PlatformConfig } from '../../../src/platforms';
+import { LOCAL_MODE } from '../../../src/licensing/localMode';
 import type { AIProviderConfig, AIProviderSettings, GlobalSettings, LicensingSettings, PlatformId, PlatformSettings, ServerConfig, WorkspaceSettings } from '../../../src/types';
 
 export interface ReservedPlatform {
@@ -112,12 +113,14 @@ const licenseFeedbackText = computed(() => {
 });
 
 const licenseBadgeText = computed(() => {
+  if (LOCAL_MODE) return '本地模式';
   if (props.licensingSettings.status === 'active') return '已授权';
   if (props.licensingSettings.status === 'restricted') return '受限模式';
   return '未授权';
 });
 
 const licenseBadgeClass = computed(() => {
+  if (LOCAL_MODE) return 'border-blue-200 bg-blue-50 text-blue-700';
   if (props.licensingSettings.status === 'active') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
   if (props.licensingSettings.status === 'restricted') return 'border-amber-200 bg-amber-50 text-amber-700';
   return 'border-slate-200 bg-slate-50 text-slate-600';
@@ -580,7 +583,7 @@ watch(
       <div class="flex items-start justify-between gap-4">
         <div>
           <h2 :class="titleClass">授权保护</h2>
-          <p class="mt-1 text-sm leading-6 text-slate-500">输入激活码后会完成授权验证；未通过时不会启动分发。</p>
+          <p class="mt-1 text-sm leading-6 text-slate-500">{{ LOCAL_MODE ? '本地模式无需激活码，也不会联网校验授权。' : '输入激活码后会完成授权验证；未通过时不会启动分发。' }}</p>
         </div>
         <span
           class="rounded-md border px-3 py-1.5 text-xs font-bold"
@@ -590,18 +593,25 @@ watch(
         </span>
       </div>
 
-      <div v-if="licensingSettings.status === 'active'" class="mt-4 max-w-xl rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+      <div
+        v-if="LOCAL_MODE"
+        class="mt-4 max-w-xl rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700"
+      >
+        本地模式已启用：跳过激活码、lease 验证、发布授权票据和远程策略更新，无需联网即可发布。
+      </div>
+
+      <div v-if="!LOCAL_MODE && licensingSettings.status === 'active'" class="mt-4 max-w-xl rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
         授权有效<span v-if="licenseValidUntilText">，有效期至 {{ licenseValidUntilText }}</span>
       </div>
       <div
-        v-if="licenseLeaseNotice"
+        v-if="!LOCAL_MODE && licenseLeaseNotice"
         class="mt-3 max-w-xl rounded-md border px-3 py-2 text-sm font-semibold"
         :class="licenseLeaseNoticeClass"
       >
         {{ licenseLeaseNotice }}
       </div>
 
-      <div class="mt-4 grid max-w-xl gap-4">
+      <div v-if="!LOCAL_MODE" class="mt-4 grid max-w-xl gap-4">
         <label class="grid gap-2">
           <span :class="fieldLabelClass">激活码</span>
           <div class="flex rounded-md border border-slate-300 bg-white focus-within:border-rose-500 focus-within:ring-2 focus-within:ring-rose-100">
@@ -643,7 +653,7 @@ watch(
         </label>
       </div>
 
-      <div class="mt-4 flex flex-wrap items-center gap-2">
+      <div v-if="!LOCAL_MODE" class="mt-4 flex flex-wrap items-center gap-2">
         <button class="pf-btn-primary" type="button" @click="emit('verifyLicense')">激活并验证授权</button>
         <button
           class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-600 hover:border-red-300 hover:text-red-600"
@@ -655,7 +665,7 @@ watch(
       </div>
 
       <div
-        v-if="licenseFeedbackText"
+        v-if="!LOCAL_MODE && licenseFeedbackText"
         class="mt-3 max-w-xl rounded-md border px-3 py-2 text-sm font-semibold"
         :class="licenseFeedbackClass"
       >

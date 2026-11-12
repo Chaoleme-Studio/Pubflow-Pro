@@ -1,4 +1,5 @@
 import { getPlatformConfig, supportsContentType } from '../../platforms';
+import type { DistributionPermit } from '../../licensing/permitManager';
 import type { ContentData, DistributionTask, PlatformId } from '../../types';
 
 export interface DistributionStartRequest {
@@ -13,19 +14,13 @@ export interface DistributionStartRequest {
   autoSubmit?: boolean;
 }
 
-interface DistributionPermit {
-  permitId: string;
-  expiresAt: number;
-  taskHash: string;
-}
-
 interface DistributionCoordinatorDependencies {
   getCurrentTask: () => DistributionTask | null;
   authorize: (
     content: ContentData,
     platforms: PlatformId[],
     videoId?: string,
-  ) => Promise<DistributionPermit>;
+  ) => Promise<Pick<DistributionPermit, 'permitId'>>;
   setCurrentTask: (task: DistributionTask) => void;
   persist: () => Promise<void>;
   openPlatform: (platformId: PlatformId) => Promise<void>;
@@ -66,8 +61,6 @@ export async function startDistribution(
     status: 'running',
     createdAt: Date.now(),
     permitId: permit.permitId,
-    permitExpiresAt: permit.expiresAt,
-    permitTaskHash: permit.taskHash,
     autoSubmit: request.autoSubmit === true,
     source: request.source || 'dashboard',
     externalTaskSource: request.externalTaskSource,

@@ -28,7 +28,7 @@ describe('distributionCoordinator direct publish', () => {
       autoSubmit: true,
     }, {
       getCurrentTask: () => currentTask,
-      authorize: async () => ({ permitId: 'permit-1', expiresAt: Date.now() + 60_000, taskHash: 'hash-1' }),
+      authorize: async () => ({ permitId: 'permit-1' }),
       setCurrentTask: (next) => {
         currentTask = next;
       },
@@ -52,7 +52,7 @@ describe('distributionCoordinator direct publish', () => {
       platforms: ['weibo'],
     }, {
       getCurrentTask: () => currentTask,
-      authorize: async () => ({ permitId: 'permit-2', expiresAt: Date.now() + 60_000, taskHash: 'hash-2' }),
+      authorize: async () => ({ permitId: 'permit-2' }),
       setCurrentTask: (next) => {
         currentTask = next;
       },
@@ -66,11 +66,7 @@ describe('distributionCoordinator direct publish', () => {
 
   it('视频缓存为空时在打开任何平台前拒绝启动', async () => {
     const openPlatform = vi.fn(async () => undefined);
-    const authorize = vi.fn(async () => ({
-      permitId: 'permit-3',
-      expiresAt: Date.now() + 60_000,
-      taskHash: 'hash-3',
-    }));
+    const authorize = vi.fn(async () => ({ permitId: 'permit-3' }));
 
     await expect(startDistribution({
       content: content({ videoCacheId: '', videoFileName: '' }),
@@ -90,11 +86,7 @@ describe('distributionCoordinator direct publish', () => {
 
   it('在授权和打开页面前过滤当前内容类型不支持的平台', async () => {
     let currentTask: DistributionTask | null = null;
-    const authorize = vi.fn(async () => ({
-      permitId: 'permit-article',
-      expiresAt: Date.now() + 60_000,
-      taskHash: 'hash-article',
-    }));
+    const authorize = vi.fn(async () => ({ permitId: 'permit-article' }));
     const openPlatform = vi.fn(async () => undefined);
 
     const task = await startDistribution({

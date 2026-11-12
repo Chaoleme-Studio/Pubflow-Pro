@@ -1,5 +1,6 @@
 import type { ContentData, LicensingSettings, PlatformId } from '../types';
 import { buildDeviceProof } from './deviceProof';
+import { LOCAL_MODE, LOCAL_MODE_VALID_UNTIL } from './localMode';
 
 const START_DISTRIBUTION_OPERATION = 'start_distribution';
 
@@ -34,12 +35,22 @@ export async function issueDistributionPermit(
   settings: LicensingSettings,
   input: DistributionPermitInput,
 ): Promise<DistributionPermit> {
+  const taskHash = await buildDistributionTaskHash(input);
+  // 本地模式直接签发占位票据，不请求服务端、不做设备证明。
+  if (LOCAL_MODE) {
+    return {
+      permitToken: 'local-mode-permit',
+      permitId: `local-mode-${crypto.randomUUID()}`,
+      expiresAt: LOCAL_MODE_VALID_UNTIL,
+      taskHash,
+    };
+  }
+
   const apiBaseUrl = settings.apiBaseUrl.replace(/\/+$/, '');
   if (!apiBaseUrl || !settings.leaseToken || !settings.clientInstallId) {
     throw new Error('授权信息未完成验证，请先重新激活。');
   }
 
-  const taskHash = await buildDistributionTaskHash(input);
   const deviceProof = await buildDeviceProof(
     apiBaseUrl,
     settings.leaseToken,

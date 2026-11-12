@@ -34,7 +34,6 @@
     "highcharts-vue": "^2.0.1",
     "markdown-it": "^14.1.1",
     "markstream-vue": "0.0.14-beta.3",
-    "vditor": "^3.11.2",
     "vue": "^3.5.29"
   },
   "devDependencies": {

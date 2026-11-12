@@ -3,6 +3,7 @@ import { defaultLicensingSettings } from '../storage/settingsStorage';
 import { activateLease } from './activation';
 import { buildDeviceProof } from './deviceProof';
 import { parseLicenseGrant } from './licenseStorage';
+import { createLocalLicensingSettings, LOCAL_MODE } from './localMode';
 
 export interface LicenseVerificationResult {
   ok: boolean;
@@ -46,6 +47,14 @@ export async function verifyLicense(input: LicensingSettings): Promise<LicenseVe
     ...defaultLicensingSettings,
     ...input,
   };
+
+  // 本地模式不激活、不联网、不校验证书，直接返回可用的 plus 身份。
+  if (LOCAL_MODE) {
+    return {
+      ok: true,
+      settings: createLocalLicensingSettings(settings),
+    };
+  }
 
   const hasExistingLease = Boolean(settings.leaseToken && settings.clientInstallId);
   if (!settings.apiBaseUrl || (!settings.activationCode && !hasExistingLease)) {

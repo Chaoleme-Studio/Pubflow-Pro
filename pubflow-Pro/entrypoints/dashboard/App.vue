@@ -28,6 +28,7 @@ import {
   importProjectAsset,
   loadProjectAssetFiles,
 } from '../../src/storage/workspaceStorage';
+import { hasLicenseCredentials } from '../../src/licensing/licenseStorage';
 import type {
   AIProviderSettings,
   DistributionTask,
@@ -373,13 +374,6 @@ async function resetLicenseSettings() {
   notice.value = '授权配置已重置。';
 }
 
-function hasLicenseCredentials() {
-  return Boolean(
-    licensingSettings.apiBaseUrl &&
-    (licensingSettings.activationCode || (licensingSettings.leaseToken && licensingSettings.clientInstallId)),
-  );
-}
-
 async function startFromVideo(video: VideoRecord, targetPlatformId?: PlatformId) {
   uploadTab.value = video.contentType || (video.imageFileNames?.length ? 'image' : 'video');
   activeView.value = 'publish';
@@ -445,7 +439,7 @@ onMounted(async () => {
   await hydrate();
   await refreshSidePanelStatus().catch(() => undefined);
   browser.runtime.onMessage.addListener(handleRuntimeMessage);
-  if (!hasLicenseCredentials()) {
+  if (!hasLicenseCredentials(licensingSettings)) {
     activeView.value = 'settings';
   }
   markSettingsLoaded();

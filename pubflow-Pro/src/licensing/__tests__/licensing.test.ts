@@ -4,10 +4,7 @@ import { buildDeviceProof, mapDeviceProofError } from '../deviceProof';
 import { getOrCreateBrowserDeviceKey, signDeviceChallenge } from '../deviceKeyManager';
 import { isLicenseExpired, mapLicenseApiError } from '../licenseManager';
 import { issueDistributionPermit, mapPermitError } from '../permitManager';
-import { isRemoteSelectorPolicyUsable } from '../remoteSelectorManager';
 import type { LicensingSettings } from '../../types';
-import { applyRemoteSelectorConfigs, getPlatformConfig } from '../../platforms';
-import type { PlatformSelectorConfig } from '../../platforms';
 
 const DEVICE_KEY_DB_NAME = 'pubflow-device-keys';
 
@@ -227,93 +224,6 @@ describe('license expiry and redacted errors', () => {
     expect(mapPermitError('PERMIT_REQUEST_INVALID')).toContain('更新插件');
   });
 });
-
-describe('remote selector policy cache', () => {
-  it('accepts only versioned and unexpired signed-protocol policy envelopes', () => {
-    const future = Math.floor(Date.now() / 1000) + 3600;
-    expect(isRemoteSelectorPolicyUsable({
-      version: 3,
-      keyVersion: 2,
-      minExtensionVersion: '0.1.0',
-      expiresAt: future,
-      checksum: 'abc',
-      selectors: { douyin: remoteDouyinSelector() },
-      updatedAt: future - 10,
-      serverTime: future - 10,
-    })).toBe(true);
-    expect(isRemoteSelectorPolicyUsable({
-      version: 3,
-      keyVersion: 2,
-      minExtensionVersion: '0.1.0',
-      expiresAt: future - 7200,
-      checksum: 'abc',
-      selectors: { douyin: remoteDouyinSelector() },
-      updatedAt: future - 8000,
-      serverTime: future - 8000,
-    })).toBe(false);
-    expect(isRemoteSelectorPolicyUsable({
-      version: 3,
-      keyVersion: 2,
-      minExtensionVersion: '0.1.0',
-      expiresAt: future,
-      checksum: 'abc',
-      selectors: {},
-      updatedAt: future - 10,
-      serverTime: future - 10,
-    })).toBe(false);
-  });
-
-  it('keeps built-in selectors when deprecated remote selector policy is supplied', () => {
-    const original = getPlatformConfig('douyin');
-    const remoteReadySelector = '[data-pubflow-test-ready="douyin"]';
-
-    const applied = applyRemoteSelectorConfigs({
-      douyin: {
-        平台标识: 'douyin',
-        名称: original.name,
-        图标: original.icon,
-        发布页地址: original.editorUrl,
-        匹配域名: original.matchHosts,
-        就绪选择器: remoteReadySelector,
-        上传: {
-          上传容器: '.upload',
-          文件输入框: ['input[type=file]'],
-          上传完成标记: '.done',
-          编辑器就绪标记: '.editor',
-        },
-        字段: {
-          标题: '.title',
-          简介: '.description',
-        },
-      },
-    });
-
-    expect(applied).toBe(false);
-    expect(getPlatformConfig('douyin').readySelector).toBe(original.readySelector);
-    expect(getPlatformConfig('douyin').readySelector).not.toBe(remoteReadySelector);
-  });
-});
-
-function remoteDouyinSelector(): PlatformSelectorConfig {
-  return {
-    平台标识: 'douyin',
-    名称: '抖音创作者',
-    图标: 'DY',
-    发布页地址: 'https://creator.douyin.com/creator-micro/content/upload',
-    匹配域名: ['creator.douyin.com'],
-    就绪选择器: '.editor',
-    上传: {
-      上传容器: '.upload',
-      文件输入框: ['input[type=file]'],
-      上传完成标记: '.done',
-      编辑器就绪标记: '.editor',
-    },
-    字段: {
-      标题: '.title',
-      简介: '.description',
-    },
-  };
-}
 
 function jsonResponse(body: unknown) {
   return new Response(JSON.stringify(body), {

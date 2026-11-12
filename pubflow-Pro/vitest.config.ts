@@ -14,5 +14,6 @@ export default defineConfig({
     __PUBFLOW_OFFICIAL_SITE_URL__: JSON.stringify(''),
     __PUBFLOW_PROTOCOL_PUBLIC_KEY__: JSON.stringify(''),
     __PUBFLOW_PROTOCOL_TRUST_ROOT_P256_SPKI__: JSON.stringify(''),
+    __PUBFLOW_LOCAL_MODE__: JSON.stringify(false),
   },
 });
