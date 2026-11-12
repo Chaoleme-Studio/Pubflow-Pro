@@ -49,7 +49,7 @@ export default defineConfig(({ mode }) => {
     || 'http://127.0.0.1:5189';
   const siteUrl = (env.VITE_PUBFLOW_SITE_URL
     || env.PUBFLOW_OFFICIAL_SITE_URL
-    || 'http://www.pubflow.chaoleme.cn').replace(/\/+$/, '');
+    || 'https://www.pubflow.chaoleme.cn').replace(/\/+$/, '');
   const webPort = Number(env.WEB_DEV_SERVER_PORT || '5188') || 5188;
   const nativeProxyTarget = env.PUBFLOW_AGENT_HTTP_URL || 'http://127.0.0.1:5190';
 

@@ -8,25 +8,25 @@
 | --- | ---: | --- |
 | 京东云生产机 | `5189` | Rust 后端服务 |
 | 京东云生产机 | `5188` | Nginx，对外提供 Web 并反代 API |
-| 京东云生产机 | `80` | PubFlow 域名入口，转发到 `5188` |
-| 京东云生产机 | `443` | HTTPS，当前尚未启用 |
+| 京东云生产机 | `80` | PubFlow 域名入口，308 跳转到 HTTPS |
+| 京东云生产机 | `443` | HTTPS 入口，反代到 `5188` |
 
 公网入口：
 
 ```text
-http://www.pubflow.chaoleme.cn/
+https://www.pubflow.chaoleme.cn/
 ```
 
 API 公网入口：
 
 ```text
-http://www.pubflow.chaoleme.cn/v1/product/catalog
+https://www.pubflow.chaoleme.cn/v1/product/catalog
 ```
 
 Nginx 配置逻辑是：
 
 ```text
-浏览器 -> www.pubflow.chaoleme.cn:80 -> 京东云 Nginx -> 127.0.0.1:5188
+浏览器 -> www.pubflow.chaoleme.cn:80 -> 308 跳转 HTTPS -> 京东云 Nginx:443 -> 127.0.0.1:5188
 京东云 Nginx /           -> /home/wong/Desktop/Application/PubFlow/web
 京东云 Nginx /v1/...       -> 127.0.0.1:5189/v1/...
 京东云 Nginx /static/...  -> 127.0.0.1:5189/static/...
@@ -49,7 +49,7 @@ Web 后台不需要配置后端地址。前端代码请求的是同源相对路�
 PUBLIC_API_BASE_URL=http://127.0.0.1:5189
 
 # .env.production
-PUBLIC_API_BASE_URL=http://www.pubflow.chaoleme.cn
+PUBLIC_API_BASE_URL=https://www.pubflow.chaoleme.cn
 ```
 
 这个值是构建期写入插件包的。打完包以后再改 `.env` 不会影响已经生成的 ZIP/CRX，必须重新打包。
@@ -121,8 +121,8 @@ dist/extension/pubflow-extension.zip
 如果生产域名没反应，先分别检查：
 
 ```bash
-curl -I http://www.pubflow.chaoleme.cn/
-curl http://www.pubflow.chaoleme.cn/v1/product/catalog
+curl -I https://www.pubflow.chaoleme.cn/
+curl https://www.pubflow.chaoleme.cn/v1/product/catalog
 ```
 
 如果第一个正常、第二个失败，多半是后端或 Nginx 反代问题。

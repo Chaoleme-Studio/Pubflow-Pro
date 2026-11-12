@@ -2,7 +2,7 @@ import { useHead } from '@unhead/vue';
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 
-const rawSiteUrl = import.meta.env.VITE_PUBFLOW_SITE_URL || 'http://www.pubflow.chaoleme.cn';
+const rawSiteUrl = import.meta.env.VITE_PUBFLOW_SITE_URL || 'https://www.pubflow.chaoleme.cn';
 export const siteUrl = rawSiteUrl.replace(/\/+$/, '');
 
 const HOME_TITLE = 'PubFlow - 多平台短视频批量发布工具';
